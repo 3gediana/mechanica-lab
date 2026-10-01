@@ -47,10 +47,32 @@ let roTimer = 0;
 
 const initPose = [];         // 复位用 [{body, pos, rot, vel, angvel}]
 
+// 折线曲线：点列已是 1.6° 密采样，线性插值即可；CatmullRom 在环底曲率突变处会过冲收窄管通道卡球
+function polylineCurve(pts) {
+  const lens = [0];
+  for (let i = 1; i < pts.length; i++) lens.push(lens[i - 1] + pts[i].distanceTo(pts[i - 1]));
+  const total = lens[lens.length - 1];
+  return {
+    getPointAt(t, out) {
+      const d = t * total;
+      let i = 1;
+      while (i < lens.length - 1 && lens[i] < d) i++;
+      const k = (d - lens[i - 1]) / (lens[i] - lens[i - 1] || 1);
+      return out.copy(pts[i - 1]).lerp(pts[i], Math.min(Math.max(k, 0), 1));
+    },
+    getTangentAt(t, out) {
+      const d = t * total;
+      let i = 1;
+      while (i < lens.length - 1 && lens[i] < d) i++;
+      return out.copy(pts[i]).sub(pts[i - 1]).normalize();
+    },
+  };
+}
+
 // ============ 轨道几何（开口朝上的半管） ============
 function buildTrough(radius, arcFraction, along, radial) {
   const pts = TRACK_POINTS.map((p) => new THREE.Vector3(p[0], p[1], p[2]));
-  const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.1);
+  const curve = polylineCurve(pts);
   const up = new THREE.Vector3(0, 1, 0);
   const B = new THREE.Vector3(0, 0, 1);
   const openHalf = Math.PI * (1 - arcFraction) / 2;
