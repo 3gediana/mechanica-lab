@@ -88,8 +88,8 @@ if no_handler: fails.append(f"按钮无 onclick: {no_handler}")
 
 # 5. 契约字段：track-curve.js 必须导出 main.js 用到的 META 字段
 tc = (ROOT / "src/track-curve.js").read_text(encoding="utf-8") if (ROOT / "src/track-curve.js").exists() else ""
-for field in ["releasePoint", "stopper", "segments", "pylonAnchors", "tubeRadius", "ballRadius"]:
-    if f"{field}:" not in tc and field not in ("releasePoint",):
+for field in ["releasePoint", "stopper", "segments", "pylonAnchors", "tubeRadius", "ballRadius", "sideFrames"]:
+    if f'"{field}"' not in tc:
         warns.append(f"track-curve.js 未见到 META 字段 {field}")
 for seg in ["platform", "loop"]:
     if seg not in tc: warns.append(f"track-curve.js 未见到段 {seg}")

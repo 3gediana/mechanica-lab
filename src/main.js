@@ -67,7 +67,7 @@ function buildTrough(radius, arcFraction, along, radial) {
       D.copy(N).multiplyScalar(Math.cos(phi)).addScaledVector(B, Math.sin(phi));
       pos.push(P.x + D.x * radius, P.y + D.y * radius, P.z + D.z * radius);
       nor.push(-D.x, -D.y, -D.z);                    // 法向指向管轴（内表面）
-      uv.push(t * 24, j / radial * 2);
+      uv.push(t * 6, j / radial);                    // 全长 24 块砖 ×repeat4 ≈ 37cm/纹，大理石纹理尺度
     }
   }
   for (let i = 0; i < along; i++) for (let j = 0; j < radial; j++) {
@@ -156,6 +156,7 @@ function buildTrough(radius, arcFraction, along, radial) {
     scene.add(overlay);
 
     world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
+    world.timestep = H;                          // 固定步长 1/120，与累加器一致（默认 1/60 会让全场景双倍速）
 
     // ---- 轨道（视觉 600 段 / 碰撞 420 段）
     const R = TRACK_META.tubeRadius;
@@ -182,6 +183,23 @@ function buildTrough(radius, arcFraction, along, radial) {
       scene.add(foot);
     }
 
+    // ---- 环侧支撑架（两柱一横梁，托住环管两侧）
+    for (const [fx, fy, hs] of (TRACK_META.sideFrames || [])) {
+      for (const dz of [-hs, hs]) {
+        const post = new THREE.Mesh(cylGeo, M.steelDark);
+        post.scale.set(0.024, fy, 0.024);
+        post.position.set(fx, fy / 2, dz);
+        post.castShadow = true;
+        scene.add(post);
+      }
+      const bar = new THREE.Mesh(cylGeo, M.steelDark);
+      bar.scale.set(0.02, hs * 2, 0.02);
+      bar.rotation.x = Math.PI / 2;
+      bar.position.set(fx, fy, 0);
+      bar.castShadow = true;
+      scene.add(bar);
+    }
+
     // ---- 挡板（抽开式，显式静态刚体避免隐式体拿不到 parent）
     stopperMesh = new THREE.Mesh(new THREE.BoxGeometry(...TRACK_META.stopper.size), M.brass);
     stopperMesh.position.set(...TRACK_META.stopper.pos);
@@ -192,8 +210,9 @@ function buildTrough(radius, arcFraction, along, radial) {
       TRACK_META.stopper.size[0] / 2, TRACK_META.stopper.size[1] / 2, TRACK_META.stopper.size[2] / 2
     ).setFriction(0.4).setCollisionGroups(groupsStatic), stopperBody);
 
-    // ---- 铬钢球（主角）
-    const spawn = [TRACK_META.stopper.pos[0] - 0.128, TRACK_POINTS[TRACK_META.segments.platform[0]][1] + 0.05, 0];
+    // ---- 铬钢球（主角）。球心静置高度 = 管心线 − (管半径−球半径)
+    const restOffset = TRACK_META.tubeRadius - TRACK_META.ballRadius;
+    const spawn = [TRACK_META.stopper.pos[0] - 0.128, TRACK_POINTS[TRACK_META.segments.platform[0]][1] - restOffset, 0];
     ballMesh = new THREE.Mesh(new THREE.SphereGeometry(TRACK_META.ballRadius, 48, 32), M.chrome);
     ballMesh.castShadow = true;
     scene.add(ballMesh);
@@ -265,9 +284,7 @@ function buildTrough(radius, arcFraction, along, radial) {
     saturnTilt.rotation.z = 0.28;
     saturnSpin = new THREE.Mesh(new THREE.SphereGeometry(0.42, 48, 32), M.saturn);
     saturnSpin.castShadow = true;
-    const ring = M.saturnRing
-      ? new THREE.Mesh(new THREE.RingGeometry(0.55, 0.98, 96), M.saturnRing)
-      : null;
+    const ring = M.saturnRing ? new THREE.Mesh(saturnRingGeometry(), M.saturnRing) : null;
     if (ring) { ring.rotation.x = -Math.PI / 2 + 0.12; saturnTilt.add(ring); }
     saturnTilt.add(saturnSpin);
     pedestal.add(saturnTilt);
@@ -325,6 +342,18 @@ function loopCenter() {
   let sx = 0, n = 0;
   for (let i = i0; i <= i1; i++) { sx += TRACK_POINTS[i][0]; n++; }
   return { x: sx / n };
+}
+
+// 土星环贴图是径向条带：UV 从圆盘映射重排为径向（u=半径方向）
+function saturnRingGeometry() {
+  const g = new THREE.RingGeometry(0.55, 0.98, 96);
+  const pos = g.attributes.position, uv = g.attributes.uv;
+  const v3 = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v3.fromBufferAttribute(pos, i);
+    uv.setXY(i, (v3.length() - 0.55) / 0.43, 0.5);
+  }
+  return g;
 }
 
 // ============ 交互 ============
@@ -475,7 +504,7 @@ function sync(rawDt) {
   ropeMesh.scale.set(1, len, 1);
   ropeQ.setFromUnitVectors(yAxis, ropeDir.normalize());
   ropeMesh.quaternion.copy(ropeQ);
-  if (saturnSpin) saturnSpin.rotation.y += 0.0025;
+  if (saturnSpin && rawDt > 0 && !paused) saturnSpin.rotation.y += 0.0025;
   if (stopperAnim >= 0 && rawDt > 0) {
     stopperAnim += rawDt;
     const k = Math.min(stopperAnim / 0.35, 1);
@@ -491,7 +520,7 @@ function readouts() {
   const speed = Math.hypot(v.x, v.y, v.z);
   $('roT').textContent = simT.toFixed(2);
   $('roV').textContent = speed.toFixed(2);
-  $('roH').textContent = Math.max(0, ballBody.translation().y - TRACK_META.ballRadius - 0.05).toFixed(2);
+  $('roH').textContent = Math.max(0, ballBody.translation().y - TRACK_META.ballRadius).toFixed(2);
   $('roP').textContent = pendCross.avg > 0 ? pendCross.avg.toFixed(2) : '--';
 }
 function tick() {
