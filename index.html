@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MECHANICA · 牛顿力学拟真沙盘</title>
+<style>
+  :root {
+    --bg: #0b0c0e;
+    --panel: rgba(13, 14, 16, 0.92);
+    --line: rgba(255, 255, 255, 0.09);
+    --line-strong: rgba(255, 255, 255, 0.18);
+    --text: #e8e6e1;
+    --dim: #82878f;
+    --faint: #565b62;
+    --accent: #d9a441;
+    --mono: "Cascadia Mono", Consolas, ui-monospace, "SF Mono", Menlo, monospace;
+    --sans: system-ui, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); font-family: var(--sans); }
+  #stage { position: fixed; inset: 0; }
+  #stage canvas { display: block; }
+
+  /* 加载幕 */
+  #veil {
+    position: fixed; inset: 0; z-index: 40; background: var(--bg);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+    transition: opacity .6s ease; 
+  }
+  #veil.gone { opacity: 0; pointer-events: none; }
+  #veil .brand { font-size: 15px; letter-spacing: .42em; text-indent: .42em; color: var(--text); font-weight: 300; }
+  #veil .rule { width: 44px; height: 1px; background: var(--line-strong); }
+  #veil .status { font-family: var(--mono); font-size: 11px; color: var(--dim); letter-spacing: .08em; }
+  #veil .status.err { color: #c96a5a; }
+
+  /* 左上铭牌 */
+  #brand { position: fixed; top: 22px; left: 26px; z-index: 20; user-select: none; }
+  #brand h1 { font-size: 13px; font-weight: 500; letter-spacing: .38em; color: var(--text); }
+  #brand .sub { margin-top: 7px; font-size: 11px; color: var(--dim); letter-spacing: .14em; }
+  #brand .bar { width: 30px; height: 1px; background: var(--accent); margin-top: 10px; opacity: .8; }
+
+  /* 左侧仪表 */
+  #panel {
+    position: fixed; left: 26px; top: 118px; z-index: 20; width: 158px;
+    background: var(--panel); border: 1px solid var(--line);
+    font-family: var(--mono); opacity: 0; transition: opacity .5s ease;
+  }
+  #panel.on { opacity: 1; }
+  #panel .row { display: flex; align-items: baseline; justify-content: space-between; padding: 9px 13px; border-bottom: 1px solid var(--line); }
+  #panel .row:last-child { border-bottom: none; }
+  #panel .k { font-family: var(--sans); font-size: 10px; color: var(--faint); letter-spacing: .18em; }
+  #panel .v { font-size: 14px; color: var(--accent); font-variant-numeric: tabular-nums; }
+  #panel .u { font-size: 10px; color: var(--faint); margin-left: 4px; }
+
+  /* 底部控制台 */
+  #console {
+    position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); z-index: 20;
+    display: flex; align-items: stretch; gap: 0;
+    background: var(--panel); border: 1px solid var(--line);
+    opacity: 0; transition: opacity .5s ease;
+  }
+  #console.on { opacity: 1; }
+  #console button {
+    appearance: none; background: transparent; border: none; border-right: 1px solid var(--line);
+    color: var(--dim); font-family: var(--sans); font-size: 11px; letter-spacing: .22em; text-indent: .22em;
+    padding: 13px 22px 12px; cursor: pointer; transition: color .15s, background .15s;
+    white-space: nowrap;
+  }
+  #console button:last-child { border-right: none; }
+  #console button:hover { color: var(--text); background: rgba(255,255,255,.035); }
+  #console button:active { transform: translateY(1px); }
+  #console button.primary { color: var(--text); }
+  #console button.hot { color: var(--accent); }
+  #console button:disabled { color: var(--faint); cursor: default; background: transparent; }
+
+  /* 右下键位 */
+  #keys {
+    position: fixed; right: 26px; bottom: 30px; z-index: 20;
+    font-family: var(--mono); font-size: 10px; color: var(--faint);
+    text-align: right; line-height: 2; letter-spacing: .06em; user-select: none;
+  }
+  #keys b { color: var(--dim); font-weight: 400; border: 1px solid var(--line); padding: 1px 5px; margin-left: 6px; }
+
+  /* 错误条 */
+  #errbar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 50; display: none;
+    background: #2a1512; color: #e0a49a; border-bottom: 1px solid #6b3328;
+    font-family: var(--mono); font-size: 11px; padding: 7px 16px; white-space: pre-wrap;
+  }
+
+  @media (max-width: 760px) {
+    #keys { display: none; }
+    #panel { top: 96px; width: 132px; }
+    #console button { padding: 11px 13px 10px; letter-spacing: .12em; }
+  }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/three.module.js",
+    "three/addons/": "./vendor/three/addons/",
+    "@dimforge/rapier3d-compat": "./vendor/rapier/rapier.mjs"
+  }
+}
+</script>
+</head>
+<body>
+<div id="stage"></div>
+
+<div id="veil">
+  <div class="brand">MECHANICA</div>
+  <div class="rule"></div>
+  <div class="status" id="veilStatus">正在加载物理内核与材质</div>
+</div>
+
+<div id="brand">
+  <h1>MECHANICA</h1>
+  <div class="sub">牛顿力学拟真沙盘</div>
+  <div class="bar"></div>
+</div>
+
+<div id="panel">
+  <div class="row"><span class="k">时间</span><span><span class="v" id="roT">0.00</span><span class="u">s</span></span></div>
+  <div class="row"><span class="k">球速</span><span><span class="v" id="roV">0.00</span><span class="u">m/s</span></span></div>
+  <div class="row"><span class="k">球高</span><span><span class="v" id="roH">0.00</span><span class="u">m</span></span></div>
+  <div class="row"><span class="k">摆周期</span><span><span class="v" id="roP">--</span><span class="u">s</span></span></div>
+</div>
+
+<div id="console">
+  <button id="btnRelease" class="primary" disabled>抽开挡板</button>
+  <button id="btnPause" disabled>暂停</button>
+  <button id="btnSlow" disabled>慢速</button>
+  <button id="btnReset" disabled>重置</button>
+</div>
+
+<div id="keys">
+  旋转视角 / 缩放<div>左键拖动 · 滚轮</div>
+  抓取球与木块<div>按住左键拖动</div>
+  <b>SPACE</b> 暂停 &nbsp;<b>R</b> 重置 &nbsp;<b>F</b> 慢速
+</div>
+
+<div id="errbar"></div>
+
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
