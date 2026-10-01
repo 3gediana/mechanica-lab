@@ -168,7 +168,7 @@ function buildTrough(radius, arcFraction, along, radial) {
     const colGeo = buildTrough(R, 0.61, 420, 20);
     const tri = new Uint32Array(colGeo.getIndex().array);
     const vtx = new Float32Array(colGeo.getAttribute('position').array);
-    world.createCollider(RAPIER.ColliderDesc.trimesh(vtx, tri).setFriction(0.28).setRestitution(0.04));
+    world.createCollider(RAPIER.ColliderDesc.trimesh(vtx, tri).setFriction(0.15).setRestitution(0.04));
 
     // ---- 支撑柱（暗钢）
     const cylGeo = new THREE.CylinderGeometry(1, 1, 1, 20);
@@ -217,9 +217,9 @@ function buildTrough(radius, arcFraction, along, radial) {
     ballMesh.castShadow = true;
     scene.add(ballMesh);
     ballBody = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic()
-      .setTranslation(...spawn).setCcdEnabled(true).setLinearDamping(0.02).setAngularDamping(0.06));
+      .setTranslation(...spawn).setCcdEnabled(true).setLinearDamping(0.0).setAngularDamping(0.01));
     world.createCollider(RAPIER.ColliderDesc.ball(TRACK_META.ballRadius)
-      .setDensity(7100).setFriction(0.35).setRestitution(0.06).setCollisionGroups(groupsDyn), ballBody);
+      .setDensity(7100).setFriction(0.3).setRestitution(0.06).setCollisionGroups(groupsDyn), ballBody);
 
     // ---- 橡胶球（用户抛掷用）
     const rubberBallMesh = new THREE.Mesh(new THREE.SphereGeometry(0.09, 40, 28), M.rubber);
@@ -408,6 +408,9 @@ function bindUI() {
   $('btnPause').onclick = togglePause;
   $('btnSlow').onclick = toggleSlow;
   $('btnReset').onclick = resetAll;
+  if (new URLSearchParams(location.search).get('run') === '1') {
+    setTimeout(releaseStopper, 1200);   // 确定性验证通道：加载完自动抽挡板
+  }
   window.addEventListener('keydown', (e) => {
     if (!ready) return;
     if (e.code === 'Space') { e.preventDefault(); togglePause(); }
@@ -521,6 +524,7 @@ function readouts() {
   $('roT').textContent = simT.toFixed(2);
   $('roV').textContent = speed.toFixed(2);
   $('roH').textContent = Math.max(0, ballBody.translation().y - TRACK_META.ballRadius).toFixed(2);
+  $('roX').textContent = ballBody.translation().x.toFixed(2);
   $('roP').textContent = pendCross.avg > 0 ? pendCross.avg.toFixed(2) : '--';
 }
 function tick() {
