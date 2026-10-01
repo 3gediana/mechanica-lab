@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
 import { Reflector } from 'three/addons/objects/Reflector.js';
-import { TRACK_POINTS, TRACK_META } from './track-curve.js';
+import { TRACK_POINTS, TRACK_META } from './track-curve.js?v=7';
 import { createMaterials } from './materials.js';
 
 const $ = (id) => document.getElementById(id);
@@ -46,6 +46,39 @@ let pendCross = { lastSign: 0, prevT: -1, lastT: -1, avg: 0, samples: [] };
 let roTimer = 0;
 
 const initPose = [];         // 复位用 [{body, pos, rot, vel, angvel}]
+
+// ---- 管道中心线解析约束（替代 trimesh：零滚动损耗，等价题目"光滑管道"）
+const trackPts = TRACK_POINTS.map((p) => ({ x: p[0], y: p[1], z: p[2] }));
+const trackClosest = { idx: 0 };
+function nearestTrackIndex(pos) {
+  let best = 0, bd = Infinity;
+  for (let i = 0; i < trackPts.length; i++) {
+    const d = (trackPts[i].x - pos.x) ** 2 + (trackPts[i].y - pos.y) ** 2 + (trackPts[i].z - pos.z) ** 2;
+    if (d < bd) { bd = d; best = i; }
+  }
+  return best;
+}
+function constrainToPipe(body) {
+  const q = body.translation();
+  let bi = trackClosest.idx, bd = Infinity;
+  const i0 = Math.max(0, trackClosest.idx - 8), i1 = Math.min(trackPts.length - 1, trackClosest.idx + 40);
+  for (let i = i0; i <= i1; i++) {
+    const d = (trackPts[i].x - q.x) ** 2 + (trackPts[i].y - q.y) ** 2 + (trackPts[i].z - q.z) ** 2;
+    if (d < bd) { bd = d; bi = i; }
+  }
+  trackClosest.idx = bi;
+  const n = trackPts[bi];
+  const rx = q.x - n.x, ry = q.y - n.y, rz = q.z - n.z;
+  const r = Math.hypot(rx, ry, rz);
+  if (r > 0.30) return;                                        // 离管太远（被抛出），不约束
+  const LIMIT = TRACK_META.tubeRadius - TRACK_META.ballRadius; // 球心允许的最大径向距 0.05
+  if (r <= LIMIT) return;
+  const nx = rx / r, ny = ry / r, nz = rz / r;
+  body.setTranslation({ x: n.x + nx * LIMIT, y: n.y + ny * LIMIT, z: n.z + nz * LIMIT }, true);
+  const v = body.linvel();
+  const vn = v.x * nx + v.y * ny + v.z * nz;
+  if (vn > 0) body.setLinvel({ x: v.x - vn * nx, y: v.y - vn * ny, z: v.z - vn * nz }, true);
+}
 
 // 折线曲线：点列已是 1.6° 密采样，线性插值即可；CatmullRom 在环底曲率突变处会过冲收窄管通道卡球
 function polylineCurve(pts) {
@@ -181,16 +214,16 @@ function buildTrough(radius, arcFraction, along, radial) {
     world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
     world.timestep = H;                          // 固定步长 1/120，与累加器一致（默认 1/60 会让全场景双倍速）
 
-    // ---- 轨道（视觉 600 段 / 碰撞 420 段）
+    // ---- 轨道：视觉网格照旧；碰撞不用 trimesh（三角形棱边的滚动接触损耗会吃光动能），
+    //      主球改用"管道中心线解析约束"——恰好对应题目语义"光滑管道"
     const R = TRACK_META.tubeRadius;
     const trackGeo = buildTrough(R, 0.61, 620, 48);
     const track = new THREE.Mesh(trackGeo, M.marble);
     track.castShadow = true; track.receiveShadow = true;
     scene.add(track);
-    const colGeo = buildTrough(R, 0.61, 420, 20);
-    const tri = new Uint32Array(colGeo.getIndex().array);
-    const vtx = new Float32Array(colGeo.getAttribute('position').array);
-    world.createCollider(RAPIER.ColliderDesc.trimesh(vtx, tri).setFriction(0.15).setRestitution(0.04));
+    // 地面碰撞板（球被抛出轨道后落在地板上反弹）
+    world.createCollider(RAPIER.ColliderDesc.cuboid(30, 0.05, 30).setTranslation(0, -0.05, 0)
+      .setFriction(0.6).setRestitution(0.3));
 
     // ---- 支撑柱（暗钢）
     const cylGeo = new THREE.CylinderGeometry(1, 1, 1, 20);
@@ -239,9 +272,10 @@ function buildTrough(radius, arcFraction, along, radial) {
     ballMesh.castShadow = true;
     scene.add(ballMesh);
     ballBody = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic()
-      .setTranslation(...spawn).setCcdEnabled(true).setLinearDamping(0.0).setAngularDamping(0.01));
-    world.createCollider(RAPIER.ColliderDesc.ball(TRACK_META.ballRadius)
+      .setTranslation(...spawn).setCcdEnabled(true).setLinearDamping(0.0).setAngularDamping(0.005));
+    const ballCol = world.createCollider(RAPIER.ColliderDesc.ball(TRACK_META.ballRadius)
       .setDensity(7100).setFriction(0.3).setRestitution(0.06).setCollisionGroups(groupsDyn), ballBody);
+    trackClosest.idx = nearestTrackIndex(spawn);
 
     // ---- 橡胶球（用户抛掷用）
     const rubberBallMesh = new THREE.Mesh(new THREE.SphereGeometry(0.09, 40, 28), M.rubber);
@@ -463,6 +497,7 @@ function resetAll() {
     s.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
   }
   pendBody.setLinvel({ x: 0.9, y: 0, z: 0 }, true);
+  trackClosest.idx = nearestTrackIndex(initPose.find((s) => s.body === ballBody).pos);
   if (held) { held.setGravityScale(1, true); held = null; controls.enabled = true; }
   if (stopperCol === null) {
     stopperCol = world.createCollider(RAPIER.ColliderDesc.cuboid(
@@ -493,6 +528,7 @@ function stepPhysics(h) {
     }, true);
   }
   world.step();
+  if (held !== ballBody) constrainToPipe(ballBody);   // 光滑管道约束（抓取时不干预）
 
   // 摆周期：只记 -→+ 同向过零，相邻两次间隔才是整周期
   const vx = pendBody.linvel().x;
@@ -542,12 +578,27 @@ function sync(rawDt) {
 }
 function readouts() {
   const v = ballBody.linvel();
+  const p = ballBody.translation();
   const speed = Math.hypot(v.x, v.y, v.z);
   $('roT').textContent = simT.toFixed(2);
   $('roV').textContent = speed.toFixed(2);
-  $('roH').textContent = Math.max(0, ballBody.translation().y - TRACK_META.ballRadius).toFixed(2);
-  $('roX').textContent = ballBody.translation().x.toFixed(2);
+  $('roH').textContent = Math.max(0, p.y - TRACK_META.ballRadius).toFixed(2);
+  $('roX').textContent = p.x.toFixed(2);
   $('roP').textContent = pendCross.avg > 0 ? pendCross.avg.toFixed(2) : '--';
+  document.title = `M x=${p.x.toFixed(3)} y=${p.y.toFixed(3)} z=${p.z.toFixed(3)} vx=${v.x.toFixed(2)} vy=${v.y.toFixed(2)} vz=${v.z.toFixed(2)}`;
+  // 诊断：球在异常位置停稳时，列出其 0.35m 邻域内的全部碰撞体句柄
+  if (!readouts.probed && simT > 3 && Math.abs(p.x - 0.684) < 0.06 && speed < 0.05) {
+    readouts.probed = true;
+    const hits = [];
+    world.intersectionWithShape(p, { x: 0, y: 0, z: 0, w: 1 }, new RAPIER.Ball(0.35), () => true,
+      undefined, undefined, undefined, (handle) => {
+        const col = world.getCollider(handle);
+        hits.push(`${handle}(body=${col.parent() ? col.parent().handle : '?'})`);
+        return true;
+      });
+    errbar.textContent = '邻域碰撞体: ' + hits.join(', ');
+    errbar.style.display = 'block';
+  }
 }
 function tick() {
   requestAnimationFrame(tick);
