@@ -101,11 +101,11 @@ function buildTrough(radius, arcFraction, along, radial) {
 
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0b0c0e);
-    scene.fog = new THREE.Fog(0x0b0c0e, 16, 34);
+    scene.fog = new THREE.Fog(0x0b0c0e, 11, 28);
     camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.05, 120);
-    camera.position.set(0.6, 1.5, 6.4);
+    camera.position.set(0.4, 1.7, 7.3);
     controls = new OrbitControls(camera, renderer.domElement);
-    controls.target.set(-0.2, 0.85, 0);
+    controls.target.set(-0.1, 0.75, 0);
     controls.enableDamping = true;
     controls.dampingFactor = 0.06;
     controls.minDistance = 1.6;
@@ -116,6 +116,7 @@ function buildTrough(radius, arcFraction, along, radial) {
     const M = await createMaterials();
 
     setLoad('正在加载摄影棚灯光');
+    scene.environmentIntensity = 0.55;           // 收敛环境反射，暗部沉下去，高光留给主光
     try {
       const tex = await new HDRLoader().loadAsync('./assets/hdri/studio_1k.hdr');
       tex.mapping = THREE.EquirectangularReflectionMapping;
@@ -128,7 +129,7 @@ function buildTrough(radius, arcFraction, along, radial) {
     }
 
     // ---- 灯光：暖主光 + 冷辅光，环境由 HDRI 提供
-    const key = new THREE.DirectionalLight(0xfff1dd, 2.4);
+    const key = new THREE.DirectionalLight(0xfff1dd, 2.05);
     key.position.set(4.5, 7.5, 3.5);
     key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048);
@@ -200,19 +201,18 @@ function buildTrough(radius, arcFraction, along, radial) {
       scene.add(bar);
     }
 
-    // ---- 挡板（抽开式，显式静态刚体避免隐式体拿不到 parent）
+    // ---- 挡板（抽开式，立在坡上球的前方）
     stopperMesh = new THREE.Mesh(new THREE.BoxGeometry(...TRACK_META.stopper.size), M.brass);
-    stopperMesh.position.set(...TRACK_META.stopper.pos);
+    stopperMesh.position.set(...TRACK_META.slopeStopper);
     stopperMesh.castShadow = true;
     scene.add(stopperMesh);
-    stopperBody = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(...TRACK_META.stopper.pos));
+    stopperBody = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(...TRACK_META.slopeStopper));
     stopperCol = world.createCollider(RAPIER.ColliderDesc.cuboid(
       TRACK_META.stopper.size[0] / 2, TRACK_META.stopper.size[1] / 2, TRACK_META.stopper.size[2] / 2
     ).setFriction(0.4).setCollisionGroups(groupsStatic), stopperBody);
 
-    // ---- 铬钢球（主角）。球心静置高度 = 管心线 − (管半径−球半径)
-    const restOffset = TRACK_META.tubeRadius - TRACK_META.ballRadius;
-    const spawn = [TRACK_META.stopper.pos[0] - 0.128, TRACK_POINTS[TRACK_META.segments.platform[0]][1] - restOffset, 0];
+    // ---- 铬钢球（主角）：出生在斜坡上、贴管底，挡板抽开即沿坡滚下
+    const spawn = TRACK_META.slopeSpawn;
     ballMesh = new THREE.Mesh(new THREE.SphereGeometry(TRACK_META.ballRadius, 48, 32), M.chrome);
     ballMesh.castShadow = true;
     scene.add(ballMesh);
@@ -224,23 +224,23 @@ function buildTrough(radius, arcFraction, along, radial) {
     // ---- 橡胶球（用户抛掷用）
     const rubberBallMesh = new THREE.Mesh(new THREE.SphereGeometry(0.09, 40, 28), M.rubber);
     rubberBallMesh.castShadow = true;
-    rubberBallMesh.position.set(3.2, 0.09, 1.15);
+    rubberBallMesh.position.set(3.3, 0.09, 1.3);
     scene.add(rubberBallMesh);
     const rubberBody = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic()
-      .setTranslation(3.2, 0.09, 1.15).setLinearDamping(0.12).setAngularDamping(0.35));
+      .setTranslation(3.3, 0.09, 1.3).setLinearDamping(0.12).setAngularDamping(0.35));
     world.createCollider(RAPIER.ColliderDesc.ball(0.09)
       .setDensity(1100).setFriction(0.85).setRestitution(0.72).setCollisionGroups(groupsDyn), rubberBody);
     pairs.push({ mesh: rubberBallMesh, body: rubberBody });
 
-    // ---- 橡木块（跑道末端的碰撞对象）
-    blockMesh = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.22, 0.18), M.wood);
+    // ---- 橡木块（跑道末端的碰撞对象，加重防止被撞出画面）
+    blockMesh = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.26, 0.20), M.wood);
     blockMesh.castShadow = true;
-    blockMesh.position.set(3.95, 0.11, 0);
+    blockMesh.position.set(4.15, 0.13, 0);
     scene.add(blockMesh);
     blockBody = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic()
-      .setTranslation(3.95, 0.11, 0).setLinearDamping(0.25).setAngularDamping(0.6));
-    world.createCollider(RAPIER.ColliderDesc.cuboid(0.18, 0.11, 0.09)
-      .setDensity(560).setFriction(0.55).setRestitution(0.12).setCollisionGroups(groupsDyn), blockBody);
+      .setTranslation(4.15, 0.13, 0).setLinearDamping(0.6).setAngularDamping(0.8));
+    world.createCollider(RAPIER.ColliderDesc.cuboid(0.21, 0.13, 0.10)
+      .setDensity(700).setFriction(0.8).setRestitution(0.12).setCollisionGroups(groupsDyn), blockBody);
     pairs.push({ mesh: blockMesh, body: blockBody });
 
     // ---- 单摆：钢架门式横梁 + 铬球 + 轻绳
@@ -265,15 +265,15 @@ function buildTrough(radius, arcFraction, along, radial) {
     world.createCollider(RAPIER.ColliderDesc.ball(0.075)
       .setDensity(7100).setFriction(0.3).setRestitution(0.3).setCollisionGroups(groupsDyn), pendBody);
     const anchorBody = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(1.95, 2.35, -1.1));
-    world.createJoint(RAPIER.JointData.rope(1.25, { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }), anchorBody, pendBody);
+    world.createImpulseJoint(RAPIER.JointData.rope(1.25, { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }), anchorBody, pendBody, true);
     ropeMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.0045, 0.0045, 1, 8),
       new THREE.MeshStandardMaterial({ color: 0x3a3d42, roughness: 0.5, metalness: 0.6 }));
     scene.add(ropeMesh);
     pendBody.setLinvel({ x: 0.9, y: 0, z: 0 }, true);
 
-    // ---- 土星展台（黄铜座 + 真实贴图行星）
+    // ---- 土星展台（黄铜座 + 真实贴图行星，置于滑道左侧空地避免遮挡）
     const pedestal = new THREE.Group();
-    pedestal.position.set(-1.5, 0, -1.6);
+    pedestal.position.set(-2.35, 0, -1.35);
     const base = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.2, 0.05, 40), M.brass);
     base.position.y = 0.025;
     const stem = new THREE.Mesh(cylGeo, M.brass);
@@ -445,7 +445,7 @@ function resetAll() {
     ).setFriction(0.4).setCollisionGroups(groupsStatic), stopperBody);
   }
   stopperAnim = -1;
-  stopperMesh.position.set(...TRACK_META.stopper.pos);
+  stopperMesh.position.set(...TRACK_META.slopeStopper);
   stopperMesh.visible = true;
   simT = 0; acc = 0; timeScale = 1;
   $('btnSlow').textContent = '慢速'; $('btnSlow').classList.remove('hot');
@@ -508,7 +508,7 @@ function sync(rawDt) {
   if (stopperAnim >= 0 && rawDt > 0) {
     stopperAnim += rawDt;
     const k = Math.min(stopperAnim / 0.35, 1);
-    stopperMesh.position.y = TRACK_META.stopper.pos[1] + 0.26 * k;
+    stopperMesh.position.y = TRACK_META.slopeStopper[1] + 0.26 * k;
     if (k >= 1 && stopperCol !== null) {
       world.removeCollider(stopperCol, true);
       stopperCol = null;

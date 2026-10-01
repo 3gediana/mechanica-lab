@@ -81,7 +81,7 @@ export async function createMaterials() {
       map: ringC, transparent: true, side: THREE.DoubleSide, depthWrite: false, roughness: 0.85, metalness: 0,
     }) : null, // 契约：环图缺失返回 null，下游跳过渲染环
 
-    // 反光地板覆层：近黑基色，roughness 0.38 保留适度反射，opacity 0.86 透出下方真实镜面地板
-    floorOverlay: new THREE.MeshPhysicalMaterial({ color: 0x0c0c0e, roughness: 0.38, metalness: 0, transparent: true, opacity: 0.86 }),
+    // 反光地板覆层：近黑基色压暗摄影棚地面，roughness 0.5 只留温润反光，opacity 0.9 透出镜面地板的克制倒影
+    floorOverlay: new THREE.MeshPhysicalMaterial({ color: 0x0a0a0c, roughness: 0.5, metalness: 0, transparent: true, opacity: 0.9 }),
   };
 }

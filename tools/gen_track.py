@@ -150,6 +150,16 @@ meta = {
     "ballRadius": BALL_R,
 }
 
+# 坡上出生点与挡板（抽开后球立即沿坡滚下）：球贴管底 = 中心线 - (R-r)·面内法向
+NRM = (math.sin(TH), math.cos(TH))
+i_seg0 = n_plat + n_cr                      # 坡段起点索引
+pb = points[i_seg0 + 2]
+ps = (pb[0] + math.cos(TH) * 0.125, pb[1] - math.sin(TH) * 0.125)  # 沿坡向 +12.5cm = 球面贴挡板
+off = TUBE_R - BALL_R
+meta["slopeSpawn"] = [round(pb[0] - off * NRM[0], 5), round(pb[1] - off * NRM[1], 5), 0]
+meta["slopeStopper"] = [round(ps[0] + 0.03 * NRM[0], 5), round(ps[1] + 0.03 * NRM[1], 5), 0]
+meta["slopeNormal"] = [round(NRM[0], 5), round(NRM[1], 5), 0.0]
+
 # ---------- 写 JS ----------
 buf = io.StringIO()
 buf.write("""// track-curve.js — 滑道中心线点列（由 tools/gen_track.py 生成，勿手改）
