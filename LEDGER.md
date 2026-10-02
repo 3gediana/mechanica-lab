@@ -140,13 +140,34 @@ M 轨迹线截图目检：恒星自发光 + 卫星轨迹弧 + astro 守恒条完
 ②守恒量基准在 rebuild 后 simT 相同（都为 0）无法检测陈旧 → 基准绑定 runtime.epoch 代数；
 ③周期公式首尾跳变差忘了除以间隔数（测出两圈）。
 
-### 下一轮（Round 6 候选）
+### Round 6（10-03）P2 收官：角动量守恒预置 —— **PASS（p4 16/16，p0/p1/p2/p3 回归 19/12/11/19 全绿）**
 
-1. P2 收官：角动量守恒预置（转台+径向滑移质量或双向自旋，I·ω 与 L 前后对比）。
-2. 教学叠加层续：能量条 + 碰撞时刻标记（数据已有）。
-3. 动量题/天体题拍题解析支持（TYPE_MAP 扩展 + explain momentum/astro 分支）。
+**转台+径向滑块**（Goal 八.3 认可形式）：转台（8kg R1.2 ω0=3rad/s 4 辐条）+ 滑块（1.5kg 初始 r=0.7 切向匹配）
++ prismatic 径向滑槽（槽内无摩擦，limits [0.15,1.05]）。滑块因惯性外滑 → I 增 → ω 减 → **L 严格守恒**（纯物理演化）。
+重力归零 = 理想轴承（对转轴无外力矩，守恒条明示"外力矩 0"）。
 
-## 设计定调（延续 Round 0）
+**通用能力沉淀**：
+- entity.joints 通用约束通道（prismatic+limits，场景文档可序列化）——Goal 五 joints 字段首次落地
+- cylinder spokes 辐条（makeMesh Group 支持）= 转动可视化；各组件 inertiaY 自转惯量公式
+- 守恒量条第三种模式 rotation：ω/I/L/L 漂移/KE/滑块半径/外力矩；MECH.rotationState
+
+**本轮修的坑（Rapier joint 三连）**：
+1. `JointData.prismatic` 高层只收 3 参，anchor/axis 必须是 **RAPIER.Vector3 实例**（传普通对象抛 "expected instance of y"，rebuild 中断连锁）。
+2. 6 参版本（limitsEnabled, min, max）是 RawGenericJoint 的，与 JointData 不是一类。
+3. limits 高层通道 = `jd.limitsEnabled = true; jd.limits = [min, max]`（intoRaw 里读取）。
+约束失败现在被隔离记录（runtime.jointFailures），不炸 rebuild。
+
+**验收数字**：L 漂移 0.301%（ω0=3）/ 0.848%（ω0=5 经检查器编辑）；I 6.50 → 24+，ω 3 → 2.66；滑块 r 0.7 → 槽限位间振荡（软限位真实动力学）；截图目检：辐条转动 + 滑块世界系直线轨迹弧 + rotation 守恒条全项。
+
+**遗留**：prismatic 软限位冲击后滑块有回弹振荡（Rapier 修正冲量特性，L 仍守恒）；KE 含转动+平动近似（ Iself 绕 y 主轴公式，斜置刚体不适用）。
+
+### 下一轮（Round 7 候选）
+
+1. 教学观察层续：能量条（KE/PE 分色）+ 碰撞时刻标记（数据已有）。
+2. 动量/天体/角动量题拍题解析支持（TYPE_MAP + explain 分支补齐）。
+3. UI 缺口：场景大纲重命名/锁定、框选多选。
+
+## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）
 
 仪器级暗色摄影棚工具界面。冷灰烟色 + 单点缀琥珀（仪表读数与激活态）；直角 hairline（radius 2px）；
 无渐变无玻璃拟态无 emoji 无 em-dash；数字等宽；动效只做状态反馈。
