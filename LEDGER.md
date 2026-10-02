@@ -214,13 +214,36 @@ fixture parse-spin.json + serve.py 解析 prompt 补 kind/joint 规则。
 
 **遗留**：滑移瞬态槽-滑块转动耦合使 I-ω 反比有 ~11% 瞬态偏差（L 守恒 0.28% 是硬结论，已如实标注）；曲线仅支持单选中实体。
 
-### 下一轮（Round 10 候选）
+### Round 10（10-03）classic 轨道组件化 + 观察层/UI 收尾 —— **PASS（p8 11/11，回归 p0-p7 全绿）**
 
-1. 观察层收尾：加速度箭头、能量堆叠条（KE/PE 分色）。
-2. UI 缺口：正交相机、缩放 gizmo、单位标尺、录制/回放。
-3. classic 轨道场景组件化迁移（Goal 第二节）。
+**Goal 第二节兑现：classic 轨道场景组件化为可复用预置**：
+- registry `track` 组件：半管参数面（TRACK_POINTS 移植 buildTrough），**无碰撞体**——球走中心线解析约束
+  （组件允许 buildCollider 返回 null，runtime 相应跳过；修了 createCollider(null) 中断）。
+- runtime `onTrack` 管道约束：线段投影 + 径向限位 + per-ball closest 状态（自 legacy-main 移植，光滑管道语义）。
+- `classic` 预置：管道轨道（下坡+凸弯+32°坡+竖直环轨，2.7R 判据注释保留）+ onTrack 铬球自由释放 + 地面板。
+  球沿轨滑完全程：下坡 → 环轨不掉落 → 出口直道（x=1.49、y=0.45、v=3.63），轨迹线/矢量叠加层可用，全程真实物理可暂停/单步/重置。
 
-## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）
+**观察层收尾**：加速度箭头（受力开关升级三箭：接触合力绿/重力红/加速度青，速度差分）；能量堆叠条 KE/PE 分色
+（astro 模式按构成比堆叠，静止释放场景 KE0≈0 防爆表下限）。
+
+**UI 缺口**：正交相机切换（OrthographicCamera 换绑 controls/gizmo）、缩放 gizmo 模式（视觉缩放写 transform.scale，
+碰撞体不变已标注）、录制/回放（帧序列 1200 帧上限，回放完自动回编辑态）。
+
+**本轮修的坑**：①createCollider(null)（track 无碰撞体组件）rebuild 中断——createCollider 移入 if；②录制自动演化时再点 Play（运行中本就禁用）为测试流程错误。
+
+**验收**（p8.mjs 11/11 + 全回归 8 套全绿）：classic 球走完下坡+环轨；受力三箭可见；堆叠条 KE 22%/PE 44% 分色；
+正交/缩放/录制（76 帧）/回放（自动回编辑态）全通；截图目检轨道完整渲染。
+
+**遗留**：组件目录搜索/最近使用/收藏/ghost preview；端点/表面/中心吸附；正交下 gizmo 尺寸手感；
+录制回放无时间轴拖拽；spin 题反比参考的滑移瞬态偏差（L 守恒 0.28% 是硬结论）。
+
+### 下一轮（Round 11 候选）
+
+1. 组件目录搜索 + 最近使用（体验小补）。
+2. Agent 面板"当前任务"展示 + 绳/弹簧约束解析（constraint 类 fixture）。
+3. P3 收尾盘点：对照 Goal 十五逐项打勾，输出差距清单。
+
+## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）
 
 仪器级暗色摄影棚工具界面。冷灰烟色 + 单点缀琥珀（仪表读数与激活态）；直角 hairline（radius 2px）；
 无渐变无玻璃拟态无 emoji 无 em-dash；数字等宽；动效只做状态反馈。
