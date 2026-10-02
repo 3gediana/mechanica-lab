@@ -305,6 +305,7 @@ function bindUI() {
     if (e.target.value === 'momentum') { setVectors(true); setCons(true); }   // 教学默认开叠加层
     if (e.target.value === 'celestial') { setTrails(true); setCons(true); }
     if (e.target.value === 'spin') { setVectors(true); setTrails(true); setCons(true); }
+    if (e.target.value === 'classic') { setVectors(true); setTrails(true); setCons(true); }
     e.target.value = '';
   };
   $('btnSave').onclick = saveFile;
@@ -313,6 +314,13 @@ function bindUI() {
 
   $('btnModeMove').onclick = () => setGizmoMode('translate');
   $('btnModeRotate').onclick = () => setGizmoMode('rotate');
+  $('btnModeScale').onclick = () => setGizmoMode('scale');
+  $('btnOrtho').onclick = () => {
+    const proj = viewport.toggleProjection();
+    $('btnOrtho').classList.toggle('hot', proj === 'ortho');
+  };
+  $('btnRec').onclick = () => toggleFrameRec();
+  $('btnReplay').onclick = () => startReplay();
   $('btnBoxSel').onclick = () => {
     if (mode !== 'edit') { toast('框选仅编辑态可用'); return; }
     const on = !viewport.boxSelectMode;
@@ -365,6 +373,7 @@ function setGizmoMode(m) {
   viewport.setGizmoMode(m);
   $('btnModeMove').classList.toggle('hot', m === 'translate');
   $('btnModeRotate').classList.toggle('hot', m === 'rotate');
+  $('btnModeScale').classList.toggle('hot', m === 'scale');
 }
 
 function onKey(e) {
@@ -837,9 +846,11 @@ function updateRotationCons() {
   $('crTime').textContent = `t=${r.simT.toFixed(1)}s`;
 }
 
-function updateEnergyBar(rate) {
+function updateEnergyBar(rate, keFrac = 1) {
   const pct = Math.max(0, Math.min(rate, 1.5)) * 100 / 1.5;   // 条量程 0-150%，66.7% 刻度=100%
-  $('ebFill').style.width = pct + '%';
+  $('ebFill').style.width = (pct * keFrac) + '%';              // KE 段（琥珀）
+  $('ebFillPE').style.width = (pct * (1 - keFrac)) + '%';      // PE 段（蓝，堆叠）
+  $('ebFillPE').style.left = (pct * keFrac) + '%';
   $('ebFill').style.background = rate > 1.02 ? 'var(--text)' : 'var(--accent)';
   $('ebPct').textContent = (rate * 100).toFixed(1) + '%';
 }
@@ -855,7 +866,7 @@ function updateConsbar() {
   if (rotation) { updateRotationCons(); return; }
   const live = runtime.systemTotals();
   if (!momentumBase || momentumBase.epoch !== runtime.epoch) momentumBase = { epoch: runtime.epoch, KE: live.ke };
-  updateEnergyBar(live.ke / Math.max(momentumBase.KE, 1e-12));
+  updateEnergyBar(live.ke / Math.max(momentumBase.KE, 0.05));   // 静止释放场景 KE0≈0，防比例条爆表
   $('cbP').textContent = `${live.p[0].toFixed(3)} N·s`;
   $('cbKE').textContent = `${live.ke.toFixed(3)} J`;
   const rep = runtime.collisionReports[runtime.collisionReports.length - 1];
@@ -890,7 +901,7 @@ function astroWithDrift() {
 function updateAstroCons() {
   const a = astroWithDrift();
   if (!a) return;
-  updateEnergyBar(a.E / astroBase.E);   // E 为负，比值仍为正 = 能量保持率
+  updateEnergyBar(a.E / astroBase.E, a.KE / Math.max(a.KE + Math.abs(a.PE), 1e-12));   // KE/PE 构成分色
   const dE = Math.abs(a.E - astroBase.E) / Math.max(Math.abs(astroBase.E), 1e-12) * 100;
   const dL = Math.abs(a.Lz - astroBase.L) / Math.max(Math.abs(astroBase.L), 1e-12) * 100;
   $('caE').textContent = `${a.E.toFixed(3)} J`;
@@ -982,13 +993,64 @@ function drawCurves() {
   }
 }
 
+// ============ 录制 / 回放 ============
+let replaying = false;
+let replayIdx = 0;
+
+function toggleFrameRec() {
+  if (replaying) { stopReplay(); return; }
+  if (runtime.recFrames) {
+    runtime.recFrames = false;
+    $('btnRec').classList.remove('hot');
+    $('btnRec').textContent = '录制';
+    $('btnReplay').disabled = runtime.frames.length < 2;
+    toast(`已录制 ${runtime.frames.length} 帧`);
+  } else {
+    if (mode !== 'edit') resetSim();
+    runtime.frames = [];
+    runtime.recFrames = true;
+    $('btnRec').classList.add('hot');
+    $('btnRec').textContent = '停止录制';
+    play();
+    toast('录制中（最长约 30s）');
+  }
+}
+
+function startReplay() {
+  if (replaying) return;
+  if (runtime.frames.length < 2) { toast('请先录制'); return; }
+  replaying = true;
+  replayIdx = 0;
+  mode = 'run';
+  paused = false;
+  viewport.setGizmoEnabled(false);
+  $('btnReplay').classList.add('hot');
+  updateSimbarStatic();
+  toast('回放中（结束后自动恢复编辑态）');
+}
+
+function stopReplay() {
+  replaying = false;
+  mode = 'edit';
+  paused = false;
+  viewport.setGizmoEnabled(true);
+  $('btnReplay').classList.remove('hot');
+  $('btnReplay').disabled = false;
+  rebuildAll();
+  updateSimbarStatic();
+}
+
 // ============ 主循环 ============
 const clock = new THREE.Clock();
 function tick() {
   requestAnimationFrame(tick);
   if (!appReady) return;
   const rawDt = Math.min(clock.getDelta(), 0.05);
-  if (mode === 'run' && !paused) runtime.advance(rawDt * timeScale);
+  if (replaying) {
+    replayIdx += Math.max(1, Math.round(rawDt * 60));   // 60 帧/s 回放速率
+    if (replayIdx >= runtime.frames.length) { stopReplay(); }
+    else runtime.applyFrame(replayIdx);
+  } else if (mode === 'run' && !paused) runtime.advance(rawDt * timeScale);
   if (vectorsOn) {
     // 编辑态显示初速度，运行/暂停显示当前速度（遥测即当前世界态）
     const items = [];
@@ -1005,7 +1067,7 @@ function tick() {
       if (e.physics.body !== 'dynamic' || e.visible === false) continue;
       const t = runtime.telemetry(e.id);
       if (!t) continue;
-      items.push({ pos: t.pos, contact: runtime.contactForces.get(e.id) || null, gravity: [0, 9.81 * (e.physics.gravityScale != null ? e.physics.gravityScale : 1) * t.mass, 0] });
+      items.push({ pos: t.pos, contact: runtime.contactForces.get(e.id) || null, gravity: [0, 9.81 * (e.physics.gravityScale != null ? e.physics.gravityScale : 1) * t.mass, 0], accel: runtime.accels.get(e.id) || [0, 0, 0] });
     }
     viewport.updateForceArrows(items);
   }
@@ -1754,6 +1816,7 @@ window.MECH = {
   impactCount: () => viewport.impactCount(),
   forceState: () => ({ on: forcesOn, ...viewport.forceArrowStats() }),
   curveState: () => ({ on: curvesOn, samples: curveData.t.length }),
+  frameState: () => ({ recording: runtime.recFrames, frames: runtime.frames.length, replaying }),
   trailState: () => ({ on: trailsOn, lines: viewport.trailStats(), points: [...runtime.trails.values()].map((a) => a.length) }),
   trailsDump: () => [...runtime.trails.entries()].map(([id, pts]) => ({ id, pts: pts.map((p) => [...p]) })),
   agentImageState: () => ({

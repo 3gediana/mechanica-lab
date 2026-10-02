@@ -221,6 +221,7 @@
   #consbar .erow { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
   #consbar .ebar { flex: 1; height: 6px; background: rgba(255,255,255,.07); position: relative; border-radius: 1px; }
   #consbar .efill { height: 100%; width: 0%; background: var(--accent); transition: width .15s; }
+  #consbar .efillpe { position: absolute; top: 0; height: 100%; width: 0%; background: #7ba7d9; opacity: .75; transition: width .15s; }
   #consbar .emark { position: absolute; left: 66.67%; top: -2px; width: 1px; height: 10px; background: var(--line-strong); }
   #consbar .erow .k { flex: 0 0 auto; }
   #consbar .erow .v { flex: 0 0 52px; text-align: right; font-family: var(--mono); font-size: 11px; color: var(--accent); }
@@ -283,6 +284,7 @@
       <option value="momentum">动量守恒（一维对撞）</option>
       <option value="celestial">天体运动（恒星+卫星）</option>
       <option value="spin">角动量守恒（转台+滑块）</option>
+      <option value="classic">管道轨道（经典演示）</option>
     </select>
     <button id="btnSave" title="下载场景 JSON">保存</button>
     <button id="btnOpen" title="打开场景 JSON">打开</button>
@@ -292,7 +294,9 @@
   <div class="tb-group">
     <button id="btnModeMove" class="hot" title="移动 gizmo（W）">移动</button>
     <button id="btnModeRotate" title="旋转 gizmo（E）">旋转</button>
+    <button id="btnModeScale" title="缩放 gizmo（仅视觉缩放，碰撞体不变）">缩放</button>
     <button id="btnSnap" title="网格吸附：平移 0.1m / 旋转 15°">吸附</button>
+    <button id="btnOrtho" title="透视/正交相机切换">正交</button>
     <button id="btnBoxSel" title="框选多选（编辑态，拖出矩形选中实体）">框选</button>
   </div>
   <div class="tb-group">
@@ -393,6 +397,8 @@
   <button id="btnForces" title="受力箭头：重力(红)+接触合力(绿)">受力</button>
   <button id="btnTrails" title="轨迹线（叠加层）">轨迹</button>
   <button id="btnCurves" title="时间曲线：选中体速率/高度 + 系统动能">曲线</button>
+  <button id="btnRec" title="录制帧序列（回放用）">录制</button>
+  <button id="btnReplay" title="回放录制的帧序列" disabled>回放</button>
   <button id="btnCons" title="守恒量读数">守恒</button>
   <span class="ro">t=<b id="roT">0.000</b>s</span>
   <span class="ro">步长 <b>1/120s</b></span>
@@ -402,7 +408,7 @@
 </footer>
 
 <div id="consbar">
-  <div class="erow"><span class="k">能量保持</span><div class="ebar"><div class="efill" id="ebFill"></div><div class="emark"></div></div><span class="v" id="ebPct">--</span></div>
+  <div class="erow"><span class="k">能量保持</span><div class="ebar"><div class="efill" id="ebFill"></div><div class="efillpe" id="ebFillPE"></div><div class="emark"></div></div><span class="v" id="ebPct">--</span></div>
   <div class="cgrid" id="consMomentum">
     <div class="cell"><span class="k">总动量</span><span class="v" id="cbP">--</span></div>
     <div class="cell"><span class="k">总动能</span><span class="v" id="cbKE">--</span></div>

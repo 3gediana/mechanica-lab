@@ -2,6 +2,7 @@
 // 全量重建语义：任何文档变更（编辑态）都 rebuild，杜绝增量同步bug；场景规模小，重建毫秒级。
 // 步进：固定步长 1/120s + 每帧步数上限，超限丢弃积压（防掉帧后追赶螺旋、防物理死循环）。
 import * as THREE from 'three';
+import { TRACK_POINTS, TRACK_META } from '../track-curve.js';
 
 export const FIXED_H = 1 / 120;
 const MAX_STEPS_PER_FRAME = 8;
@@ -22,7 +23,10 @@ export class Runtime {
     this.recording = null;       // 轨迹采样 {id, points:[{t,pos,speed,vel}], every, n}（解释器用，单实体）
     this.trailsOn = false;
     this.trails = new Map();
-    this.contactForces = new Map();   // id -> [fx,fy,fz] 接触合力（速度差分反推，受力箭头用）     // 轨迹线数据 id -> [[x,y,z], ...]（叠加层用，多实体，每 2 步一点）
+    this.contactForces = new Map();   // id -> [fx,fy,fz] 接触合力（速度差分反推，受力箭头用）
+    this.accels = new Map();          // id -> [ax,ay,az] 加速度（差分）
+    this.frames = [];                 // 录制帧 [{t, states:[[id,px,py,pz,qx,qy,qz,w],...]}]
+    this.recFrames = false;     // 轨迹线数据 id -> [[x,y,z], ...]（叠加层用，多实体，每 2 步一点）
     this._grav = [];             // 天体（velocity-Verlet 自积分，不建 Rapier 刚体）
     this._gravMap = new Map();   // id -> 天体状态（telemetry/trails 用）
     this.epoch = 0;              // rebuild 代数（守恒量基准重取依据）
@@ -41,6 +45,7 @@ export class Runtime {
     for (const e of doc.entities) this._createEntity(e);
     this._createJoints(doc);
     this._collectGravitating();
+    this._collectTrackBalls(doc);
     this.epoch++;
     this.simT = 0;    this.acc = 0;
     this.dropped = 0;
@@ -49,6 +54,7 @@ export class Runtime {
     this.jointFailures.length = 0;
     this.trails.clear();
     this.contactForces.clear();
+    this.accels.clear();
   }
 
   clear() {
@@ -70,6 +76,7 @@ export class Runtime {
     const mesh = c.makeMesh ? c.makeMesh(e.params, material) : new THREE.Mesh(geometry, material);
     mesh.position.fromArray(e.transform.pos);
     mesh.rotation.set(...e.transform.rot);
+    if (e.transform.scale) mesh.scale.fromArray(e.transform.scale);
     mesh.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
     mesh.visible = e.visible !== false;
     mesh.userData.entityId = e.id;
@@ -92,14 +99,14 @@ export class Runtime {
         body.setAngularDamping(e.physics.angDamping);
         body.setGravityScale(e.physics.gravityScale, true);
       }
-      let colDesc = c.buildCollider(RAPIER, e.params);
-      if (!colDesc) colDesc = RAPIER.ColliderDesc.cuboid(0.1, 0.1, 0.1); // 退化几何兜底
-      colDesc.setFriction(e.physics.friction).setRestitution(e.physics.restitution)
-        .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS);
-      if (e.physics.body === 'dynamic' && e.physics.mass > 0) colDesc.setMass(e.physics.mass);
-      const collider = this.world.createCollider(colDesc, body);
+      const colDesc = c.buildCollider(RAPIER, e.params);
+      if (colDesc) {                                 // track 等解析约束组件无碰撞体
+        colDesc.setFriction(e.physics.friction).setRestitution(e.physics.restitution)
+          .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS);
+        if (e.physics.body === 'dynamic' && e.physics.mass > 0) colDesc.setMass(e.physics.mass);
+        bind.collider = this.world.createCollider(colDesc, body);
+      }
       bind.body = body;
-      bind.collider = collider;
     }
     this.binds.set(e.id, bind);
   }
@@ -128,6 +135,52 @@ export class Runtime {
         }
       }
     }
+  }
+
+  // ============ 管道轨道约束（track 组件 + onTrack 球，光滑管道语义） ============
+  _collectTrackBalls(doc) {
+    this._trackBalls = [];
+    const hasTrack = doc.entities.some((e) => e.type === 'track');
+    if (!hasTrack) return;
+    for (const b of this.binds.values()) {
+      if (!b.body || !b.entity.physics.onTrack) continue;
+      const t = b.entity.transform.pos;
+      let bi = 0, bd = Infinity;
+      for (let i = 0; i < TRACK_POINTS.length; i++) {
+        const d = (TRACK_POINTS[i][0] - t[0]) ** 2 + (TRACK_POINTS[i][1] - t[1]) ** 2 + (TRACK_POINTS[i][2] - t[2]) ** 2;
+        if (d < bd) { bd = d; bi = i; }
+      }
+      this._trackBalls.push({ id: b.entity.id, body: b.body, closest: bi, ballR: b.entity.params.radius ?? 0.09 });
+    }
+  }
+
+  _constrainToPipe(tb) {
+    const q = tb.body.translation();
+    // 最近"线段"投影（顶点投影会把坡向分量混入径向形成锯齿卡球——legacy 已验证的结论）
+    let bi = tb.closest, bd = Infinity, bp = TRACK_POINTS[tb.closest];
+    const i0 = Math.max(0, tb.closest - 8), i1 = Math.min(TRACK_POINTS.length - 2, tb.closest + 40);
+    for (let i = i0; i <= i1; i++) {
+      const a = TRACK_POINTS[i], b = TRACK_POINTS[i + 1];
+      const abx = b[0] - a[0], aby = b[1] - a[1], abz = b[2] - a[2];
+      const apx = q.x - a[0], apy = q.y - a[1], apz = q.z - a[2];
+      const len2 = abx * abx + aby * aby + abz * abz;
+      let t = len2 > 0 ? (apx * abx + apy * aby + apz * abz) / len2 : 0;
+      t = Math.min(Math.max(t, 0), 1);
+      const px = a[0] + abx * t, py = a[1] + aby * t, pz = a[2] + abz * t;
+      const d = (q.x - px) ** 2 + (q.y - py) ** 2 + (q.z - pz) ** 2;
+      if (d < bd) { bd = d; bi = i; bp = { x: px, y: py, z: pz }; }
+    }
+    tb.closest = bi;
+    const rx = q.x - bp.x, ry = q.y - bp.y, rz = q.z - bp.z;
+    const r = Math.hypot(rx, ry, rz);
+    if (r > 0.30) return;                                          // 离管太远（被抛出），不约束
+    const LIMIT = TRACK_META.tubeRadius - tb.ballR;
+    if (r <= LIMIT) return;
+    const nx = rx / r, ny = ry / r, nz = rz / r;
+    tb.body.setTranslation({ x: bp.x + nx * LIMIT, y: bp.y + ny * LIMIT, z: bp.z + nz * LIMIT }, true);
+    const v = tb.body.linvel();
+    const vn = v.x * nx + v.y * ny + v.z * nz;
+    if (vn > 0) tb.body.setLinvel({ x: v.x - vn * nx, y: v.y - vn * ny, z: v.z - vn * nz }, true);
   }
 
   // ============ 天体 n 体引力（velocity-Verlet，自写积分器） ============
@@ -232,6 +285,7 @@ export class Runtime {
     }
     this._gravStep(FIXED_H);                  // 天体（自积分）先行；Rapier 步内不含天体
     this.world.step(this.eventQueue);         // 事件队列必须传入 step 才会被填充
+    for (const tb of this._trackBalls) this._constrainToPipe(tb);
     this._drainCollisions();
     if (this.collisions.length > nCol0) {
       const post = this.systemTotals();
@@ -260,6 +314,7 @@ export class Runtime {
       const v = b.body.linvel();
       const m = b.body.mass();
       const gs = b.entity.physics.gravityScale != null ? b.entity.physics.gravityScale : 1;
+      this.accels.set(id, [(v.x - pv[0]) / FIXED_H, (v.y - pv[1]) / FIXED_H, (v.z - pv[2]) / FIXED_H]);
       this.contactForces.set(id, [
         m * ((v.x - pv[0]) / FIXED_H - 0),
         m * ((v.y - pv[1]) / FIXED_H - gy * gs),
@@ -287,6 +342,31 @@ export class Runtime {
         if (t) r.points.push({ t: this.simT, pos: t.pos, speed: t.speed, vel: t.vel });
       }
     }
+    if (this.recFrames && this._stepN % 3 === 0) {
+      const states = [];
+      for (const [id, b] of this.binds) {
+        if (!b.body) continue;
+        const p = b.body.translation(), q = b.body.rotation();
+        states.push([id, p.x, p.y, p.z, q.x, q.y, q.z, q.w]);
+      }
+      this.frames.push({ t: this.simT, states });
+      if (this.frames.length >= 1200) this.recFrames = false;   // ~30s 上限
+    }
+  }
+
+  // ============ 回放（应用录制帧到网格，演化暂停） ============
+  applyFrame(fi) {
+    const f = this.frames[fi];
+    if (!f) return false;
+    for (const s of f.states) {
+      const b = this.binds.get(s[0]);
+      if (b && b.mesh) {
+        b.mesh.position.set(s[1], s[2], s[3]);
+        b.mesh.quaternion.set(s[4], s[5], s[6], s[7]);
+      }
+    }
+    this.simT = f.t;
+    return true;
   }
 
   advance(dt) {

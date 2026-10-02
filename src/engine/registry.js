@@ -2,6 +2,47 @@
 // 新增对象类型只需在此登记，不写独立逻辑；schema 驱动检查器 UI 与校验。
 import * as THREE from 'three';
 import { newId } from './scene-doc.js';
+import { TRACK_POINTS, TRACK_META } from '../track-curve.js';
+
+// ---------- 轨道：半管参数面（经典管道轨道，球经中心线解析约束滑行，Goal 第二节组件化迁移） ----------
+function buildTroughGeometry(arcFraction, along, radial) {
+  const pts = TRACK_POINTS.map((p) => new THREE.Vector3(p[0], p[1], p[2]));
+  const lens = [0];
+  for (let i = 1; i < pts.length; i++) lens.push(lens[i - 1] + pts[i].distanceTo(pts[i - 1]));
+  const total = lens[lens.length - 1];
+  const up = new THREE.Vector3(0, 1, 0);
+  const B = new THREE.Vector3(0, 0, 1);
+  const openHalf = Math.PI * (1 - arcFraction) / 2;
+  const pos = [], nor = [], uv = [], idx = [];
+  const N = new THREE.Vector3(), P = new THREE.Vector3(), T = new THREE.Vector3(), D = new THREE.Vector3();
+  for (let i = 0; i <= along; i++) {
+    const d = (i / along) * total;
+    let k = 1;
+    while (k < lens.length - 1 && lens[k] < d) k++;
+    const seg = (lens[k] - lens[k - 1]) || 1;
+    P.copy(pts[k - 1]).lerp(pts[k], Math.min(Math.max((d - lens[k - 1]) / seg, 0), 1));
+    T.copy(pts[k]).sub(pts[k - 1]).normalize();
+    N.set(-T.y, T.x, 0).normalize();
+    const phiUp = Math.atan2(up.dot(B), up.dot(N));
+    for (let j = 0; j <= radial; j++) {
+      const phi = phiUp + openHalf + (j / radial) * (2 * Math.PI - 2 * openHalf);
+      D.copy(N).multiplyScalar(Math.cos(phi)).addScaledVector(B, Math.sin(phi));
+      pos.push(P.x + D.x * TRACK_META.tubeRadius, P.y + D.y * TRACK_META.tubeRadius, P.z + D.z * TRACK_META.tubeRadius);
+      nor.push(-D.x, -D.y, -D.z);
+      uv.push((i / along) * 6, j / radial);
+    }
+  }
+  for (let i = 0; i < along; i++) for (let j = 0; j < radial; j++) {
+    const a = i * (radial + 1) + j, b = a + radial + 1;
+    idx.push(a, b, a + 1, b, b + 1, a + 1);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  return g;
+}
 
 // 实体可用材质（键与 materials.js 返回对象一致）
 export const MATERIAL_OPTIONS = [
@@ -153,6 +194,18 @@ export const COMPONENTS = {
     inertiaY: (p, m) => m * (p.sx * p.sx + p.sz * p.sz) / 12,
   },
 
+  track: {
+    id: 'track', label: '管道轨道', category: '轨道和曲面',
+    desc: '半管滑道+竖直环轨（中心线解析约束，光滑无摩擦；球体设 onTrack 沿轨滑行）',
+    defaults: { params: { arcFraction: 0.61 }, physics: defaultPhysics('fixed', 0), render: { material: 'marble' } },
+    schema: [
+      { key: 'arcFraction', label: '开口比', unit: '', min: 0.3, max: 0.9, step: 0.01 },
+    ],
+    buildGeometry: (p) => buildTroughGeometry(p.arcFraction, 620, 48),
+    buildCollider: () => null,                     // 球走中心线解析约束，轨道自身无碰撞体
+    spawnY: () => 0.02,
+  },
+
   celestial: {
     id: 'celestial', label: '天体', category: '天体',
     desc: '参与成对引力作用的球状天体（不受世界重力，physics.gravitating）',
@@ -209,7 +262,7 @@ export function createEntity(typeId, overrides = {}, nameSeq = {}) {
     name: `${c.label} ${nameSeq[typeId]}`,
     visible: true,
     locked: false,
-    transform: { pos: [0, 0, 0], rot: [0, 0, 0] },
+    transform: { pos: [0, 0, 0], rot: [0, 0, 0], scale: [1, 1, 1] },
     params: { ...c.defaults.params },
     physics: { ...c.defaults.physics, linvel: [...c.defaults.physics.linvel], angvel: [...c.defaults.physics.angvel] },
     render: { ...c.defaults.render },

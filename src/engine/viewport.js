@@ -28,7 +28,9 @@ export class Viewport {
     this.highlightIds = [];
     this._bindLookup = null;
     this.forcesOn = false;
-    this._forceArrows = [];      // 受力箭头池：偶=接触合力(绿) 奇=重力(红)
+    this._forceArrows = [];      // 受力箭头池：3/实体 = 接触合力(绿)+重力(红)+加速度(青)
+    this._orthoCam = null;
+    this.projection = 'persp';
     this._rubber = document.getElementById('rubber');
   }
 
@@ -64,42 +66,41 @@ export class Viewport {
 
   impactCount() { return this._impacts.length; }
 
-  // ============ 受力箭头（重力红 + 接触合力绿） ============
+  // ============ 受力/加速度箭头（重力红 + 接触合力绿 + 加速度青） ============
   setForceArrows(on) {
     this.forcesOn = on;
     for (const a of this._forceArrows) a.visible = false;
   }
 
-  // items: [{pos, contact:[x,y,z]|null, gravity:[x,y,z]}]  每 tick 驱动
+  // items: [{pos, contact, gravity, accel}]  每 tick 驱动
   updateForceArrows(items) {
     if (!this.forcesOn) return;
-    const need = items.length * 2;
+    const need = items.length * 3;
+    const COLORS = [0x7dc87d, 0xc96a5a, 0x5ac8c8];
     while (this._forceArrows.length < need) {
-      const isG = this._forceArrows.length % 2 === 1;
-      const a = new THREE.ArrowHelper(new THREE.Vector3(0, -1, 0), new THREE.Vector3(), 0.4, isG ? 0xc96a5a : 0x7dc87d, 0.07, 0.045);
+      const kind = this._forceArrows.length % 3;
+      const a = new THREE.ArrowHelper(new THREE.Vector3(0, -1, 0), new THREE.Vector3(), 0.4, COLORS[kind], 0.07, 0.045);
       this.scene.add(a);
       this._forceArrows.push(a);
     }
     let ai = 0;
     for (const it of items) {
-      const gLen = Math.hypot(...it.gravity);
-      // 重力箭头（恒显）
-      const ga = this._forceArrows[ai++];
-      ga.visible = true;
-      ga.position.set(...it.pos);
-      ga.setDirection(new THREE.Vector3(...it.gravity).normalize());
-      ga.setLength(Math.min(0.12 + gLen * 0.04, 1.2), 0.07, 0.045);
-      // 接触合力箭头（超阈值显示）
-      const ca = this._forceArrows[ai++];
-      const c = it.contact;
-      const cLen = c ? Math.hypot(...c) : 0;
-      if (c && cLen > 0.35) {
-        ca.visible = true;
-        ca.position.set(...it.pos);
-        ca.setDirection(new THREE.Vector3(...c).normalize());
-        ca.setLength(Math.min(0.12 + cLen * 0.02, 1.6), 0.07, 0.045);
-      } else {
-        ca.visible = false;
+      const vecs = [
+        { v: it.contact, min: 0.35, scale: 0.02, max: 1.6 },   // 接触合力
+        { v: it.gravity, min: 0.01, scale: 0.04, max: 1.2 },   // 重力
+        { v: it.accel, min: 0.15, scale: 0.06, max: 1.4 },     // 加速度
+      ];
+      for (const vd of vecs) {
+        const a = this._forceArrows[ai++];
+        const len = vd.v ? Math.hypot(...vd.v) : 0;
+        if (vd.v && len > vd.min) {
+          a.visible = true;
+          a.position.set(...it.pos);
+          a.setDirection(new THREE.Vector3(...vd.v).normalize());
+          a.setLength(Math.min(0.12 + len * vd.scale, vd.max), 0.07, 0.045);
+        } else {
+          a.visible = false;
+        }
       }
     }
     for (; ai < this._forceArrows.length; ai++) this._forceArrows[ai].visible = false;
@@ -107,6 +108,72 @@ export class Viewport {
 
   forceArrowStats() {
     return { total: this._forceArrows.length, visible: this._forceArrows.filter((a) => a.visible).length };
+  }
+
+  // ============ 透视 / 正交相机切换 ============
+  setProjection(mode) {
+    if (mode === this.projection) return;
+    if (!this._orthoCam) {
+      const ar = this.camera.aspect;
+      const h = 6;
+      this._orthoCam = new THREE.OrthographicCamera(-h * ar / 2, h * ar / 2, h / 2, -h / 2, 0.01, 300);
+    }
+    const target = this.controls.target.clone();
+    const pos = this.camera.position.clone();
+    const o = this._orthoCam;
+    o.position.copy(pos);
+    o.zoom = 1;
+    o.updateProjectionMatrix();
+    this.controls.object = o;
+    this.gizmo.camera = o;
+    this.camera = o;
+    this.controls.target.copy(target);
+    this.controls.update();
+    this.projection = mode;
+  }
+
+  setPersp() {
+    if (this.projection === 'persp') return;
+    const pos = this.camera.position.clone();
+    this.controls.object = this._perspCamSaved || this.camera;
+    // 恢复透视：_orthoCam 保存了切走前的透视相机
+    const persp = this._perspSaved;
+    this.controls.object = persp;
+    this.gizmo.camera = persp;
+    this.camera = persp;
+    persp.position.copy(pos);
+    this.controls.target.copy(this.controls.target);
+    this.controls.update();
+    this.projection = 'persp';
+  }
+
+  toggleProjection() {
+    if (this.projection === 'persp') {
+      this._perspSaved = this.camera;
+      const pos = this.camera.position.clone();
+      if (!this._orthoCam) {
+        const ar = this.camera.aspect;
+        const h = 6;
+        this._orthoCam = new THREE.OrthographicCamera(-h * ar / 2, h * ar / 2, h / 2, -h / 2, 0.01, 300);
+      }
+      const o = this._orthoCam;
+      o.position.copy(pos);
+      this.controls.object = o;
+      this.gizmo.camera = o;
+      this.camera = o;
+      this.projection = 'ortho';
+    } else {
+      const pos = this.camera.position.clone();
+      const p = this._perspSaved || this.camera;
+      this.controls.object = p;
+      this.gizmo.camera = p;
+      this.camera = p;
+      p.position.copy(pos);
+      this.projection = 'persp';
+    }
+    this.controls.target.copy(this.controls.target);
+    this.controls.update();
+    return this.projection;
   }
 
   // ============ 多选高亮（BoxHelper 池，末位为主选中） ============
@@ -497,8 +564,10 @@ export class Viewport {
 
   resize() {
     const w = this.container.clientWidth, h = this.container.clientHeight;
-    this.camera.aspect = w / h;
-    this.camera.updateProjectionMatrix();
+    if (this.camera.isPerspectiveCamera) {
+      this.camera.aspect = w / h;
+      this.camera.updateProjectionMatrix();
+    }
     this.renderer.setSize(w, h);
   }
 

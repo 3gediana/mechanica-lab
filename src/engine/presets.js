@@ -132,6 +132,48 @@ export const PRESETS = {
     },
   },
 
+  classic: {
+    id: 'classic', label: '管道轨道（经典演示迁移）',
+    build() {
+      const doc = createEmptyDoc('管道轨道：下坡+竖直环轨');
+      const seq = {};
+      // 轨道本体（中心线解析约束，光滑无摩擦）
+      const track = createEntity('track', {
+        name: '管道轨道',
+        transform: { pos: [0, 0, 0], rot: [0, 0, 0] },
+        source: 'preset',
+      }, seq);
+      // 铬钢球：置于坡顶，onTrack 沿中心线滑行（free release，无挡板）
+      const ball = createEntity('sphere', {
+        name: '轨道小球',
+        transform: { pos: [-1.70, 1.577, 0], rot: [0, 0, 0] },
+        params: { radius: 0.09 },
+        physics: {
+          body: 'dynamic', mass: 0.24, friction: 0, restitution: 0.05,
+          linvel: [0, 0, 0], angvel: [0, 0, 0],
+          linDamping: 0, angDamping: 0, gravityScale: 1, onTrack: true,
+        },
+        render: { material: 'chrome' },
+        measured: true,
+        source: 'preset',
+      }, seq);
+      // 地面板：接甩出/抛出的球
+      const ground = createEntity('ground', {
+        name: '地面板',
+        transform: { pos: [0, -0.05, 0], rot: [0, 0, 0] },
+        params: { sx: 12, sy: 0.1, sz: 6 },
+        source: 'preset',
+      }, seq);
+      doc.entities.push(track, ball, ground);
+      doc.meta.assumptions = [
+        '光滑管道（中心线解析约束，无摩擦）：球心被约束在管中心线半径 0.05m 内',
+        '环轨可行性：释放高 1.47m > 2.7·R_eff=1.107m（余量 32.8%），环顶不掉落',
+        '无挡板：小球由静止自由释放（经典演示的闸门释放的理想化）',
+      ];
+      return doc;
+    },
+  },
+
   spin: {
     id: 'spin', label: '角动量守恒（转台+径向滑块）',
     build() {
