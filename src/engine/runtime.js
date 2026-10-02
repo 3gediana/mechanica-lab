@@ -17,6 +17,7 @@ export class Runtime {
     this.acc = 0;
     this.dropped = 0;            // 因背压丢弃的模拟秒数（诊断）
     this.collisions = [];        // [{t, a, b}] 碰撞事件（动量等场景用），上限 200
+    this.collisionReports = [];  // [{t, pBefore, pAfter, keBefore, keAfter}] 碰撞步前后系统守恒量快照，上限 50
     this.recording = null;       // 轨迹采样 {id, points:[{t,pos,speed,vel}], every, n}
     this._bindDocs = null;
   }
@@ -35,6 +36,7 @@ export class Runtime {
     this.acc = 0;
     this.dropped = 0;
     this.collisions.length = 0;
+    this.collisionReports.length = 0;
   }
 
   clear() {
@@ -88,11 +90,30 @@ export class Runtime {
     this.binds.set(e.id, bind);
   }
 
+  // ============ 系统守恒量（所有动态体总动量/平动动能） ============
+  systemTotals() {
+    let px = 0, py = 0, pz = 0, ke = 0;
+    for (const b of this.binds.values()) {
+      if (!b.body || b.entity.physics.body !== 'dynamic') continue;
+      const v = b.body.linvel(), m = b.body.mass();
+      px += m * v.x; py += m * v.y; pz += m * v.z;
+      ke += 0.5 * m * (v.x * v.x + v.y * v.y + v.z * v.z);
+    }
+    return { p: [px, py, pz], ke };
+  }
+
   // ============ 步进 ============
   stepOnce() {
     if (!this.world) return;
-    this.world.step();
+    const nCol0 = this.collisions.length;
+    const pre = this.systemTotals();          // 上一步末速度 = 本次碰撞前状态
+    this.world.step(this.eventQueue);         // 事件队列必须传入 step 才会被填充
     this._drainCollisions();
+    if (this.collisions.length > nCol0) {
+      const post = this.systemTotals();
+      this.collisionReports.push({ t: this.simT, pBefore: pre.p, keBefore: pre.ke, pAfter: post.p, keAfter: post.ke });
+      if (this.collisionReports.length > 50) this.collisionReports.shift();
+    }
     this._syncMeshes();
     this.simT += FIXED_H;
     if (this.recording) {

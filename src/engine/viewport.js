@@ -17,6 +17,40 @@ export class Viewport {
     this._highlight = null;
     this.gizmoMode = 'translate';
     this.snap = false;
+    this.arrowsOn = false;
+    this._arrows = [];
+  }
+
+  // ============ 速度向量叠加层（教学观察层） ============
+  setVelocityArrows(on) {
+    this.arrowsOn = on;
+    if (!on) {
+      for (const a of this._arrows) { a.visible = false; }
+    }
+  }
+
+  // items: [{pos:[x,y,z], vel:[vx,vy,vz]}] 每 tick 由 workbench 用最新遥测驱动
+  updateVelocityArrows(items) {
+    if (!this.arrowsOn) return;
+    while (this._arrows.length < items.length) {
+      const a = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 1, ACCENT, 0.09, 0.055);
+      this.scene.add(a);
+      this._arrows.push(a);
+    }
+    this._arrows.forEach((a, i) => {
+      if (i >= items.length) { a.visible = false; return; }
+      const v = new THREE.Vector3(...items[i].vel);
+      const speed = v.length();
+      if (speed < 0.01) { a.visible = false; return; }
+      a.visible = true;
+      a.position.set(...items[i].pos);
+      a.setDirection(v.normalize());
+      a.setLength(Math.min(0.15 + speed * 0.22, 1.8), 0.09, 0.055);
+    });
+  }
+
+  arrowStats() {
+    return { total: this._arrows.length, visible: this._arrows.filter((a) => a.visible).length };
   }
 
   async init() {

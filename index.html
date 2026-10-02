@@ -205,6 +205,20 @@
   }
   #simbar select option { background: var(--panel-solid); }
 
+  /* 守恒量条 */
+  #consbar {
+    position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--simbar-h) + 10px);
+    z-index: 18; display: none;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 2px;
+    padding: 8px 16px; font-family: var(--mono);
+  }
+  #consbar.on { display: block; }
+  #consbar .cgrid { display: grid; grid-template-columns: repeat(4, auto); gap: 4px 22px; }
+  #consbar .cell { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+  #consbar .k { font-family: var(--sans); font-size: 9px; color: var(--faint); letter-spacing: .1em; }
+  #consbar .v { font-size: 12px; color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #consbar .v.acc { color: var(--accent); }
+
   /* 加载幕 / 错误条 */
   #veil {
     position: fixed; inset: 0; z-index: 60; background: var(--bg);
@@ -250,6 +264,7 @@
     <select id="selPreset" title="载入预置场景">
       <option value="">预置场景</option>
       <option value="incline">斜面小球</option>
+      <option value="momentum">动量守恒（一维对撞）</option>
     </select>
     <button id="btnSave" title="下载场景 JSON">保存</button>
     <button id="btnOpen" title="打开场景 JSON">打开</button>
@@ -340,12 +355,27 @@
     <option value="0.5">0.5x</option>
     <option value="1" selected>1.0x</option>
   </select>
+  <button id="btnVectors" title="速度向量箭头（叠加层）">矢量</button>
+  <button id="btnCons" title="守恒量读数">守恒</button>
   <span class="ro">t=<b id="roT">0.000</b>s</span>
   <span class="ro">步长 <b>1/120s</b></span>
   <span class="ro">实体 <b id="roN">0</b></span>
   <div class="spacer"></div>
   <span class="ro" id="roSel">未选中</span>
 </footer>
+
+<div id="consbar">
+  <div class="cgrid">
+    <div class="cell"><span class="k">总动量</span><span class="v" id="cbP">--</span></div>
+    <div class="cell"><span class="k">总动能</span><span class="v" id="cbKE">--</span></div>
+    <div class="cell"><span class="k">碰撞时刻</span><span class="v" id="cbT">--</span></div>
+    <div class="cell"><span class="k">动量误差</span><span class="v acc" id="cbPerr">--</span></div>
+    <div class="cell"><span class="k">p 前</span><span class="v" id="cbPb">--</span></div>
+    <div class="cell"><span class="k">p 后</span><span class="v" id="cbPa">--</span></div>
+    <div class="cell"><span class="k">KE 前</span><span class="v" id="cbKEb">--</span></div>
+    <div class="cell"><span class="k">KE 后</span><span class="v" id="cbKEa">--</span></div>
+  </div>
+</div>
 
 <div id="toast"></div>
 <div id="errbar"></div>

@@ -263,6 +263,7 @@ function bindUI() {
     if (!e.target.value) return;
     applyDoc(getPreset(e.target.value), '载入预置');
     $('sceneName').value = doc.name;
+    if (e.target.value === 'momentum') { setVectors(true); setCons(true); }   // 教学默认开叠加层
     e.target.value = '';
   };
   $('btnSave').onclick = saveFile;
@@ -287,6 +288,8 @@ function bindUI() {
   $('btnStep').onclick = stepOnce;
   $('btnReset').onclick = resetSim;
   $('selSpeed').onchange = (e) => { timeScale = parseFloat(e.target.value); };
+  $('btnVectors').onclick = () => setVectors(!vectorsOn);
+  $('btnCons').onclick = () => setCons(!consOn);
 
   $('sceneName').onchange = (e) => { doc.name = e.target.value || '未命名场景'; e.target.value = doc.name; autosave(); };
 
@@ -595,6 +598,44 @@ function triRow(parent, label, unit, values, step, onCommit) {
   parent.appendChild(row);
 }
 
+// ============ 教学叠加层：速度向量 + 守恒量条 ============
+let vectorsOn = false;
+let consOn = false;
+
+function setVectors(on) {
+  vectorsOn = on;
+  viewport.setVelocityArrows(on);
+  $('btnVectors').classList.toggle('hot', on);
+}
+function setCons(on) {
+  consOn = on;
+  $('consbar').classList.toggle('on', on);
+  $('btnCons').classList.toggle('hot', on);
+}
+
+function updateConsbar() {
+  if (!consOn) return;
+  const live = runtime.systemTotals();
+  $('cbP').textContent = `${live.p[0].toFixed(3)} N·s`;
+  $('cbKE').textContent = `${live.ke.toFixed(3)} J`;
+  const rep = runtime.collisionReports[runtime.collisionReports.length - 1];
+  if (!rep) {
+    $('cbT').textContent = '尚无碰撞';
+    $('cbPerr').textContent = '--';
+    ['cbPb', 'cbPa', 'cbKEb', 'cbKEa'].forEach((id) => { $(id).textContent = '--'; });
+    return;
+  }
+  $('cbT').textContent = `t=${rep.t.toFixed(3)}s`;
+  const pB = rep.pBefore[0], pA = rep.pAfter[0];
+  const err = Math.abs(pB) > 1e-9 ? Math.abs(pA - pB) / Math.abs(pB) * 100 : 0;
+  $('cbPerr').textContent = `${err.toFixed(3)}%`;
+  $('cbPerr').style.color = err < 1 ? 'var(--accent)' : 'var(--danger)';
+  $('cbPb').textContent = `${pB.toFixed(3)} N·s`;
+  $('cbPa').textContent = `${pA.toFixed(3)} N·s`;
+  $('cbKEb').textContent = `${rep.keBefore.toFixed(3)} J`;
+  $('cbKEa').textContent = `${rep.keAfter.toFixed(3)} J`;
+}
+
 // ============ 底栏读数 + 检查器实时区 ============
 let roTimer = 0;
 function updateReadouts() {
@@ -634,9 +675,19 @@ function tick() {
   if (!appReady) return;
   const rawDt = Math.min(clock.getDelta(), 0.05);
   if (mode === 'run' && !paused) runtime.advance(rawDt * timeScale);
+  if (vectorsOn) {
+    // 编辑态显示初速度，运行/暂停显示当前速度（遥测即当前世界态）
+    const items = [];
+    for (const e of doc.entities) {
+      if (e.physics.body !== 'dynamic' || e.visible === false) continue;
+      const t = runtime.telemetry(e.id);
+      if (t) items.push({ pos: t.pos, vel: t.vel });
+    }
+    viewport.updateVelocityArrows(items);
+  }
   viewport.render();
   roTimer += rawDt;
-  if (roTimer > 0.15) { roTimer = 0; updateReadouts(); }
+  if (roTimer > 0.15) { roTimer = 0; updateReadouts(); updateConsbar(); }
 }
 
 // ============ Agent 题目解析面板 ============
@@ -1096,6 +1147,13 @@ window.MECH = {
     entities: agentPlan ? agentPlan.entities.map((e) => ({ type: e.type, given: { ...e.given } })) : [],
   }),
   explainState: () => agentExplain ? JSON.parse(JSON.stringify(agentExplain)) : null,
+  consState: () => ({
+    live: runtime.systemTotals(),
+    reports: runtime.collisionReports.map((r) => ({
+      t: r.t, pBefore: r.pBefore, pAfter: r.pAfter, keBefore: r.keBefore, keAfter: r.keAfter,
+    })),
+  }),
+  vectorState: () => ({ on: vectorsOn, ...viewport.arrowStats() }),
   // 物理自检：UI 同路径构造斜面场景，同步步进 5s，验证真实演化（非预录）
   selftest() {
     const prev = cloneDoc(doc);
