@@ -64,6 +64,7 @@ export const COMPONENTS = {
     buildGeometry: (p) => new THREE.SphereGeometry(p.radius, 40, 28),
     buildCollider: (RAPIER, p) => RAPIER.ColliderDesc.ball(p.radius),
     spawnY: (p) => p.radius,
+    inertiaY: (p, m) => 0.4 * m * p.radius * p.radius,
   },
 
   box: {
@@ -78,19 +79,39 @@ export const COMPONENTS = {
     buildGeometry: (p) => new THREE.BoxGeometry(p.sx, p.sy, p.sz),
     buildCollider: (RAPIER, p) => RAPIER.ColliderDesc.cuboid(p.sx / 2, p.sy / 2, p.sz / 2),
     spawnY: (p) => p.sy / 2,
+    inertiaY: (p, m) => m * (p.sx * p.sx + p.sz * p.sz) / 12,
   },
 
   cylinder: {
     id: 'cylinder', label: '圆柱', category: '基础物体',
-    desc: '直立圆柱，可滚动（放倒时）、碰撞',
-    defaults: { params: { radius: 0.12, height: 0.3 }, physics: defaultPhysics('dynamic', 1.5), render: { material: 'brass' } },
+    desc: '直立圆柱，可滚动（放倒时）、碰撞；spokes>0 时带辐条（转台演示，转动可见）',
+    defaults: { params: { radius: 0.12, height: 0.3, spokes: 0 }, physics: defaultPhysics('dynamic', 1.5), render: { material: 'brass' } },
     schema: [
       { key: 'radius', label: '半径', unit: 'm', min: 0.01, max: 2, step: 0.01 },
       { key: 'height', label: '高', unit: 'm', min: 0.02, max: 8, step: 0.01 },
+      { key: 'spokes', label: '辐条数', unit: '', min: 0, max: 12, step: 1 },
     ],
     buildGeometry: (p) => new THREE.CylinderGeometry(p.radius, p.radius, p.height, 32),
+    // spokes>0 返回 Group：盘 + 顶面辐条（转动可视化；rotation 模式与转台演示用）
+    makeMesh: (p, material) => {
+      const disk = new THREE.Mesh(new THREE.CylinderGeometry(p.radius, p.radius, p.height, 32), material);
+      if (!p.spokes) return disk;
+      const g = new THREE.Group();
+      g.add(disk);
+      for (let i = 0; i < p.spokes; i++) {
+        const spoke = new THREE.Mesh(
+          new THREE.BoxGeometry(p.radius * 2, 0.015, 0.035),
+          new THREE.MeshStandardMaterial({ color: 0x8a6a48, roughness: 0.6, metalness: 0.1 })
+        );
+        spoke.position.y = p.height / 2 + 0.008;
+        spoke.rotation.y = (i / p.spokes) * Math.PI;   // 每根辐条是一条直径
+        g.add(spoke);
+      }
+      return g;
+    },
     buildCollider: (RAPIER, p) => RAPIER.ColliderDesc.cylinder(p.height / 2, p.radius),
     spawnY: (p) => p.height / 2,
+    inertiaY: (p, m) => 0.5 * m * p.radius * p.radius,        // 绕主轴
   },
 
   ramp: {
@@ -129,6 +150,7 @@ export const COMPONENTS = {
     buildGeometry: (p) => new THREE.BoxGeometry(p.sx, p.sy, p.sz),
     buildCollider: (RAPIER, p) => RAPIER.ColliderDesc.cuboid(p.sx / 2, p.sy / 2, p.sz / 2),
     spawnY: (p) => p.sy / 2,
+    inertiaY: (p, m) => m * (p.sx * p.sx + p.sz * p.sz) / 12,
   },
 
   celestial: {
@@ -150,8 +172,15 @@ export const COMPONENTS = {
     buildGeometry: (p) => new THREE.SphereGeometry(p.radius, 48, 32),
     buildCollider: (RAPIER, p) => RAPIER.ColliderDesc.ball(p.radius),
     spawnY: (p) => p.radius,
+    inertiaY: (p, m) => 0.4 * m * p.radius * p.radius,
   },
 };
+
+// 绕 y 轴自转动惯量（rotation 模式守恒量；未定义的组件返回 0）
+export function inertiaYOf(typeId, params, mass) {
+  const c = getComponent(typeId);
+  return c.inertiaY ? c.inertiaY(params, mass) : 0;
+}
 
 export function getComponent(typeId) {
   const c = COMPONENTS[typeId];

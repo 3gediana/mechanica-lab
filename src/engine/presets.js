@@ -131,6 +131,65 @@ export const PRESETS = {
       return doc;
     },
   },
+
+  spin: {
+    id: 'spin', label: '角动量守恒（转台+径向滑块）',
+    build() {
+      const doc = createEmptyDoc('角动量守恒：转台+径向滑块');
+      doc.kind = 'rotation';
+      const seq = {};
+      // 轴承底座（固定装饰，示意无外力矩轴承）
+      const base = createEntity('cylinder', {
+        name: '轴承底座',
+        transform: { pos: [0, 0.15, 0], rot: [0, 0, 0] },
+        params: { radius: 0.25, height: 0.3, spokes: 0 },
+        physics: { body: 'fixed' },
+        render: { material: 'steelDark' },
+        source: 'preset',
+      }, seq);
+      // 转台 m=8 R=1.2，ω0=3 rad/s；重力归零=理想轴承（对转轴无外力矩）
+      const table = createEntity('cylinder', {
+        name: '转台',
+        transform: { pos: [0, 0.42, 0], rot: [0, 0, 0] },
+        params: { radius: 1.2, height: 0.12, spokes: 4 },
+        physics: {
+          body: 'dynamic', mass: 8, friction: 0, restitution: 0.1,
+          linvel: [0, 0, 0], angvel: [0, 3, 0],
+          linDamping: 0, angDamping: 0, gravityScale: 0,
+        },
+        render: { material: 'wood' },
+        measured: true,
+        source: 'preset',
+      }, seq);
+      // 滑块 m=1.5 初始 r=0.7，切向速度与转台匹配 ω0·r=2.1；槽内无摩擦，惯性外滑 → I 增 ω 减
+      const slider = createEntity('box', {
+        name: '滑块',
+        transform: { pos: [0.7, 0.56, 0], rot: [0, 0, 0] },
+        params: { sx: 0.14, sy: 0.14, sz: 0.14 },
+        physics: {
+          body: 'dynamic', mass: 1.5, friction: 0, restitution: 0.1,
+          linvel: [0, 0, -2.1], angvel: [0, 0, 0],
+          linDamping: 0, angDamping: 0, gravityScale: 0,
+        },
+        render: { material: 'chrome' },
+        measured: true,
+        source: 'preset',
+      }, seq);
+      // 径向滑槽：转台局部 +x 方向 prismatic joint（沿轴自由无摩擦，法向刚性约束）
+      table.joints = [{
+        type: 'prismatic', target: slider.id,
+        anchor1: [0, 0.14, 0], anchor2: [0, 0, 0], axis: [1, 0, 0],
+        limits: [0.15, 1.05],
+      }];
+      doc.entities.push(base, table, slider);
+      doc.meta.assumptions = [
+        '对转轴无外力矩（理想轴承，重力沿轴方向或已理想化为零），系统角动量 L=I·ω 守恒',
+        '滑槽沿转台径向、槽内无摩擦；滑块因惯性向外滑，I 增大 → ω 减小',
+        '转台初始 ω=3 rad/s，滑块 m=1.5kg 初始 r=0.7m，切向速度与转台匹配（3×0.7=2.1 m/s）',
+      ];
+      return doc;
+    },
+  },
 };
 
 export function getPreset(id) {

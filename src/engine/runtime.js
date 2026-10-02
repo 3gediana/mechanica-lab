@@ -18,6 +18,7 @@ export class Runtime {
     this.dropped = 0;            // 因背压丢弃的模拟秒数（诊断）
     this.collisions = [];        // [{t, a, b}] 碰撞事件（动量等场景用），上限 200
     this.collisionReports = [];  // [{t, pBefore, pAfter, keBefore, keAfter}] 碰撞步前后系统守恒量快照，上限 50
+    this.jointFailures = [];     // 约束创建失败记录（UI/Agent 可见）
     this.recording = null;       // 轨迹采样 {id, points:[{t,pos,speed,vel}], every, n}（解释器用，单实体）
     this.trailsOn = false;
     this.trails = new Map();     // 轨迹线数据 id -> [[x,y,z], ...]（叠加层用，多实体，每 2 步一点）
@@ -37,12 +38,14 @@ export class Runtime {
     this.world.numSolverIterations = 8;
     this.eventQueue = new this.RAPIER.EventQueue(true);
     for (const e of doc.entities) this._createEntity(e);
+    this._createJoints(doc);
     this._collectGravitating();
     this.epoch++;
     this.simT = 0;    this.acc = 0;
     this.dropped = 0;
     this.collisions.length = 0;
     this.collisionReports.length = 0;
+    this.jointFailures.length = 0;
     this.trails.clear();
   }
 
@@ -52,7 +55,7 @@ export class Runtime {
     this.recording = null;
     for (const b of this.binds.values()) {
       this.scene.remove(b.mesh);
-      b.mesh.geometry.dispose();
+      b.mesh.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
     }
     this.binds.clear();
   }
@@ -62,11 +65,10 @@ export class Runtime {
     const c = this._reg.getComponent(e.type);
     const geometry = c.buildGeometry(e.params);
     const material = this.M[e.render.material] || this.M.marble;
-    const mesh = new THREE.Mesh(geometry, material);
+    const mesh = c.makeMesh ? c.makeMesh(e.params, material) : new THREE.Mesh(geometry, material);
     mesh.position.fromArray(e.transform.pos);
     mesh.rotation.set(...e.transform.rot);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
+    mesh.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
     mesh.visible = e.visible !== false;
     mesh.userData.entityId = e.id;
     this.scene.add(mesh);
@@ -97,6 +99,32 @@ export class Runtime {
       bind.collider = collider;
     }
     this.binds.set(e.id, bind);
+  }
+
+  // ============ 约束（entity.joints，场景文档可序列化） ============
+  _createJoints(doc) {
+    const vec = (a) => new this.RAPIER.Vector3(a[0], a[1], a[2]);   // Rapier 要求 Vector3 实例
+    for (const e of doc.entities) {
+      for (const j of (e.joints || [])) {
+        const bindA = this.binds.get(e.id), bindB = this.binds.get(j.target);
+        if (!bindA || !bindA.body || !bindB || !bindB.body) continue;
+        try {
+          let jd = null;
+          if (j.type === 'prismatic') {
+            jd = this.RAPIER.JointData.prismatic(vec(j.anchor1), vec(j.anchor2), vec(j.axis));
+            if (j.limits) {                       // 高层通道：intoRaw 读 limitsEnabled/limits
+              jd.limitsEnabled = true;
+              jd.limits = j.limits;
+            }
+          }
+          if (jd) this.world.createImpulseJoint(jd, bindA.body, bindB.body, true);
+        } catch (err) {
+          // 单个约束失败不炸 rebuild，但必须可见
+          console.warn('[runtime] joint 创建失败:', j.type, err && err.message);
+          this.jointFailures.push({ type: j.type, target: j.target, error: String(err && err.message) });
+        }
+      }
+    }
   }
 
   // ============ 天体 n 体引力（velocity-Verlet，自写积分器） ============

@@ -265,6 +265,7 @@ function bindUI() {
     $('sceneName').value = doc.name;
     if (e.target.value === 'momentum') { setVectors(true); setCons(true); }   // 教学默认开叠加层
     if (e.target.value === 'celestial') { setTrails(true); setCons(true); }
+    if (e.target.value === 'spin') { setVectors(true); setTrails(true); setCons(true); }
     e.target.value = '';
   };
   $('btnSave').onclick = saveFile;
@@ -673,12 +674,67 @@ function astroInfo() {
   return { G, E, KE, PE, Lz, bodies: bodies.length, ecc, period, rmin, rmax };
 }
 
+// ---------- 转动守恒量（rotation 模式：转台+径向滑块等绕 y 系统） ----------
+let rotationBase = null;   // {epoch, L}
+
+function rotationInfo() {
+  const items = [];
+  for (const b of runtime.binds.values()) {
+    if (!b.body || b.entity.physics.body !== 'dynamic') continue;
+    const e = b.entity;
+    const p = b.body.translation(), v = b.body.linvel(), w = b.body.angvel();
+    const m = b.body.mass();
+    items.push({
+      id: e.id, m, Iself: registry.inertiaYOf(e.type, e.params, m),
+      pos: [p.x, p.y, p.z], vel: [v.x, v.y, v.z], wy: w.y,
+    });
+  }
+  if (!items.length) return null;
+  let Lz = 0, KE = 0, I = 0, iMax = -1;
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    Lz += it.Iself * it.wy + it.m * (it.pos[2] * it.vel[0] - it.pos[0] * it.vel[2]);
+    KE += 0.5 * it.m * (it.vel[0] ** 2 + it.vel[1] ** 2 + it.vel[2] ** 2) + 0.5 * it.Iself * it.wy ** 2;
+    it.Itot = it.Iself + it.m * (it.pos[0] ** 2 + it.pos[2] ** 2);
+    I += it.Itot;
+    if (iMax < 0 || it.Iself > items[iMax].Iself) iMax = i;
+  }
+  const omega = iMax >= 0 ? items[iMax].wy : 0;
+  let sliderR = null;
+  for (const e of doc.entities) {
+    for (const j of (e.joints || [])) {
+      const it = items.find((x) => x.id === j.target);
+      if (it) sliderR = Math.hypot(it.pos[0], it.pos[2]);
+    }
+  }
+  return { Lz, KE, I, omega, sliderR, torque: 0, simT: runtime.simT };
+}
+
+function updateRotationCons() {
+  const r = rotationInfo();
+  if (!r) return;
+  if (!rotationBase || rotationBase.epoch !== runtime.epoch) rotationBase = { epoch: runtime.epoch, L: r.Lz };
+  const dL = Math.abs(r.Lz - rotationBase.L) / Math.max(Math.abs(rotationBase.L), 1e-12) * 100;
+  $('crOmega').textContent = `${r.omega.toFixed(3)} rad/s`;
+  $('crI').textContent = `${r.I.toFixed(3)} kg·m²`;
+  $('crL').textContent = `${r.Lz.toFixed(3)} kg·m²/s`;
+  $('crLdrift').textContent = `${dL.toFixed(3)}%`;
+  $('crLdrift').style.color = dL < 1 ? 'var(--accent)' : 'var(--danger)';
+  $('crKE').textContent = `${r.KE.toFixed(3)} J`;
+  $('crR').textContent = r.sliderR != null ? `${r.sliderR.toFixed(3)} m` : '--';
+  $('crTorque').textContent = '0（无外力矩）';
+  $('crTime').textContent = `t=${r.simT.toFixed(1)}s`;
+}
+
 function updateConsbar() {
   if (!consOn) return;
   const astro = doc.entities.some((e) => e.physics.gravitating);
-  $('consMomentum').style.display = astro ? 'none' : 'grid';
+  const rotation = !astro && doc.kind === 'rotation';
+  $('consMomentum').style.display = astro || rotation ? 'none' : 'grid';
   $('consAstro').style.display = astro ? 'grid' : 'none';
+  $('consRotation').style.display = rotation ? 'grid' : 'none';
   if (astro) { updateAstroCons(); return; }
+  if (rotation) { updateRotationCons(); return; }
   const live = runtime.systemTotals();
   $('cbP').textContent = `${live.p[0].toFixed(3)} N·s`;
   $('cbKE').textContent = `${live.ke.toFixed(3)} J`;
@@ -1248,6 +1304,16 @@ window.MECH = {
       driftE: Math.abs(a.E - astroBase.E) / Math.max(Math.abs(astroBase.E), 1e-12) * 100,
       driftL: Math.abs(a.Lz - astroBase.L) / Math.max(Math.abs(astroBase.L), 1e-12) * 100,
       ecc: a.ecc, period: a.period, rmin: a.rmin, rmax: a.rmax, simT: runtime.simT,
+    };
+  },
+  rotationState: () => {
+    const r = rotationInfo();
+    if (!r) return null;
+    if (!rotationBase || rotationBase.epoch !== runtime.epoch) rotationBase = { epoch: runtime.epoch, L: r.Lz };
+    return {
+      omega: r.omega, I: r.I, L: r.Lz, KE: r.KE, sliderR: r.sliderR, torque: r.torque,
+      driftL: Math.abs(r.Lz - rotationBase.L) / Math.max(Math.abs(rotationBase.L), 1e-12) * 100,
+      simT: runtime.simT,
     };
   },
   // 物理自检：UI 同路径构造斜面场景，同步步进 5s，验证真实演化（非预录）

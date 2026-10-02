@@ -203,12 +203,15 @@ export class Viewport {
       -((clientY - r.top) / r.height) * 2 + 1
     );
     this.raycaster.setFromCamera(ndc, this.camera);
-    const meshes = [];
+    const roots = [];
     for (const child of this.scene.children) {
-      if (child.userData && child.userData.entityId && child.visible) meshes.push(child);
+      if (child.userData && child.userData.entityId && child.visible) roots.push(child);
     }
-    const hits = this.raycaster.intersectObjects(meshes, false);
-    return hits.length ? hits[0].object.userData.entityId : null;
+    const hits = this.raycaster.intersectObjects(roots, true);   // 递归：Group 子网格（辐条等）也可点选
+    if (!hits.length) return null;
+    let o = hits[0].object;
+    while (o && !o.userData.entityId) o = o.parent;
+    return o ? o.userData.entityId : null;
   }
 
   // ============ 选择与 gizmo ============
