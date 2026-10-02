@@ -31,7 +31,8 @@ python tools/serve.py            # 或 python -m http.server 8721
 
 ## Agent 题目解析（P1 切片，链路完整）
 
-右栏"Agent 解析"标签：上传题图 → `POST /api/parse-question`（step-5-preview 视觉模型）→
+右栏"Agent 解析"标签：**上传或拍照**（getUserMedia 相机采帧）题图，可**框选题目区域**（解析只发送选区）→
+`POST /api/parse-question`（step-5-preview 视觉模型）→
 结构化解析（题型/实体/物理量/单位/置信度/未知量/假设）→ 用户逐项检查修正 → 确认后经白名单 API 创建真实场景实体 →
 运行真实物理 → **"运行并生成解释"**：轨迹采样后对照理论（确定性物理计算，非模型生成——理论 √(2g·Δh) vs 实测、
 机械能漂移、假设核对、题目全长参考值）。
@@ -64,6 +65,7 @@ cd tools/ui-test && npm i && node p0.mjs   # P0 工作台内核 19 项
                             node p2.mjs   # P2 动量守恒预置 12 项
                             node p3.mjs   # P2 天体运动预置 11 项（约 60s）
                             node p4.mjs   # P2 角动量守恒预置 16 项
+                            node p5.mjs   # 拍照+框选+动量解释 13 项（约 60s）
 ```
 
 ## 教学预置场景（P2，走通用场景系统）
