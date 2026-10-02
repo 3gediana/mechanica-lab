@@ -88,6 +88,8 @@
   .comp-item:hover { background: rgba(255,255,255,.045); border-left-color: var(--accent); }
   .comp-item .nm { font-size: 12px; color: var(--text); }
   .comp-item .plus { font-family: var(--mono); font-size: 13px; color: var(--faint); }
+  .comp-item .fav { font-size: 9px; color: var(--faint); cursor: pointer; padding: 0 2px; user-select: none; }
+  .comp-item .fav:hover { color: var(--accent); }
   .comp-item:hover .plus { color: var(--accent); }
   #outline { max-height: 34%; overflow-y: auto; border-top: 1px solid var(--line); }
   .ol-row {
@@ -225,6 +227,13 @@
   #consbar .emark { position: absolute; left: 66.67%; top: -2px; width: 1px; height: 10px; background: var(--line-strong); }
   #consbar .erow .k { flex: 0 0 auto; }
   #consbar .erow .v { flex: 0 0 52px; text-align: right; font-family: var(--mono); font-size: 11px; color: var(--accent); }
+
+  /* 单位标尺读数 */
+  #scaleReadout {
+    position: fixed; left: calc(var(--left-w) + 12px); bottom: calc(var(--simbar-h) + 10px); z-index: 14;
+    font-family: var(--mono); font-size: 10px; color: var(--faint); letter-spacing: .06em;
+    background: rgba(11,12,14,.6); padding: 3px 8px; border-radius: 2px; user-select: none;
+  }
 
   /* 时间曲线面板 */
   #curvePanel {
@@ -401,6 +410,7 @@
   </select>
   <button id="btnVectors" title="速度向量箭头（叠加层）">矢量</button>
   <button id="btnForces" title="受力箭头：重力(红)+接触合力(绿)">受力</button>
+  <button id="btnDecompose" title="受力分解：支持力(淡绿 N)+摩擦力(橙 f) 分列（斜面场景）">分解</button>
   <button id="btnTrails" title="轨迹线（叠加层）">轨迹</button>
   <button id="btnCurves" title="时间曲线：选中体速率/高度 + 系统动能">曲线</button>
   <button id="btnRec" title="录制帧序列（回放用）">录制</button>
@@ -453,6 +463,8 @@
     <span style="color:#d9a441">速率</span><span style="color:#7ba7d9">高度</span><span style="color:#7dc87d">系统KE</span>
   </div>
 </div>
+
+<div id="scaleReadout">网格 1 格 = 1 m</div>
 
 <div id="toast"></div>
 <div id="errbar"></div>

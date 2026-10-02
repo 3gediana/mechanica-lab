@@ -28,6 +28,7 @@ export class Viewport {
     this.highlightIds = [];
     this._bindLookup = null;
     this.forcesOn = false;
+    this.decompose = false;      // 受力分解模式（N/f 分列替代接触合力）
     this._forceArrows = [];      // 受力箭头池：3/实体 = 接触合力(绿)+重力(红)+加速度(青)
     this._orthoCam = null;
     this.projection = 'persp';
@@ -66,30 +67,44 @@ export class Viewport {
 
   impactCount() { return this._impacts.length; }
 
-  // ============ 受力/加速度箭头（重力红 + 接触合力绿 + 加速度青） ============
-  setForceArrows(on) {
+  // ============ 受力/加速度箭头 ============
+  // 分解模式：支持力(淡绿 N)+摩擦力(橙 f)+重力(红)+加速度(青)；合力模式：接触合力(绿)+重力(红)+加速度(青)
+  setForceArrows(on, decompose = this.decompose) {
     this.forcesOn = on;
+    this.decompose = decompose;
     for (const a of this._forceArrows) a.visible = false;
   }
 
-  // items: [{pos, contact, gravity, accel}]  每 tick 驱动
+  setForceDecompose(on) {
+    this.decompose = on;
+  }
+
+  // items: [{pos, contact, normal, friction, gravity, accel}]  每 tick 驱动
   updateForceArrows(items) {
     if (!this.forcesOn) return;
-    const need = items.length * 3;
-    const COLORS = [0x7dc87d, 0xc96a5a, 0x5ac8c8];
+    const COLORS = [0x7dc87d, 0xc96a5a, 0x5ac8c8, 0x9fd8a8, 0xd88a5a];
+    const PER = this.decompose ? 4 : 3;   // 分解: N/f/重力/加速度；合力: 接触/重力/加速度
+    const need = items.length * PER;
     while (this._forceArrows.length < need) {
-      const kind = this._forceArrows.length % 3;
+      const kind = this._forceArrows.length % PER;
       const a = new THREE.ArrowHelper(new THREE.Vector3(0, -1, 0), new THREE.Vector3(), 0.4, COLORS[kind], 0.07, 0.045);
       this.scene.add(a);
       this._forceArrows.push(a);
     }
     let ai = 0;
     for (const it of items) {
-      const vecs = [
-        { v: it.contact, min: 0.35, scale: 0.02, max: 1.6 },   // 接触合力
-        { v: it.gravity, min: 0.01, scale: 0.04, max: 1.2 },   // 重力
-        { v: it.accel, min: 0.15, scale: 0.06, max: 1.4 },     // 加速度
-      ];
+      const vecs = this.decompose
+        ? [
+            { v: it.normal, min: 0.35, scale: 0.02, max: 1.6 },    // 支持力 N（淡绿）
+            { v: it.friction, min: 0.15, scale: 0.03, max: 1.2 },  // 摩擦力 f（橙）
+            { v: it.gravity, min: 0.01, scale: 0.04, max: 1.2 },   // 重力（红）
+            { v: it.accel, min: 0.15, scale: 0.06, max: 1.4 },     // 加速度（青）
+          ]
+        : [
+            { v: it.contact, min: 0.35, scale: 0.02, max: 1.6 },   // 接触合力（绿）
+            { v: it.gravity, min: 0.01, scale: 0.04, max: 1.2 },   // 重力（红）
+            { v: it.accel, min: 0.15, scale: 0.06, max: 1.4 },     // 加速度（青）
+          ];
       for (const vd of vecs) {
         const a = this._forceArrows[ai++];
         const len = vd.v ? Math.hypot(...vd.v) : 0;

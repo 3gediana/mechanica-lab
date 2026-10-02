@@ -224,6 +224,19 @@ function noteRecentUse(typeId) {
     $('catalogSearch').value = catalogFilter;   // renderCatalog 后恢复搜索词
   } catch { /* 隐私模式静默 */ }
 }
+const FAV_KEY = 'mechanica.favorites.components';
+function favoriteComponents() {
+  try { return JSON.parse(localStorage.getItem(FAV_KEY) || '[]').filter((x) => { try { registry.getComponent(x); return true; } catch { return false; } }); }
+  catch { return []; }
+}
+function toggleFavorite(typeId) {
+  try {
+    let list = JSON.parse(localStorage.getItem(FAV_KEY) || '[]');
+    list = list.includes(typeId) ? list.filter((x) => x !== typeId) : [...list, typeId];
+    localStorage.setItem(FAV_KEY, JSON.stringify(list));
+    renderCatalog();
+  } catch { /* 静默 */ }
+}
 function recentComponents() {
   try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]').filter((x) => { try { registry.getComponent(x); return true; } catch { return false; } }); }
   catch { return []; }
@@ -398,6 +411,11 @@ function bindUI() {
   $('selSpeed').onchange = (e) => { timeScale = parseFloat(e.target.value); };
   $('btnVectors').onclick = () => setVectors(!vectorsOn);
   $('btnForces').onclick = () => setForces(!forcesOn);
+  $('btnDecompose').onclick = () => {
+    if (!forcesOn) { toast('先开启"受力"再切换分解'); return; }
+    viewport.setForceDecompose(!viewport.decompose);
+    $('btnDecompose').classList.toggle('hot', viewport.decompose);
+  };
   $('btnTrails').onclick = () => setTrails(!trailsOn);
   $('btnCurves').onclick = () => setCurves(!curvesOn);
   $('btnCons').onclick = () => setCons(!consOn);
@@ -458,10 +476,14 @@ function onKey(e) {
 }
 
 // ============ 左侧目录 / 大纲 ============
-function addCatalogRow(box, c) {
+function addCatalogRow(box, c, faved = false) {
   const row = document.createElement('div');
   row.className = 'comp-item';
-  row.innerHTML = `<span class="nm"></span><span class="plus">+</span>`;
+  row.innerHTML = `<span class="fav" title="收藏/取消收藏"></span><span class="nm"></span><span class="plus">+</span>`;
+  const fav = row.querySelector('.fav');
+  fav.textContent = faved ? '已藏' : '收';
+  fav.style.color = faved ? 'var(--accent)' : 'var(--faint)';
+  fav.onclick = (ev) => { ev.stopPropagation(); toggleFavorite(c.id); };
   row.querySelector('.nm').textContent = c.label;
   row.title = c.desc;
   row.onclick = () => opAddComponent(c.id);
@@ -472,7 +494,9 @@ function renderCatalog() {
   const box = $('catalogList');
   box.innerHTML = '';
   const q = catalogFilter.trim().toLowerCase();
+  const favs = favoriteComponents();
   if (q) {
+    // 搜索：跨分类平铺匹配项（带收藏切换）
     const h = document.createElement('div');
     h.className = 'cat-head';
     h.textContent = '搜索结果';
@@ -481,7 +505,7 @@ function renderCatalog() {
     for (const cat of registry.catalog()) {
       for (const c of cat.items) {
         if (c.label.toLowerCase().includes(q) || c.desc.toLowerCase().includes(q)) {
-          addCatalogRow(box, c);
+          addCatalogRow(box, c, favs.includes(c.id));
           hit++;
         }
       }
@@ -494,28 +518,27 @@ function renderCatalog() {
     }
     return;
   }
+  if (favs.length) {
+    const h = document.createElement('div');
+    h.className = 'cat-head';
+    h.textContent = '收藏';
+    box.appendChild(h);
+    for (const typeId of favs) addCatalogRow(box, registry.getComponent(typeId), true);
+  }
   const recent = recentComponents();
   if (recent.length) {
     const h = document.createElement('div');
     h.className = 'cat-head';
     h.textContent = '最近使用';
     box.appendChild(h);
-    for (const typeId of recent) addCatalogRow(box, registry.getComponent(typeId));
+    for (const typeId of recent) addCatalogRow(box, registry.getComponent(typeId), favs.includes(typeId));
   }
   for (const cat of registry.catalog()) {
     const h = document.createElement('div');
     h.className = 'cat-head';
     h.textContent = cat.label;
     box.appendChild(h);
-    for (const c of cat.items) {
-      const row = document.createElement('div');
-      row.className = 'comp-item';
-      row.innerHTML = `<span class="nm"></span><span class="plus">+</span>`;
-      row.querySelector('.nm').textContent = c.label;
-      row.title = c.desc;
-      row.onclick = () => opAddComponent(c.id);
-      box.appendChild(row);
-    }
+    for (const c of cat.items) addCatalogRow(box, c, favs.includes(c.id));
   }
 }
 
@@ -1095,6 +1118,14 @@ function drawCurves() {
   }
 }
 
+// ============ 单位标尺读数（网格 1 格 = 1 m，视野宽随相机距离） ============
+function updateScaleReadout() {
+  const el = $('scaleReadout');
+  if (!el) return;
+  const d = viewport.camera.position.distanceTo(viewport.controls.target);
+  el.textContent = `网格 1 格 = 1 m　|　视野宽约 ${(2 * d * Math.tan((viewport.camera.fov || 42) * Math.PI / 360)).toFixed(1)} m`;
+}
+
 // ============ 录制 / 回放 ============
 let replaying = false;
 let replayIdx = 0;
@@ -1164,12 +1195,34 @@ function tick() {
     viewport.updateVelocityArrows(items);
   }
   if (forcesOn) {
+    const ramp = doc.entities.find((e) => e.type === 'ramp');
+    let nrm = null;
+    if (ramp) {
+      const th = Math.atan2(ramp.params.height, ramp.params.length);
+      nrm = [Math.sin(th), Math.cos(th), 0];                       // 坡面法向（局部=世界，rot 默认 0）
+      if (ramp.transform.rot && ramp.transform.rot.some((v) => Math.abs(v) > 1e-6)) {
+        const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(...ramp.transform.rot));
+        nrm = new THREE.Vector3(...nrm).applyQuaternion(q).toArray();
+      }
+    }
+    const decompose = viewport.decompose && !!ramp;
     const items = [];
     for (const e of doc.entities) {
       if (e.physics.body !== 'dynamic' || e.visible === false) continue;
       const t = runtime.telemetry(e.id);
       if (!t) continue;
-      items.push({ pos: t.pos, contact: runtime.contactForces.get(e.id) || null, gravity: [0, 9.81 * (e.physics.gravityScale != null ? e.physics.gravityScale : 1) * t.mass, 0], accel: runtime.accels.get(e.id) || [0, 0, 0] });
+      const contact = runtime.contactForces.get(e.id) || null;
+      const gravity = [0, 9.81 * (e.physics.gravityScale != null ? e.physics.gravityScale : 1) * t.mass, 0];
+      const item = { pos: t.pos, contact, gravity, accel: runtime.accels.get(e.id) || [0, 0, 0] };
+      if (decompose && contact) {
+        const dot = contact[0] * nrm[0] + contact[1] * nrm[1] + contact[2] * nrm[2];
+        const normal = [dot * nrm[0], dot * nrm[1], dot * nrm[2]];         // 支持力 = (F·n)n
+        const friction = [contact[0] - normal[0], contact[1] - normal[1], contact[2] - normal[2]];   // 摩擦 = F − N
+        item.normal = normal;
+        item.friction = friction;
+        item.contact = null;                                                // 分解模式不显示合力
+      }
+      items.push(item);
     }
     viewport.updateForceArrows(items);
   }
@@ -1191,6 +1244,7 @@ function tick() {
     updateReadouts();
     updateConsbar();
     if (curvesOn && mode === 'run') sampleCurves();
+    updateScaleReadout();
   }
 }
 
@@ -1976,7 +2030,27 @@ window.MECH = {
   vectorState: () => ({ on: vectorsOn, ...viewport.arrowStats() }),
   selectionState: () => ({ ids: [...selectedIds], main: selectedId }),
   impactCount: () => viewport.impactCount(),
-  forceState: () => ({ on: forcesOn, ...viewport.forceArrowStats() }),
+  forceState: () => ({ on: forcesOn, decompose: viewport.decompose, ...viewport.forceArrowStats() }),
+  forceDecompose: (id) => {
+    // 斜面场景支持力/摩擦力数值（理论对照：N=mg·cosθ, f=μN 或实测差分）
+    const b = runtime.binds.get(id || selectedId);
+    const ramp = doc.entities.find((e) => e.type === 'ramp');
+    if (!b || !b.body || !ramp) return null;
+    const th = Math.atan2(ramp.params.height, ramp.params.length);
+    const m = b.body.mass();
+    const c = runtime.contactForces.get(id || selectedId) || [0, 0, 0];
+    const nrm = [Math.sin(th), Math.cos(th), 0];
+    const dot = c[0] * nrm[0] + c[1] * nrm[1] + c[2] * nrm[2];
+    const N = [dot * nrm[0], dot * nrm[1], dot * nrm[2]];
+    const f = [c[0] - N[0], c[1] - N[1], c[2] - N[2]];
+    return {
+      thetaDeg: +(th * 180 / Math.PI).toFixed(2),
+      N: { measured: +Math.hypot(...N).toFixed(4), theory: +(m * 9.81 * Math.cos(th)).toFixed(4) },
+      f: { measured: +Math.hypot(...f).toFixed(4), muEff: +(Math.hypot(...f) / Math.max(dot, 1e-9)).toFixed(4) },
+      gravity: +(m * 9.81).toFixed(4),
+      contactMag: +Math.hypot(c[0], c[1], c[2]).toFixed(4),
+    };
+  },
   curveState: () => ({ on: curvesOn, samples: curveData.t.length }),
   frameState: () => ({ recording: runtime.recFrames, frames: runtime.frames.length, replaying }),
   trailState: () => ({ on: trailsOn, lines: viewport.trailStats(), points: [...runtime.trails.values()].map((a) => a.length) }),

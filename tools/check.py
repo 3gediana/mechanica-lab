@@ -35,7 +35,7 @@ for js in [
     need(ROOT / js, (ROOT / js).exists(), f"缺失: {js}")
 for page in ["index.html", "classic.html"]:
     need(ROOT / page, (ROOT / page).exists(), f"缺失: {page}")
-for tool in ["tools/serve.py", "tools/ui-test/p0.mjs", "tools/ui-test/p1.mjs", "tools/ui-test/p2.mjs", "tools/ui-test/p3.mjs", "tools/ui-test/p4.mjs", "tools/ui-test/p5.mjs", "tools/ui-test/p6.mjs", "tools/ui-test/p7.mjs", "tools/ui-test/p8.mjs", "tools/ui-test/p9.mjs"]:
+for tool in ["tools/serve.py", "tools/ui-test/p0.mjs", "tools/ui-test/p1.mjs", "tools/ui-test/p2.mjs", "tools/ui-test/p3.mjs", "tools/ui-test/p4.mjs", "tools/ui-test/p5.mjs", "tools/ui-test/p6.mjs", "tools/ui-test/p7.mjs", "tools/ui-test/p8.mjs", "tools/ui-test/p9.mjs", "tools/ui-test/p10.mjs"]:
     need(ROOT / tool, (ROOT / tool).exists(), f"缺失: {tool}")
 for fx in ["tools/fixtures/question-incline.png", "tools/fixtures/parse-incline.json",
            "tools/fixtures/question-momentum.png", "tools/fixtures/parse-momentum.json",
@@ -65,48 +65,19 @@ if mp:
 else:
     fails.append("index.html 缺少 importmap")
 
-# 3. JS 括号/反引号配对（粗糙但抓 EOF）
-def balance(path):
-    src = path.read_text(encoding="utf-8")
-    # 去行注释/块注释/字符串近似处理：粗扫计数即可（真语法错误靠浏览器 errbar 兜底）
-    stack = []
-    pairs = {")": "(", "]": "[", "}": "{"}
-    in_s = None; esc = False; in_line = False; in_block = False
-    i, n = 0, len(src)
-    while i < n:
-        c = src[i]
-        nxt = src[i+1] if i+1 < n else ""
-        if in_line:
-            if c == "\n": in_line = False
-        elif in_block:
-            if c == "*" and nxt == "/": in_block = False; i += 1
-        elif in_s:
-            if esc: esc = False
-            elif c == "\\": esc = True
-            elif c == in_s: in_s = None
-        else:
-            if c == "/" and nxt == "/": in_line = True; i += 1
-            elif c == "/" and nxt == "*": in_block = True; i += 1
-            elif c in "\"'`": in_s = c
-            elif c in "([{": stack.append(c)
-            elif c in ")]}":
-                if not stack or stack[-1] != pairs[c]:
-                    return f"{path.name}: 第{i}行 括号失配 {c}"
-                stack.pop()
-        i += 1
-    if stack: return f"{path.name}: 未闭合 {stack[-5:]}"
-    if in_s: return f"{path.name}: 字符串未闭合"
-    return None
-
+# 3. JS 语法检查：node --check 为权威（粗扫器在模板串内嵌引号上会误报，已弃用）
+import subprocess
 for js in ["src/legacy-main.js", "src/track-curve.js", "src/materials.js",
            "src/workbench.js", "src/engine/scene-doc.js", "src/engine/registry.js",
-           "src/engine/runtime.js", "src/engine/viewport.js", "src/engine/presets.js"]:
-    p = ROOT / js
-    if p.exists():
-        r = balance(p)
-        if r: fails.append(r)
-    else:
+           "src/engine/runtime.js", "src/engine/viewport.js", "src/engine/presets.js",
+           "src/engine/parse-schema.js", "src/engine/explain.js"]:
+    p2 = ROOT / js
+    if not p2.exists():
         fails.append(f"缺失: {js}")
+        continue
+    r = subprocess.run(["node", "--check", str(p2)], capture_output=True, text=True)
+    if r.returncode != 0:
+        fails.append(f"JS 语法错误 {js}: {r.stderr.strip()[:200]}")
 
 # 3b. 页面入口指向正确
 if "src/workbench.js" not in html:
