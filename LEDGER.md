@@ -60,11 +60,34 @@
 
 **是否改变已有物理行为**：否。legacy 场景原样保留在 `classic.html` + `src/legacy-main.js`（含 ?run=1 通道），管道线段投影约束未动。
 
-### 下一轮（Round 2 候选）
+### Round 2（10-03）P1 切片第一步：拍题解析→确认→建场 —— **PASS（13/13 + 真实 API 一次过）**
 
-1. 场景大纲重命名/显隐/锁定 + gizmo 缩放模式（几何参数联动）。
-2. 轨道场景迁移为可复用预置（track 组件化）或先做动量守恒预置（两个球对撞 + 动量/动能/碰撞时刻读数）。
-3. P1 起步：MECH API 升级为带 validation 的白名单操作集 + 题图上传 UI 壳 + step-5-preview 解析接口（服务端持 key）。
+**链路（真实 UI 全通）**：Agent 标签页上传题图（PIL 生成的固定测试题：30° 斜面 L=2m、球 1kg、光滑、g=10）→
+预览/重新上传 → POST `/api/parse-question`（serve.py 代理，**key 只在服务端**：env 或未跟踪 tools/server/step_key.txt，
+错误不透传上游、不写日志）→ step-5-preview 返回严格 JSON → parse-schema.js 零信任规范化（范围校验/类型映射/未知类型跳过）→
+评审表单（题型/置信度/重力/每实体参数可编辑，题给 vs 默认徽标，模型字符串一律 textContent 防注入）→
+用户修正（记录进 doc.meta.corrections）→ 确认后经 `window.MECH` 白名单建实体（setGravity/addComponent/setAgentMeta）→
+真实物理运行（光滑斜面滑动加速 v>14m/s）。
+
+**验证**：p1.mjs 13/13（含真实 API 经 UI 单次调用，badge=step-5-preview，16.1s）；p0 回归 19/19；服务端冒烟直接过；
+截图目检两张（评审表单、真实解析建场）。check.py 新增前端密钥泄漏扫描（key/端点/Bearer 在前端零出现）。
+
+**本轮修的坑**：
+1. createEntity 原来整对象覆盖 overrides.physics → partial 参数会丢默认 linvel 等，改键级合并。
+2. 模型把"不计摩擦"标在斜面（成对属性的正确位置）→ 球摩擦继承接触面，评审表单显示与建场逻辑一致。
+3. 建场后面板自动切回检查器标签，测试直接点 #btnParse 等可见性超时（UI 设计使然，测试先重开标签）。
+
+**Mock/fallback 声明**：fixture（tools/fixtures/parse-incline.json）入口常驻且明确标注"示例数据/非真实模型输出"，
+用于无 Key 验证链路；真实路径默认走 step-5-preview。
+
+**遗留**：解析只支持五类基础组件（斜面/球/方块/圆柱/地面）；评审表单不能增删实体行；Agent 尚不做运行后解释（链路最后一段）；
+无拍照（camera capture）入口，仅文件上传。
+
+### 下一轮（Round 3 候选）
+
+1. P1 收口：Agent 运行后解释（读遥测/守恒量 → 生成解释文本）+ 评审表单增删实体行，形成完整九步链路。
+2. P2 起步：动量守恒预置（两球一维对撞 + 碰撞前中后动量/动能/守恒误差读数，碰撞事件基建已有）。
+3. 教学叠加层起步：轨迹记录器 + 速度矢量箭头（开关式）。
 
 ## 设计定调（延续 Round 0）
 
