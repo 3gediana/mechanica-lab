@@ -265,6 +265,7 @@
       <option value="">预置场景</option>
       <option value="incline">斜面小球</option>
       <option value="momentum">动量守恒（一维对撞）</option>
+      <option value="celestial">天体运动（恒星+卫星）</option>
     </select>
     <button id="btnSave" title="下载场景 JSON">保存</button>
     <button id="btnOpen" title="打开场景 JSON">打开</button>
@@ -356,6 +357,7 @@
     <option value="1" selected>1.0x</option>
   </select>
   <button id="btnVectors" title="速度向量箭头（叠加层）">矢量</button>
+  <button id="btnTrails" title="轨迹线（叠加层）">轨迹</button>
   <button id="btnCons" title="守恒量读数">守恒</button>
   <span class="ro">t=<b id="roT">0.000</b>s</span>
   <span class="ro">步长 <b>1/120s</b></span>
@@ -365,7 +367,7 @@
 </footer>
 
 <div id="consbar">
-  <div class="cgrid">
+  <div class="cgrid" id="consMomentum">
     <div class="cell"><span class="k">总动量</span><span class="v" id="cbP">--</span></div>
     <div class="cell"><span class="k">总动能</span><span class="v" id="cbKE">--</span></div>
     <div class="cell"><span class="k">碰撞时刻</span><span class="v" id="cbT">--</span></div>
@@ -374,6 +376,16 @@
     <div class="cell"><span class="k">p 后</span><span class="v" id="cbPa">--</span></div>
     <div class="cell"><span class="k">KE 前</span><span class="v" id="cbKEb">--</span></div>
     <div class="cell"><span class="k">KE 后</span><span class="v" id="cbKEa">--</span></div>
+  </div>
+  <div class="cgrid" id="consAstro" style="display:none">
+    <div class="cell"><span class="k">机械能 E</span><span class="v" id="caE">--</span></div>
+    <div class="cell"><span class="k">E 漂移</span><span class="v acc" id="caEdrift">--</span></div>
+    <div class="cell"><span class="k">角动量 Lz</span><span class="v" id="caL">--</span></div>
+    <div class="cell"><span class="k">Lz 漂移</span><span class="v acc" id="caLdrift">--</span></div>
+    <div class="cell"><span class="k">周期 T</span><span class="v" id="caT">--</span></div>
+    <div class="cell"><span class="k">偏心率 e</span><span class="v" id="caEcc">--</span></div>
+    <div class="cell"><span class="k">轨道 rmin/rmax</span><span class="v" id="caR">--</span></div>
+    <div class="cell"><span class="k">运行时长</span><span class="v" id="caTime">--</span></div>
   </div>
 </div>
 

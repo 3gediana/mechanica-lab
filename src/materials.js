@@ -69,6 +69,11 @@ export async function createMaterials() {
     // 黄铜展台：抛光黄铜反射率 ≈0.8，roughness 0.28 呈缎面拉丝高光
     brass: new THREE.MeshPhysicalMaterial({ color: 0x9c7a3c, metalness: 1, roughness: 0.28, envMapIntensity: 1.1 }),
 
+    // 恒星（天体场景）：自发光为主，暗场里作为光源质感出现，不靠环境反射
+    sun: new THREE.MeshStandardMaterial({
+      color: 0xffc46b, emissive: 0xff9a2a, emissiveIntensity: 1.35, roughness: 1, metalness: 0,
+    }),
+
     // 土星本体：气态行星以漫射为主，roughness 0.95 消除镜面高光
     saturn: new THREE.MeshPhysicalMaterial({
       color: saturnC ? 0xffffff : 0xc9b38a, // 降级为云带米金色

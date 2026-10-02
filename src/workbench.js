@@ -264,6 +264,7 @@ function bindUI() {
     applyDoc(getPreset(e.target.value), '载入预置');
     $('sceneName').value = doc.name;
     if (e.target.value === 'momentum') { setVectors(true); setCons(true); }   // 教学默认开叠加层
+    if (e.target.value === 'celestial') { setTrails(true); setCons(true); }
     e.target.value = '';
   };
   $('btnSave').onclick = saveFile;
@@ -289,6 +290,7 @@ function bindUI() {
   $('btnReset').onclick = resetSim;
   $('selSpeed').onchange = (e) => { timeScale = parseFloat(e.target.value); };
   $('btnVectors').onclick = () => setVectors(!vectorsOn);
+  $('btnTrails').onclick = () => setTrails(!trailsOn);
   $('btnCons').onclick = () => setCons(!consOn);
 
   $('sceneName').onchange = (e) => { doc.name = e.target.value || '未命名场景'; e.target.value = doc.name; autosave(); };
@@ -598,8 +600,9 @@ function triRow(parent, label, unit, values, step, onCommit) {
   parent.appendChild(row);
 }
 
-// ============ 教学叠加层：速度向量 + 守恒量条 ============
+// ============ 教学叠加层：速度向量 + 轨迹线 + 守恒量条 ============
 let vectorsOn = false;
+let trailsOn = false;
 let consOn = false;
 
 function setVectors(on) {
@@ -607,14 +610,75 @@ function setVectors(on) {
   viewport.setVelocityArrows(on);
   $('btnVectors').classList.toggle('hot', on);
 }
+function setTrails(on) {
+  trailsOn = on;
+  runtime.setTrails(on);
+  viewport.setTrailsVisible(on);
+  $('btnTrails').classList.toggle('hot', on);
+}
 function setCons(on) {
   consOn = on;
   $('consbar').classList.toggle('on', on);
   $('btnCons').classList.toggle('hot', on);
 }
 
+// ---------- 天体守恒量（系统 E/Lz + 相对轨道几何） ----------
+let astroBase = null;   // 基准 {epoch, E, L}（rebuild 换代即重取）
+
+function astroInfo() {
+  const G = doc.G || 6.674e-11;
+  const bodies = runtime.getGravState().map((g) => {
+    const e = getEntity(doc, g.id);
+    return { id: g.id, m: g.m, pos: g.pos, vel: g.vel, name: e ? e.name : g.id };
+  });
+  if (bodies.length < 2) return null;
+  let KE = 0, Lz = 0;
+  for (const b of bodies) {
+    KE += 0.5 * b.m * (b.vel[0] ** 2 + b.vel[1] ** 2 + b.vel[2] ** 2);
+    Lz += b.m * (b.pos[0] * b.vel[2] - b.pos[2] * b.vel[0]);
+  }
+  let PE = 0;
+  for (let i = 0; i < bodies.length; i++) {
+    for (let j = i + 1; j < bodies.length; j++) {
+      const a = bodies[i], c = bodies[j];
+      const r = Math.hypot(a.pos[0] - c.pos[0], a.pos[1] - c.pos[1], a.pos[2] - c.pos[2]);
+      if (r > 1e-9) PE -= G * a.m * c.m / r;
+    }
+  }
+  const E = KE + PE;
+  // 轨道几何：质量最小者绕质量最大者（相对轨迹）
+  const sat = bodies.reduce((a, b) => (b.m < a.m ? b : a), bodies[0]);
+  const cen = bodies.reduce((a, b) => (b.m > a.m ? b : a), bodies[0]);
+  const pts = runtime.trails.get(sat.id);
+  const cpt = runtime.trails.get(cen.id);
+  let ecc = null, period = null, rmin = null, rmax = null;
+  if (pts && cpt && pts.length === cpt.length && pts.length > 10) {
+    const rel = pts.map((p, k) => [p[0] - cpt[k][0], p[1] - cpt[k][1], p[2] - cpt[k][2]]);
+    const rs = rel.map((d) => Math.hypot(d[0], d[1], d[2]));
+    rmin = Math.min(...rs);
+    rmax = Math.max(...rs);
+    if (rmin > 1e-6) ecc = (rmax - rmin) / (rmax + rmin);
+    // 周期：相对方位角每绕完一圈发生 ±π 跳变（顺/逆时针都检测），相邻两次跳变的时间差即周期
+    const jumps = [];
+    for (let k = 1; k < rel.length; k++) {
+      const a0 = Math.atan2(rel[k - 1][2], rel[k - 1][0]);
+      const a1 = Math.atan2(rel[k][2], rel[k][0]);
+      if (Math.abs(a1 - a0) > Math.PI) jumps.push(k);
+    }
+    if (jumps.length >= 2 && jumps[jumps.length - 1] > jumps[0]) {
+      // 首尾跳变差 / 间隔数 = 单圈周期（跳变每圈一次）
+      period = (jumps[jumps.length - 1] - jumps[0]) / (jumps.length - 1) * 2 * FIXED_H;   // 每 trail 点 = 2 步
+    }
+  }
+  return { G, E, KE, PE, Lz, bodies: bodies.length, ecc, period, rmin, rmax };
+}
+
 function updateConsbar() {
   if (!consOn) return;
+  const astro = doc.entities.some((e) => e.physics.gravitating);
+  $('consMomentum').style.display = astro ? 'none' : 'grid';
+  $('consAstro').style.display = astro ? 'grid' : 'none';
+  if (astro) { updateAstroCons(); return; }
   const live = runtime.systemTotals();
   $('cbP').textContent = `${live.p[0].toFixed(3)} N·s`;
   $('cbKE').textContent = `${live.ke.toFixed(3)} J`;
@@ -634,6 +698,24 @@ function updateConsbar() {
   $('cbPa').textContent = `${pA.toFixed(3)} N·s`;
   $('cbKEb').textContent = `${rep.keBefore.toFixed(3)} J`;
   $('cbKEa').textContent = `${rep.keAfter.toFixed(3)} J`;
+}
+
+function updateAstroCons() {
+  const a = astroInfo();
+  if (!a) return;
+  if (!astroBase || astroBase.epoch !== runtime.epoch) astroBase = { epoch: runtime.epoch, E: a.E, L: a.Lz };
+  const dE = Math.abs(a.E - astroBase.E) / Math.max(Math.abs(astroBase.E), 1e-12) * 100;
+  const dL = Math.abs(a.Lz - astroBase.L) / Math.max(Math.abs(astroBase.L), 1e-12) * 100;
+  $('caE').textContent = `${a.E.toFixed(3)} J`;
+  $('caEdrift').textContent = `${dE.toFixed(3)}%`;
+  $('caEdrift').style.color = dE < 2 ? 'var(--accent)' : 'var(--danger)';
+  $('caL').textContent = `${a.Lz.toFixed(3)} kg·m²/s`;
+  $('caLdrift').textContent = `${dL.toFixed(3)}%`;
+  $('caLdrift').style.color = dL < 2 ? 'var(--accent)' : 'var(--danger)';
+  $('caEcc').textContent = a.ecc != null ? a.ecc.toFixed(3) : '--';
+  $('caT').textContent = a.period != null ? `${a.period.toFixed(2)} s` : '采样中';
+  $('caR').textContent = a.rmin != null ? `${a.rmin.toFixed(2)} / ${a.rmax.toFixed(2)} m` : '--';
+  $('caTime').textContent = `t=${runtime.simT.toFixed(1)}s`;
 }
 
 // ============ 底栏读数 + 检查器实时区 ============
@@ -685,6 +767,7 @@ function tick() {
     }
     viewport.updateVelocityArrows(items);
   }
+  if (trailsOn) viewport.updateTrails(runtime.trails);
   viewport.render();
   roTimer += rawDt;
   if (roTimer > 0.15) { roTimer = 0; updateReadouts(); updateConsbar(); }
@@ -1154,6 +1237,19 @@ window.MECH = {
     })),
   }),
   vectorState: () => ({ on: vectorsOn, ...viewport.arrowStats() }),
+  trailState: () => ({ on: trailsOn, lines: viewport.trailStats(), points: [...runtime.trails.values()].map((a) => a.length) }),
+  trailsDump: () => [...runtime.trails.entries()].map(([id, pts]) => ({ id, pts: pts.map((p) => [...p]) })),
+  astroState: () => {
+    const a = astroInfo();
+    if (!a) return null;
+    if (!astroBase || astroBase.epoch !== runtime.epoch) astroBase = { epoch: runtime.epoch, E: a.E, L: a.Lz };
+    return {
+      G: a.G, E: a.E, KE: a.KE, PE: a.PE, Lz: a.Lz,
+      driftE: Math.abs(a.E - astroBase.E) / Math.max(Math.abs(astroBase.E), 1e-12) * 100,
+      driftL: Math.abs(a.Lz - astroBase.L) / Math.max(Math.abs(astroBase.L), 1e-12) * 100,
+      ecc: a.ecc, period: a.period, rmin: a.rmin, rmax: a.rmax, simT: runtime.simT,
+    };
+  },
   // 物理自检：UI 同路径构造斜面场景，同步步进 5s，验证真实演化（非预录）
   selftest() {
     const prev = cloneDoc(doc);

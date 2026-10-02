@@ -15,6 +15,7 @@ export function createEmptyDoc(name = '未命名场景') {
     version: SCENE_VERSION,
     name,
     gravity: -9.81,
+    G: 6.674e-11,            // 引力常数（天体场景按教学尺度覆写，如 G=1）
     entities: [],
     meta: {
       source: 'user',          // user | agent | preset

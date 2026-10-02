@@ -35,7 +35,7 @@ for js in [
     need(ROOT / js, (ROOT / js).exists(), f"缺失: {js}")
 for page in ["index.html", "classic.html"]:
     need(ROOT / page, (ROOT / page).exists(), f"缺失: {page}")
-for tool in ["tools/serve.py", "tools/ui-test/p0.mjs", "tools/ui-test/p1.mjs", "tools/ui-test/p2.mjs"]:
+for tool in ["tools/serve.py", "tools/ui-test/p0.mjs", "tools/ui-test/p1.mjs", "tools/ui-test/p2.mjs", "tools/ui-test/p3.mjs"]:
     need(ROOT / tool, (ROOT / tool).exists(), f"缺失: {tool}")
 for fx in ["tools/fixtures/question-incline.png", "tools/fixtures/parse-incline.json"]:
     need(ROOT / fx, (ROOT / fx).exists(), f"缺失: {fx}")

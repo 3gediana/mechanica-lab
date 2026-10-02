@@ -97,6 +97,40 @@ export const PRESETS = {
       return doc;
     },
   },
+
+  celestial: {
+    id: 'celestial', label: '天体运动（恒星+卫星）',
+    build() {
+      const doc = createEmptyDoc('天体运动：近圆轨道');
+      doc.G = 1;                                 // 场景引力常数（教学缩放；动力学与真实引力同构）
+      const seq = {};
+      // 中心恒星 m=100 静止；卫星 m=1 在 r=4 处以圆轨道速度 v=√(GM/r)=5 m/s 入轨（xz 平面）
+      const star = createEntity('celestial', {
+        name: '中心恒星',
+        transform: { pos: [0, 0, 0], rot: [0, 0, 0] },
+        params: { radius: 0.6 },
+        physics: { mass: 100, linvel: [0, 0, 0] },
+        render: { material: 'sun' },
+        source: 'preset',
+      }, seq);
+      const sat = createEntity('celestial', {
+        name: '卫星',
+        transform: { pos: [4, 0, 0], rot: [0, 0, 0] },
+        params: { radius: 0.15 },
+        physics: { mass: 1, linvel: [0, 0, -5] },
+        render: { material: 'saturn' },
+        measured: true,
+        source: 'preset',
+      }, seq);
+      doc.entities.push(star, sat);
+      doc.meta.assumptions = [
+        '两体引力 F=G·m1·m2/r² 逐步施加（Rapier 数值积分，固定步长 1/120s）',
+        '场景引力常数 G=1（教学缩放）；轨道半径 4 m，圆轨道速度 √(GM/r)=5 m/s',
+        '天体不受世界重力（gravityScale=0）；渲染尺寸与引力质量分离',
+      ];
+      return doc;
+    },
+  },
 };
 
 export function getPreset(id) {

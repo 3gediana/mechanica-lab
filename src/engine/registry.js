@@ -11,6 +11,8 @@ export const MATERIAL_OPTIONS = [
   { key: 'steelDark', label: '暗钢' },
   { key: 'rubber', label: '橡胶' },
   { key: 'brass', label: '黄铜' },
+  { key: 'sun', label: '恒星' },
+  { key: 'saturn', label: '土星' },
 ];
 
 export const BODY_OPTIONS = [
@@ -127,6 +129,27 @@ export const COMPONENTS = {
     buildGeometry: (p) => new THREE.BoxGeometry(p.sx, p.sy, p.sz),
     buildCollider: (RAPIER, p) => RAPIER.ColliderDesc.cuboid(p.sx / 2, p.sy / 2, p.sz / 2),
     spawnY: (p) => p.sy / 2,
+  },
+
+  celestial: {
+    id: 'celestial', label: '天体', category: '天体',
+    desc: '参与成对引力作用的球状天体（不受世界重力，physics.gravitating）',
+    // 渲染半径与引力质量分离：radius 只是视觉/碰撞尺寸，mass 才是引力质量（物理实体与视觉实体分离）
+    defaults: {
+      params: { radius: 0.5 },
+      physics: {
+        body: 'dynamic', mass: 100, friction: 0, restitution: 0.5,
+        linvel: [0, 0, 0], angvel: [0, 0, 0],
+        linDamping: 0, angDamping: 0, gravityScale: 0, gravitating: true,
+      },
+      render: { material: 'sun' },
+    },
+    schema: [
+      { key: 'radius', label: '半径', unit: 'm', min: 0.05, max: 4, step: 0.05 },
+    ],
+    buildGeometry: (p) => new THREE.SphereGeometry(p.radius, 48, 32),
+    buildCollider: (RAPIER, p) => RAPIER.ColliderDesc.ball(p.radius),
+    spawnY: (p) => p.radius,
   },
 };
 

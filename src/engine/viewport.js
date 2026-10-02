@@ -19,6 +19,47 @@ export class Viewport {
     this.snap = false;
     this.arrowsOn = false;
     this._arrows = [];
+    this.trailsVisible = false;
+    this._trailLines = [];
+  }
+
+  // ============ 轨迹线叠加层 ============
+  setTrailsVisible(on) {
+    this.trailsVisible = on;
+    for (const line of this._trailLines) line.visible = on && line.geometry.drawRange.count >= 4;
+  }
+
+  // trails: Map<id, [[x,y,z],...]>（runtime.trails），每实体一条线，颜色按序固定
+  updateTrails(trails) {
+    if (!this.trailsVisible) return;
+    const PALETTE = [0xd9a441, 0x7ba7d9, 0x93c47d, 0xc27ba0, 0xd98a6f];
+    let i = 0;
+    for (const pts of trails.values()) {
+      let line = this._trailLines[i];
+      if (!line) {
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(1800 * 3), 3));
+        geo.setDrawRange(0, 0);
+        const mat = new THREE.LineBasicMaterial({ color: PALETTE[i % PALETTE.length], transparent: true, opacity: 0.75 });
+        line = new THREE.Line(geo, mat);
+        line.frustumCulled = false;
+        line.visible = false;
+        this.scene.add(line);
+        this._trailLines.push(line);
+      }
+      const attr = line.geometry.attributes.position;
+      const n = Math.min(pts.length, 1800);
+      for (let k = 0; k < n; k++) attr.setXYZ(k, pts[k][0], pts[k][1], pts[k][2]);
+      attr.needsUpdate = true;
+      line.geometry.setDrawRange(0, n);
+      line.visible = n >= 2;
+      i++;
+    }
+    for (; i < this._trailLines.length; i++) this._trailLines[i].visible = false;
+  }
+
+  trailStats() {
+    return this._trailLines.map((l) => l.geometry.drawRange.count).filter((c) => c >= 2).length;
   }
 
   // ============ 速度向量叠加层（教学观察层） ============
