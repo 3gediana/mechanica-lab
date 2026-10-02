@@ -313,6 +313,8 @@
 
 <aside id="left">
   <div class="panel-title">组件目录</div>
+  <input id="catalogSearch" placeholder="搜索组件…" spellcheck="false"
+    style="margin:8px 10px 4px;width:calc(100% - 20px);background:rgba(255,255,255,.04);border:1px solid var(--line);color:var(--text);font-size:11px;padding:5px 8px;border-radius:2px">
   <div id="catalogList"></div>
   <div class="panel-title">场景对象</div>
   <div id="outline"></div>
@@ -328,6 +330,10 @@
     <div id="inspBody" style="display:none"></div>
   </div>
   <div id="agentWrap" style="display:none">
+    <div class="grp">
+      <div class="grp-h">当前任务 <span id="taskStage" class="badge" style="margin-left:auto"></span></div>
+      <div id="taskText" class="hint" style="margin-top:0">未开始：上传/拍照题目图片，或用下方示例数据</div>
+    </div>
     <div class="grp">
       <div class="grp-h">题目图片</div>
       <div id="dropZone">点击上传题目图片</div>

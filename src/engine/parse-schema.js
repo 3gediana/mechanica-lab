@@ -61,6 +61,15 @@ export function normalizeParse(raw) {
     gravity: num(raw.gravity, [0, 50]),
     G: num(raw.G, [1e-14, 1e6]),            // 场景引力常数（天体题给；null=保持 doc 现值）
     kind: str(raw.kind, ''),                  // rotation = 角动量/转台类（需要自动 joint 布局）
+    attaches: Array.isArray(raw.attaches) ? raw.attaches.map((a) => ({
+      type: a.type === 'rope' ? 'rope' : 'spring',
+      from: Math.max(0, Number(a.from) | 0),
+      to: Math.max(0, Number(a.to) | 0),
+      length: num(a.length, [0.05, 20]),
+      stiffness: num(a.stiffness, [0.5, 5000]),
+      restLength: num(a.restLength, [0.1, 10]),
+      damping: num(a.damping, [0, 50]),
+    })).filter((a) => a.from !== a.to).slice(0, 4) : [],
     joint: raw.joint && typeof raw.joint === 'object' ? {
       type: 'prismatic',
       from: Math.max(0, Number(raw.joint.from) | 0),
@@ -83,6 +92,35 @@ export function normalizeParse(raw) {
 function str(v, d) { return typeof v === 'string' && v.trim() ? v.trim().slice(0, 80) : d; }
 function strs(v) { return Array.isArray(v) ? v.filter((x) => typeof x === 'string').map((s) => s.slice(0, 120)).slice(0, 8) : []; }
 function clamp01(v) { const n = Number(v); return Number.isFinite(n) ? Math.min(Math.max(n, 0), 1) : null; }
+
+// ---------- 弹簧振子布局：立柱墙 + 水平理想化小球（拉开 rest+0.4 静止释放，简谐振动） ----------
+function springLayout(plan) {
+  const out = [];
+  const sphere = plan.entities.find((e) => e.type === 'sphere');
+  const m = sphere ? (sphere.given.mass ?? 1) : 1;
+  const k = (plan.attaches.find((a) => a.type === 'spring') || {}).stiffness ?? 20;
+  const rest = (plan.attaches.find((a) => a.type === 'spring') || {}).restLength ?? 0.8;
+  const stretch = 0.4;                                       // 初始拉伸（静止释放 → 简谐振动）
+  out.push({
+    type: 'box', name: '立柱墙', source: 'agent',
+    params: { sx: 0.3, sy: 1.2, sz: 1.2 },
+    transform: { pos: [-2.0, 0.6, 0], rot: [0, 0, 0] },
+    physics: { body: 'fixed', friction: 0.8 },
+    render: { material: 'steelDark' },
+  });
+  out.push({
+    type: 'sphere', name: sphere ? sphere.name || '振子小球' : '振子小球', source: 'agent',
+    params: { radius: 0.15 },
+    physics: {
+      body: 'dynamic', mass: m, friction: 0, restitution: 0.1,
+      linvel: [0, 0, 0], angvel: [0, 0, 0],
+      linDamping: 0, angDamping: 0, gravityScale: 0,
+    },
+    render: { material: 'chrome' },
+    measured: true,
+  });
+  return out;
+}
 
 // ---------- 角动量（转台+径向滑块）布局：自动 prismatic joint ----------
 // 第一个 cylinder = 转台（自动 4 辐条、ω0 默认 3 rad/s），第一个 box = 滑块（初始 r=0.7、切向速度匹配）。
@@ -129,6 +167,8 @@ function rotationLayout(plan) {
 // 故给 angleDeg 时做换算 base = L·cosθ, height = L·sinθ（球心实际可滑全程 ≠ 全长，解释层处理）。
 export function planToOverrides(plan) {
   if (plan.kind === 'rotation') return rotationLayout(plan);
+  const hasSpringAttach = (plan.attaches || []).some((a) => a.type === 'spring');
+  if (hasSpringAttach || plan.kind === 'spring') return springLayout(plan);
   const ramp = plan.entities.find((e) => e.type === 'ramp');
   let rampGeom = null;
   if (ramp) {

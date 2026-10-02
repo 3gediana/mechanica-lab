@@ -42,7 +42,8 @@ export class Runtime {
     this.world.timestep = FIXED_H;
     this.world.numSolverIterations = 8;
     this.eventQueue = new this.RAPIER.EventQueue(true);
-    for (const e of doc.entities) this._createEntity(e);
+    for (const e of doc.entities) if (!this._reg.getComponent(e.type).isLink) this._createEntity(e);
+    for (const e of doc.entities) if (this._reg.getComponent(e.type).isLink) this._createEntity(e);
     this._createJoints(doc);
     this._collectGravitating();
     this._collectTrackBalls(doc);
@@ -84,6 +85,20 @@ export class Runtime {
     this.scene.add(mesh);
 
     const bind = { entity: e, mesh, body: null, collider: null, geometry };
+    // 连接类（绳/弹簧）：attach 两个实体，建 rope/spring 关节；网格由 _syncLinks 每帧拉伸
+    if (c.isLink && Array.isArray(e.attach) && e.attach.length === 2) {
+      const bodyA = this.binds.get(e.attach[0]), bodyB = this.binds.get(e.attach[1]);
+      if (bodyA && bodyA.body && bodyB && bodyB.body) {
+        const v = (a) => new RAPIER.Vector3(a[0], a[1], a[2]);
+        let jd = null;
+        if (e.type === 'rope') jd = RAPIER.JointData.rope(e.params.length, v([0, 0, 0]), v([0, 0, 0]));
+        else if (e.type === 'spring') jd = RAPIER.JointData.spring(e.params.restLength, e.params.stiffness, e.params.damping || 0, v([0, 0, 0]), v([0, 0, 0]));
+        if (jd) this.world.createImpulseJoint(jd, bodyA.body, bodyB.body, true);
+      }
+      bind.isLink = true;
+      this.binds.set(e.id, bind);
+      return;
+    }
     // gravitating 天体走自写 velocity-Verlet n 体积分（辛积分器，能量长期有界），不建 Rapier 刚体：
     // 天体间纯引力作用，无需碰撞体；渲染网格仍归 three（物理与视觉分离）。
     if (e.physics.body !== 'none' && !e.physics.gravitating) {
@@ -401,12 +416,29 @@ export class Runtime {
     return null;
   }
 
+  _syncLinks() {
+    for (const b of this.binds.values()) {
+      if (!b.isLink || !Array.isArray(b.entity.attach) || b.entity.attach.length !== 2) continue;
+      const a = this.binds.get(b.entity.attach[0]), c = this.binds.get(b.entity.attach[1]);
+      if (!a || !c) continue;
+      const pa = a.mesh.position, pc = c.mesh.position;
+      const dir = new THREE.Vector3().subVectors(pc, pa);
+      const len = dir.length();
+      if (len < 1e-6) continue;
+      b.mesh.position.copy(pa).addScaledVector(dir, 0.5);
+      b.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+      b.mesh.scale.set(1, len, 1);
+    }
+  }
+
   _syncMeshes() {
     for (const b of this.binds.values()) {
+      if (b.isLink) continue;
       if (!b.body || b.entity.physics.body === 'fixed') continue;
       b.mesh.position.copy(b.body.translation());
       b.mesh.quaternion.copy(b.body.rotation());
     }
+    this._syncLinks();
   }
 
   // ============ 轨迹采样（解释器/未来教学叠加层用） ============

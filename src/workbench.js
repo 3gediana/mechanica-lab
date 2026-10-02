@@ -167,6 +167,41 @@ function updateOutlineSelection() {
 // ============ 实体操作（UI 与 Agent 共用） ============
 function opAddComponent(typeId, overrides = {}) {
   const c = registry.getComponent(typeId);
+  // 连接类（绳/弹簧）：需选中两个实体，自动按当前距离定长
+  if (c.isLink) {
+    let attach = overrides.attach || null;
+    let e;
+    if (attach) {
+      // 解析/Agent 路径：attach 已给（真实 id）
+      const ea = getEntity(doc, attach[0]), eb = getEntity(doc, attach[1]);
+      if (!ea || !eb) { toast('连接目标不存在'); return null; }
+      const pa = ea.transform.pos, pb = eb.transform.pos;
+      const len = Math.hypot(pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]);
+      e = registry.createEntity(typeId, {
+        name: `${c.label} ${len.toFixed(2)}m`,
+        params: { length: +len.toFixed(3), restLength: +len.toFixed(3), ...overrides.params },
+        attach, source: overrides.source || 'user',
+      });
+    } else {
+      if (selectedIds.length !== 2) { toast('先选中两个实体，再添加' + c.label); return null; }
+      const [ida, idb] = selectedIds;
+      const ea = getEntity(doc, ida), eb = getEntity(doc, idb);
+      if (!ea || !eb) return null;
+      const pa = ea.transform.pos, pb = eb.transform.pos;
+      const len = Math.hypot(pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]);
+      e = registry.createEntity(typeId, {
+        name: `${c.label} ${len.toFixed(2)}m`,
+        params: { length: +len.toFixed(3), restLength: +len.toFixed(3) },
+        attach: [ida, idb],
+      });
+    }
+    addEntity(doc, e);
+    rebuildAll();
+    commitChange('添加 ' + c.label);
+    selectEntity(e.id);
+    noteRecentUse(typeId);
+    return e.id;
+  }
   const n = doc.entities.length;
   const base = { transform: { pos: [((n % 3) - 1) * 0.8, c.spawnY(c.defaults.params) + 0.05, ((Math.floor(n / 3) % 3) - 1) * 0.8] } };
   const e = registry.createEntity(typeId, { ...base, ...overrides });
@@ -174,8 +209,26 @@ function opAddComponent(typeId, overrides = {}) {
   rebuildAll();
   commitChange('添加 ' + c.label);
   selectEntity(e.id);
+  noteRecentUse(typeId);
   return e.id;
 }
+
+// 最近使用（localStorage，cap 5）
+const RECENT_KEY = 'mechanica.recent.components';
+function noteRecentUse(typeId) {
+  try {
+    let list = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]').filter((x) => x !== typeId);
+    list.unshift(typeId);
+    localStorage.setItem(RECENT_KEY, JSON.stringify(list.slice(0, 5)));
+    renderCatalog();
+    $('catalogSearch').value = catalogFilter;   // renderCatalog 后恢复搜索词
+  } catch { /* 隐私模式静默 */ }
+}
+function recentComponents() {
+  try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]').filter((x) => { try { registry.getComponent(x); return true; } catch { return false; } }); }
+  catch { return []; }
+}
+let catalogFilter = '';
 function opUpdateEntity(id, patch, label, { rebuild = true, rerender = true } = {}) {
   const e = getEntity(doc, id);
   if (!e) return false;
@@ -351,6 +404,14 @@ function bindUI() {
 
   $('sceneName').onchange = (e) => { doc.name = e.target.value || '未命名场景'; e.target.value = doc.name; autosave(); };
 
+  $('catalogSearch').oninput = (e) => {
+    catalogFilter = e.target.value;
+    const pos = e.target.selectionStart;
+    renderCatalog();
+    const inp = $('catalogSearch');
+    inp.value = catalogFilter;
+    inp.setSelectionRange(pos, pos);
+  };
   $('tabInspector').onclick = () => selectTab('inspector');
   $('tabAgent').onclick = () => selectTab('agent');
   bindAgentPanel();
@@ -397,9 +458,50 @@ function onKey(e) {
 }
 
 // ============ 左侧目录 / 大纲 ============
+function addCatalogRow(box, c) {
+  const row = document.createElement('div');
+  row.className = 'comp-item';
+  row.innerHTML = `<span class="nm"></span><span class="plus">+</span>`;
+  row.querySelector('.nm').textContent = c.label;
+  row.title = c.desc;
+  row.onclick = () => opAddComponent(c.id);
+  box.appendChild(row);
+}
+
 function renderCatalog() {
   const box = $('catalogList');
   box.innerHTML = '';
+  const q = catalogFilter.trim().toLowerCase();
+  if (q) {
+    const h = document.createElement('div');
+    h.className = 'cat-head';
+    h.textContent = '搜索结果';
+    box.appendChild(h);
+    let hit = 0;
+    for (const cat of registry.catalog()) {
+      for (const c of cat.items) {
+        if (c.label.toLowerCase().includes(q) || c.desc.toLowerCase().includes(q)) {
+          addCatalogRow(box, c);
+          hit++;
+        }
+      }
+    }
+    if (!hit) {
+      const none = document.createElement('div');
+      none.className = 'ol-empty';
+      none.textContent = '无匹配组件';
+      box.appendChild(none);
+    }
+    return;
+  }
+  const recent = recentComponents();
+  if (recent.length) {
+    const h = document.createElement('div');
+    h.className = 'cat-head';
+    h.textContent = '最近使用';
+    box.appendChild(h);
+    for (const typeId of recent) addCatalogRow(box, registry.getComponent(typeId));
+  }
   for (const cat of registry.catalog()) {
     const h = document.createElement('div');
     h.className = 'cat-head';
@@ -1150,6 +1252,17 @@ function bindAgentPanel() {
   $('btnClearParse').onclick = () => { resetAgentPanel(); };
   $('btnRunExplain').onclick = () => runAndExplain();
   bindCropEvents();
+  setAgentStage('idle', '未开始：上传/拍照题目图片，或用下方示例数据');
+}
+
+// ============ Agent 面板当前任务（阶段徽标状态机） ============
+function setAgentStage(stage, text) {
+  const STAGES = { idle: '未开始', uploaded: '图片就绪', parsing: '解析中', parsed: '待确认', building: '建场中', built: '已建场', explaining: '运行解释中', explained: '已解释', error: '出错' };
+  const el = $('taskStage'), tx = $('taskText');
+  if (!el) return;
+  el.textContent = STAGES[stage] || stage;
+  el.className = 'badge' + (stage === 'explained' ? ' given' : (stage === 'built' ? ' given' : (stage === 'error' ? '' : (stage === 'parsing' ? ' given' : ''))));
+  if (text) tx.textContent = text;
 }
 
 // ============ 拍照（getUserMedia → canvas 采帧） ============
@@ -1185,6 +1298,7 @@ function captureFrame() {
   cv.height = Math.round(video.videoHeight * k);
   cv.getContext('2d').drawImage(video, 0, 0, cv.width, cv.height);
   setAgentImageFromCanvas(cv, '已捕获相机帧');
+  setAgentStage('uploaded', '已拍照，可框选区域后解析');
 }
 
 // ============ 题目图片状态（原图 canvas + 归一化选区） ============
@@ -1218,6 +1332,7 @@ function readQuestionImage(file) {
       cv.height = Math.round(img.height * k);
       cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
       setAgentImageFromCanvas(cv, `已上传 ${img.width}x${img.height}`);
+      setAgentStage('uploaded', '图片已上传，可框选区域后解析');
     };
     img.onerror = () => setParseStatus('图片读取失败，请换一张', true);
     img.src = String(r.result);
@@ -1303,6 +1418,7 @@ async function parseQuestion() {
   const send = croppedCanvas();
   const dataUrl = send ? send.toDataURL('image/jpeg', 0.85) : agentImageDataUrl;
   const tag = agentCrop ? `（仅选区 ${send.width}x${send.height}）` : '';
+  setAgentStage('parsing', '正在解析题目…');
   setParseStatus(`正在解析${tag}（step-5-preview 视觉模型）…`, false, true);
   try {
     const resp = await fetch('/api/parse-question', {
@@ -1311,12 +1427,13 @@ async function parseQuestion() {
       body: JSON.stringify({ image: dataUrl }),
     });
     const out = await resp.json();
-    if (!out.ok) { setParseStatus('解析失败：' + out.error + '（可重试，或用下方示例数据）', true); return; }
+    if (!out.ok) { setAgentStage('error', '解析失败'); setParseStatus('解析失败：' + out.error + '（可重试，或用下方示例数据）', true); return; }
     const n = normalizeParse(out.parse);
     if (!n.ok) { setParseStatus('解析结果无效：' + n.errors.join('; '), true); return; }
     agentPlan = n.plan;
     agentCorrections = [];
     renderParseResult(n.errors);
+    setAgentStage('parsed', '解析完成，检查/修正后创建实体');
     setParseStatus('解析完成。请检查/修正下方各项后再创建实体');
   } catch (e) {
     setParseStatus('解析请求失败（网络或服务不可用）。可重试，或用下方示例数据', true);
@@ -1334,6 +1451,7 @@ async function loadFixtureData(name) {
     agentPlan = n.plan;
     agentCorrections = [];
     renderParseResult(n.errors);
+    setAgentStage('parsed', `示例解析「${n.plan.questionType}」已载入，检查/修正后创建实体`);
     setParseStatus(`已载入本地示例解析数据「${n.plan.questionType}」（fixture，非真实模型输出）`);
     return n.plan;
   } catch (e) {
@@ -1502,6 +1620,7 @@ function applyAgentPlan() {
   const overrides = planToOverrides(agentPlan);
   const created = [];
   for (const o of overrides) created.push(M.addComponent(o.type, o));
+  setAgentStage('building', '按解析计划创建实体…');
   // rotation 类：plan.joint 的 from/to 为实体索引，建场后映射为真实 id 建滑槽约束
   if (agentPlan.kind === 'rotation' && agentPlan.joint) {
     const fromId = created[agentPlan.joint.from], toId = created[agentPlan.joint.to];
@@ -1528,7 +1647,21 @@ function applyAgentPlan() {
       at: new Date().toISOString(),
     },
   });
+  // 连接类（绳/弹簧）：plan.attaches 的 from/to 索引 → 真实 id
+  for (const at of (agentPlan.attaches || [])) {
+    const fromId = created[at.from], toId = created[at.to];
+    if (!fromId || !toId) continue;
+    const ea = getEntity(doc, fromId), eb = getEntity(doc, toId);
+    if (!ea || !eb) continue;
+    const pa = ea.transform.pos, pb = eb.transform.pos;
+    const dist = Math.hypot(pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]);
+    const params = at.type === 'rope'
+      ? { length: at.length ?? +dist.toFixed(3) }
+      : { stiffness: at.stiffness ?? 20, restLength: at.restLength ?? +dist.toFixed(3), damping: at.damping ?? 0.5 };
+    created.push(M.addComponent(at.type, { name: (at.type === 'rope' ? '绳 ' : '弹簧 ') + dist.toFixed(2) + 'm', params, attach: [fromId, toId], source: 'agent' }));
+  }
   toast(`已按解析创建 ${created.length} 个实体${agentPlan.fixture ? '（示例数据）' : ''}`);
+  setAgentStage('built', `已建场 ${created.length} 实体，可运行并生成解释`);
   // 建场成功即开放"运行并生成解释"（解释体在运行后填充）
   $('explainGrp').style.display = 'block';
   selectTab('inspector');
@@ -1549,6 +1682,7 @@ function resetAgentPanel() {
   $('parseStatusGrp').style.display = 'none';
   $('parseResultGrp').style.display = 'none';
   $('explainGrp').style.display = 'none';
+  setAgentStage('idle', '未开始：上传/拍照题目图片，或用下方示例数据');
 }
 
 // ============ 运行后解释（确定性物理计算，非模型生成） ============
@@ -1564,14 +1698,16 @@ async function runAndExplain() {
   const hasRamp = doc.entities.some((e) => e.type === 'ramp');
   const isAstro = doc.entities.some((e) => e.physics.gravitating);
   const isRotation = doc.kind === 'rotation';
+  const isSpring = doc.entities.some((e) => e.type === 'spring');
   if (mode !== 'edit') resetSim();
 
+  setAgentStage('explaining', '运行并记录数据中…');
   explainBusy = true;
   const btn = $('btnRunExplain');
   btn.disabled = true;
   btn.textContent = '运行并记录中…';
-  const isMomentum = !hasRamp && !isAstro && !isRotation;
-  const needT = isAstro ? 11 : (isRotation ? 3.5 : 4);              // 天体需跑满两圈（两个方位角跳变才可测周期，T≈5s）
+  const isMomentum = !hasRamp && !isAstro && !isRotation && !isSpring;
+  const needT = isSpring ? 6.5 : (isAstro ? 11 : (isRotation ? 3.5 : 4));   // 弹簧 6.5s ≥ 3 个周期（T≈1.72s）
   const u0 = ball.physics.linvel[0];
   // 运行前预采守恒基准（初始态），避免首采落在演化中
   if (isRotation) rotationWithDrift();
@@ -1603,6 +1739,7 @@ async function runAndExplain() {
   agentExplain = explainRun(agentPlan, doc, series, runtime.collisionReports,
     isAstro ? astroWithDrift() : null, isRotation ? rotationWithDrift() : null);
   renderExplanation();
+  setAgentStage(agentExplain && agentExplain.supported ? 'explained' : 'built', agentExplain && agentExplain.supported ? '解释已生成' : '暂无该题型解释器');
   btn.disabled = false;
   btn.textContent = '重新运行解释';
   explainBusy = false;
@@ -1633,6 +1770,30 @@ function renderAstroExplain(r, box) {
 }
 function a_of(r) {
   return (r.measured.rmin + r.measured.rmax) / 2;
+}
+
+function renderSpringExplain(r, box) {
+  const grid = document.createElement('div');
+  grid.className = 'ro-grid';
+  const rows = [
+    ['劲度系数 k', `${r.theoretical.k} N/m`],
+    ['振子质量 m', `${r.theoretical.m} kg`],
+    ['周期（理论 2π√(m/k)）', `${r.theoretical.period.toFixed(3)} s`],
+    ['周期（实测·峰值间隔法）', r.measured.period != null ? `${r.measured.period.toFixed(3)} s` : '采样中'],
+    ['周期偏差', r.errPct != null ? `${r.errPct.toFixed(2)}%` : '--'],
+    ['初始振幅', `${r.measured.amplitude.toFixed(3)} m`],
+    ['判定', r.pass ? '通过（T=2π√(m/k) 验证）' : '未通过'],
+  ];
+  grid.innerHTML = rows.map(([k], i) =>
+    `<div class="cell" style="grid-column:1/-1"><span class="k">${k}</span><span class="v ${i === 6 ? 'acc' : 'plain'}"></span></div>`
+  ).join('');
+  [...grid.querySelectorAll('.v')].forEach((el, i) => { el.textContent = rows[i][1]; });
+  box.appendChild(grid);
+  const p = document.createElement('div');
+  p.className = 'hint';
+  p.style.marginTop = '8px';
+  p.textContent = r.summary;
+  box.appendChild(p);
 }
 
 function renderRotationExplain(r, box) {
@@ -1703,6 +1864,7 @@ function renderExplanation() {
   if (r.kind === 'momentum-1d') { renderMomentumExplain(r, box); return; }
   if (r.kind === 'astro') { renderAstroExplain(r, box); return; }
   if (r.kind === 'rotation') { renderRotationExplain(r, box); return; }
+  if (r.kind === 'spring') { renderSpringExplain(r, box); return; }
   // 观察项对比表（斜面）
   const grid = document.createElement('div');
   grid.className = 'ro-grid';
@@ -1760,7 +1922,7 @@ window.MECH = {
   doc: () => cloneDoc(doc),
   entities: () => doc.entities.map((e) => ({ id: e.id, type: e.type, name: e.name, source: e.source })),
   selectedId: () => selectedId,
-  select: (id) => selectEntity(id),
+  select: (id, additive) => selectEntity(id, additive),
   addComponent: (type, overrides) => opAddComponent(type, overrides),
   updateEntity: (id, patch, label) => opUpdateEntity(id, patch, label || 'Agent 修改'),
   removeEntity: (id) => opRemoveEntity(id),

@@ -194,6 +194,34 @@ export const COMPONENTS = {
     inertiaY: (p, m) => m * (p.sx * p.sx + p.sz * p.sz) / 12,
   },
 
+  rope: {
+    id: 'rope', label: '绳', category: '绳和约束',
+    desc: '连接两个实体的轻绳（仅拉不推）；先选中两个实体再点目录添加，或由解析自动连接',
+    defaults: { params: { length: 0 }, physics: defaultPhysics('fixed', 0), render: { material: 'steelDark' } },
+    schema: [
+      { key: 'length', label: '绳长', unit: 'm', min: 0.05, max: 20, step: 0.05 },
+    ],
+    buildGeometry: () => new THREE.CylinderGeometry(0.008, 0.008, 1, 8),   // 单位杆，runtime 按两端拉伸
+    buildCollider: () => null,
+    isLink: true,                                  // 连接类：无独立 body，runtime 建绳关节并每帧同步网格
+    spawnY: () => 0.5,
+  },
+
+  spring: {
+    id: 'spring', label: '弹簧', category: '绳和约束',
+    desc: '连接两个实体的线性弹簧（胡克定律 F=-k·Δx）；可演示简谐振动',
+    defaults: { params: { stiffness: 20, restLength: 0.8, damping: 0.5 }, physics: defaultPhysics('fixed', 0), render: { material: 'brass' } },
+    schema: [
+      { key: 'stiffness', label: '劲度系数', unit: 'N/m', min: 0.5, max: 5000, step: 0.5 },
+      { key: 'restLength', label: '原长', unit: 'm', min: 0.1, max: 10, step: 0.05 },
+      { key: 'damping', label: '阻尼', unit: '', min: 0, max: 50, step: 0.1 },
+    ],
+    buildGeometry: () => new THREE.CylinderGeometry(0.022, 0.022, 1, 10),   // 单位杆，runtime 按两端拉伸
+    buildCollider: () => null,
+    isLink: true,
+    spawnY: () => 0.5,
+  },
+
   track: {
     id: 'track', label: '管道轨道', category: '轨道和曲面',
     desc: '半管滑道+竖直环轨（中心线解析约束，光滑无摩擦；球体设 onTrack 沿轨滑行）',

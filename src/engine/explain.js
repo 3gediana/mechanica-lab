@@ -8,7 +8,9 @@ const FIXED_EXIT_TOL = 0.015; // 球心越过斜面底边的判定余量 m（小
 export function explainRun(plan, doc, series, reports = [], astro = null, rotation = null) {
   const hasRamp = doc.entities.some((e) => e.type === 'ramp');
   const hasGrav = doc.entities.some((e) => e.physics.gravitating);
+  const hasSpring = doc.entities.some((e) => e.type === 'spring');
   const spheres = doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
+  if (hasSpring && series.length > 10) return explainSpring(plan, doc, series);
   if (doc.kind === 'rotation' && rotation) return explainRotation(plan, doc, rotation);
   if (hasGrav && astro) return explainAstro(plan, astro);
   if (hasRamp && spheres.length) return explainIncline(plan, doc, series);
@@ -17,6 +19,54 @@ export function explainRun(plan, doc, series, reports = [], astro = null, rotati
     supported: false,
     reason: hasRamp ? '运行轨迹过短' : '该解析场景不含斜面、两球对撞、引力系统或转台，暂无专用解释器',
     summary: telemetrySummary(series),
+  };
+}
+
+// ---------- 弹簧振子：简谐振动周期 T = 2π√(m/k) ----------
+function explainSpring(plan, doc, series) {
+  const spring = doc.entities.find((e) => e.type === 'spring');
+  const ball = doc.entities.find((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
+  if (!spring || !ball) return { supported: false, reason: '弹簧解释需要弹簧+振子小球', summary: telemetrySummary(series) };
+  const m = ball.physics.mass;
+  const k = spring.params.stiffness;
+  const Ttheory = 2 * Math.PI * Math.sqrt(m / k);
+
+  // 实测周期：振子 x 序列的相邻峰值间隔（峰检测：差分符号翻转点）
+  const xs = series.map((p) => p.pos[0]);
+  const peaks = [];
+  for (let i = 1; i < xs.length - 1; i++) {
+    if (xs[i] > xs[i - 1] && xs[i] >= xs[i + 1] && xs[i] - xs[i - 1] > 1e-4) {
+      if (!peaks.length || i - peaks[peaks.length - 1] > 5) peaks.push(i);   // 去毛刺：峰间隔 > 5 采样
+    }
+  }
+  let Tmeasured = null;
+  if (peaks.length >= 2) {
+    const span = series[series.length - 1].t - series[0].t;
+    const dt = span / (series.length - 1);
+    Tmeasured = (peaks[peaks.length - 1] - peaks[0]) * dt / (peaks.length - 1);
+  }
+  const errPct = Tmeasured != null ? Math.abs(Tmeasured - Ttheory) / Ttheory * 100 : null;
+  const pass = errPct != null && errPct < 8;
+  const amp0 = Math.max(...xs) - Math.min(...xs);
+
+  const summary = [
+    `弹簧振子（m=${m} kg，k=${k} N/m）：简谐振动理论周期 T = 2π√(m/k) = ${Ttheory.toFixed(3)} s。`,
+    Tmeasured != null
+      ? `实测振动周期 ${Tmeasured.toFixed(3)} s（峰值间隔法，共 ${peaks.length} 个峰），偏差 ${errPct.toFixed(2)}%。`
+      : '运行时长不足两个完整振动，周期未测出。',
+    `初始振幅约 ${amp0.toFixed(3)} m${spring.params.damping > 0 ? `，阻尼 ${spring.params.damping} 会缓慢耗能使振幅衰减` : '（无阻尼，振幅保持）'}。`,
+    pass ? '实测周期与理论一致，简谐振动 T=2π√(m/k) 得到验证。' : '周期偏差偏大，建议检查劲度系数与阻尼设置。',
+  ].join('');
+
+  return {
+    supported: true,
+    kind: 'spring',
+    simT: series[series.length - 1].t,
+    observation: plan.observations[0] || '振动周期',
+    theoretical: { period: Ttheory, formula: 'T = 2π√(m/k)', m, k },
+    measured: { period: Tmeasured, peaks: peaks.length, amplitude: amp0 },
+    errPct, pass,
+    summary,
   };
 }
 

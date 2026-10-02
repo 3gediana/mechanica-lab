@@ -1,0 +1,41 @@
+{
+  "_fixture": true,
+  "_note": "本地示例解析数据（弹簧振子简谐振动），用于无 API Key 时验证弹簧链路；不是真实模型输出",
+  "kind": "spring",
+  "questionType": "弹簧振子（简谐振动）",
+  "goal": "观察振子周期运动，验证 T=2π√(m/k)",
+  "gravity": 10,
+  "entities": [
+    {
+      "type": "sphere",
+      "name": "振子小球",
+      "given": {
+        "mass": 1.5
+      },
+      "confidence": 0.95
+    }
+  ],
+  "attaches": [
+    {
+      "type": "spring",
+      "from": 0,
+      "to": 1,
+      "stiffness": 20,
+      "restLength": 0.8,
+      "damping": 0
+    }
+  ],
+  "observations": [
+    "振子振动周期",
+    "振幅是否衰减"
+  ],
+  "unknowns": [
+    "初相位（由初始拉伸决定）"
+  ],
+  "assumptions": [
+    "水平理想化（重力沿振动法向，不影响周期）",
+    "劲度系数 k=20 N/m，弹簧原长 0.8 m",
+    "初始拉伸 1.2 m 静止释放"
+  ],
+  "confidence": 0.9
+}
