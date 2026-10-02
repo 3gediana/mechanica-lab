@@ -177,13 +177,32 @@ M 轨迹线截图目检：恒星自发光 + 卫星轨迹弧 + astro 守恒条完
 
 **遗留**：框选仅矩形（Goal 未要求多边形）；拍照在无 https/无摄像头环境降级为仅上传（已有）；能量条/框选多选/正交相机/录制回放/受力箭头/曲线仍缺（Round 8+）。
 
-### 下一轮（Round 8 候选）
+### Round 8（10-03）观察层补全 + 框选多选 + 天体题解析解释 —— **PASS（p6 13/13，回归 p0-p5 全绿）**
 
-1. 教学观察层：能量条（KE/PE 比例条入守恒量条）+ 碰撞时刻视口标记。
-2. 框选多选（选择系统泛化）+ 大纲重命名/锁定。
-3. 天体/角动量题拍题解析与解释分支（ celestial/spin 场景参数入 fixture）。
+**教学观察层**：
+- **能量保持率比例条**（并入守恒量条，三模式通用）：now/base，量程 0-150% 带 100% 刻度线；momentum(KE)/rotation(KE)/astro(E) 各自基准绑定 rebuild 代数。
+- **碰撞时刻视口标记**：碰撞报告增位置（两碰撞体中点）→ 碰撞点琥珀标记环扩散、1.5s 淡出（关键时刻可视化）。
 
-## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）
+**视口/大纲**：
+- **框选多选**：顶栏"框选"模式（橡皮筋 + 相机投影矩形选实体 + 锁定者排除），shift 点击加选；多选 BoxHelper 高亮（主选中琥珀/次选灰）；Delete 多选删除。框选时相机旋转自动让位。
+- **大纲重命名/锁定**：双击行内改名（编辑保护防重建吞 input）；锁定写文档 locked 字段 + userData，锁定者不被点选/框选（防误操作）。
+
+**天体题拍题解析 + 解释**：TYPE_MAP 扩展 celestial/planet/star/中文；given.position；celestial 布局 + 检查器 PEDIT；fixture parse-celestial.json（G=1）。
+explain.js astro 分支：圆轨道理论周期 2π√(a³/GM) vs 实测（方位角跳变法）、E/L 漂移、偏心率——开普勒轨道动力学验证。
+
+**验收数字**（p6.mjs 13/13）：能量保持率 88.0%（碰撞后动能损失可见）；碰撞标记 1 个出现+1.5s 淡出；框选 2 实体（锁定滑块被排除）→ Delete 后仅剩锁定者；astro 解释 E 漂移 3.1e-6、L 漂移 8.9e-14、实测周期 4.93s vs 理论 4.95s（0.4%）。
+
+**本轮修的坑**：①viewport._rubber 未初始化（DOM 引用只在部分方法用 document.getElementById，其他用 this._rubber → undefined 抛错中断框选回调）；②大纲单击选择的 renderOutline 全量重建吞掉 dblclick（分离 updateOutlineSelection 只刷 class）；③锁定 userData 赋值时序（opUpdateEntity 后 e.locked 已是新值，取反写回恒为 false）；④PEDIT 缺 celestial 键导致 fixture 渲染抛错被 catch 吞成"读取失败"；⑤normalizeParse 丢弃 fixture 的 G 键。
+
+**遗留**：多选 gizmo 只对主选中（整组移动未做）；正交相机/缩放 gizmo/单位标尺/录制回放/受力箭头/曲线仍未做（P3）；spin 题拍题解析需自动 joint 生成（Round 9 评估）。
+
+### 下一轮（Round 9 候选）
+
+1. spin 题拍题解析（questionType 含角动量 → 转台+滑块+自动 joint 布局）+ explain rotation 分支接入拍题。
+2. 受力箭头（斜面场景重力/支持力/摩擦分解）。
+3. 曲线（速度/位置/能量随时间，trail 数据已有）。
+
+## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）
 
 仪器级暗色摄影棚工具界面。冷灰烟色 + 单点缀琥珀（仪表读数与激活态）；直角 hairline（radius 2px）；
 无渐变无玻璃拟态无 emoji 无 em-dash；数字等宽；动效只做状态反馈。
