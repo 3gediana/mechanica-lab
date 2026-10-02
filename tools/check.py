@@ -29,7 +29,7 @@ for js in [
     "src/workbench.js",
     "src/engine/scene-doc.js", "src/engine/registry.js",
     "src/engine/runtime.js", "src/engine/viewport.js", "src/engine/presets.js",
-    "src/engine/parse-schema.js",
+    "src/engine/parse-schema.js", "src/engine/explain.js",
     "src/legacy-main.js", "src/track-curve.js", "src/materials.js",
 ]:
     need(ROOT / js, (ROOT / js).exists(), f"缺失: {js}")
@@ -45,7 +45,8 @@ SECRET_PATTERNS = ["3esUVr", "step_key", "api.stepfun", "Bearer"]
 for rel in ["index.html", "classic.html", "src/workbench.js", "src/legacy-main.js",
             "src/materials.js", "src/track-curve.js",
             "src/engine/scene-doc.js", "src/engine/registry.js", "src/engine/runtime.js",
-            "src/engine/viewport.js", "src/engine/presets.js", "src/engine/parse-schema.js"]:
+            "src/engine/viewport.js", "src/engine/presets.js", "src/engine/parse-schema.js",
+            "src/engine/explain.js"]:
     txt = (ROOT / rel).read_text(encoding="utf-8")
     for pat in SECRET_PATTERNS:
         if pat in txt:

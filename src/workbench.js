@@ -12,6 +12,7 @@ import { Viewport } from './engine/viewport.js';
 import { getPreset } from './engine/presets.js';
 import { createMaterials } from './materials.js';
 import { normalizeParse, planToOverrides } from './engine/parse-schema.js';
+import { explainRun } from './engine/explain.js';
 
 const $ = (id) => document.getElementById(id);
 const veil = $('veil'), veilStatus = $('veilStatus'), errbar = $('errbar');
@@ -117,9 +118,13 @@ function rebuildAll(rerenderInspector = true) {
   updateSimbarStatic();
 }
 
-function applyDoc(doc0, label) {   // 整文档替换（预置/打开/新建/撤销重做）
+function applyDoc(doc0, label) {   // 整文档替换（预置/打开/新建/撤销重做）——运行态一并终结
   doc = doc0;
+  mode = 'edit';
+  paused = false;
+  if (viewport) viewport.setGizmoEnabled(true);
   rebuildAll();
+  updateSimbarStatic();
   commitChange(label);
 }
 
@@ -681,6 +686,7 @@ function bindAgentPanel() {
   $('btnFixtureParse').onclick = () => loadFixtureParse();
   $('btnApplyParse').onclick = () => applyAgentPlan();
   $('btnClearParse').onclick = () => { resetAgentPanel(); };
+  $('btnRunExplain').onclick = () => runAndExplain();
 }
 
 function readQuestionImage(file) {
@@ -806,9 +812,11 @@ function renderParseResult(warnings = []) {
   // 实体行
   const box = $('parseEntities');
   box.innerHTML = '';
-  // 摩擦是成对属性：球未给摩擦时继承斜面摩擦（与 planToOverrides 建场逻辑一致）
+  // 摩擦是成对属性：球未显式给摩擦时，默认值取两侧显式摩擦的最小值（与 planToOverrides 建场一致）
   const rampEnt = plan.entities.find((x) => x.type === 'ramp');
-  const surfF = rampEnt && rampEnt.given.friction != null ? rampEnt.given.friction : null;
+  const ballEnt0 = plan.entities.find((x) => x.type === 'sphere');
+  const pairF = [ballEnt0 ? ballEnt0.given.friction : null, rampEnt ? rampEnt.given.friction : null].filter((v) => v != null);
+  const pairFriction = pairF.length ? Math.min(...pairF) : null;
   plan.entities.forEach((e, i) => {
     const row = document.createElement('div');
     row.className = 'pe-row';
@@ -837,7 +845,7 @@ function renderParseResult(warnings = []) {
       inp.type = 'number';
       inp.step = 'any';
       const given = plan.entities[i].given;
-      const defVal = (e.type === 'sphere' && key === 'friction' && surfF != null) ? surfF : def;
+      const defVal = (e.type === 'sphere' && key === 'friction' && pairFriction != null) ? pairFriction : def;
       const val = given[key] !== undefined ? given[key] : defVal;
       inp.value = val;
       const src = document.createElement('span');
@@ -919,6 +927,8 @@ function applyAgentPlan() {
     },
   });
   toast(`已按解析创建 ${created.length} 个实体${agentPlan.fixture ? '（示例数据）' : ''}`);
+  // 建场成功即开放"运行并生成解释"（解释体在运行后填充）
+  $('explainGrp').style.display = 'block';
   selectTab('inspector');
 }
 
@@ -926,10 +936,121 @@ function resetAgentPanel() {
   agentImageDataUrl = null;
   agentPlan = null;
   agentCorrections = [];
+  agentExplain = null;
   $('dropZone').style.display = 'block';
   $('imgPrevWrap').style.display = 'none';
   $('parseStatusGrp').style.display = 'none';
   $('parseResultGrp').style.display = 'none';
+  $('explainGrp').style.display = 'none';
+}
+
+// ============ 运行后解释（确定性物理计算，非模型生成） ============
+let agentExplain = null;
+let explainBusy = false;
+
+async function runAndExplain() {
+  if (explainBusy) return;
+  if (!agentPlan) { toast('请先完成解析并创建场景实体'); return; }
+  const ball = doc.entities.find((e) => e.type === 'sphere');
+  const ramp = doc.entities.find((e) => e.type === 'ramp');
+  if (!ball) { setParseStatus('解释器需要场景中存在小球，请先创建实体', true); return; }
+  if (mode !== 'edit') resetSim();
+
+  explainBusy = true;
+  const btn = $('btnRunExplain');
+  btn.disabled = true;
+  btn.textContent = '运行并记录中…';
+  runtime.startRecording(ball.id);
+  play();
+  const exitX = ramp ? ramp.transform.pos[0] + ramp.params.length / 2 : Infinity;
+  await new Promise((resolve) => {
+    // 终止条件：球越过斜面底边 / 超时 4s（防无限追跑）/ 场景被重建
+    const iv = setInterval(() => {
+      const tel = runtime.telemetry(ball.id);
+      if (!runtime.world || !tel || tel.pos[0] > exitX || runtime.simT > 4) {
+        clearInterval(iv);
+        resolve();
+      }
+    }, 40);
+  });
+  if (mode === 'run' && !paused) pauseToggle();
+  const series = runtime.stopRecording();
+  agentExplain = explainRun(agentPlan, doc, series);
+  renderExplanation();
+  btn.disabled = false;
+  btn.textContent = '重新运行解释';
+  explainBusy = false;
+}
+
+function renderExplanation() {
+  const r = agentExplain;
+  const grp = $('explainGrp');
+  grp.style.display = 'block';
+  const badge = $('explainBadge');
+  badge.textContent = r.supported ? '确定性计算' : '不支持该题型';
+  const box = $('explainBody');
+  box.innerHTML = '';
+  if (!r.supported) {
+    const p = document.createElement('div');
+    p.className = 'hint';
+    p.style.color = 'var(--danger)';
+    p.textContent = r.reason;
+    box.appendChild(p);
+    const s = document.createElement('div');
+    s.className = 'hint';
+    s.textContent = r.summary;
+    box.appendChild(s);
+    return;
+  }
+  // 观察项对比表
+  const grid = document.createElement('div');
+  grid.className = 'ro-grid';
+  grid.innerHTML = `
+    <div class="cell" style="grid-column:1/-1"><span class="k">观察项</span><span class="v plain" data-ev="obs" style="max-width:170px;text-align:right"></span></div>
+    <div class="cell"><span class="k">理论值</span><span class="v" data-ev="theo"></span></div>
+    <div class="cell"><span class="k">实测值</span><span class="v" data-ev="meas"></span></div>
+    <div class="cell"><span class="k">偏差</span><span class="v" data-ev="err"></span></div>
+    <div class="cell"><span class="k">判定</span><span class="v" data-ev="pass"></span></div>
+    <div class="cell"><span class="k">机械能初</span><span class="v plain" data-ev="e0"></span></div>
+    <div class="cell"><span class="k">机械能末</span><span class="v plain" data-ev="e1"></span></div>
+    <div class="cell" style="grid-column:1/-1"><span class="k">守恒漂移</span><span class="v" data-ev="drift"></span></div>
+    ${r.reference ? `<div class="cell" style="grid-column:1/-1"><span class="k">${r.reference.label}</span><span class="v plain" data-ev="ref"></span></div>` : ''}`;
+  box.appendChild(grid);
+  const set = (k, v) => { const el = grid.querySelector(`[data-ev=${k}]`); if (el) el.textContent = v; };
+  set('obs', r.observation);
+  set('theo', `${r.theoretical.value.toFixed(3)} m/s`);
+  set('meas', `${r.measured.value.toFixed(3)} m/s`);
+  set('err', `${r.errorPct.toFixed(2)}%`);
+  set('pass', r.pass ? '通过(<3%)' : '未通过');
+  grid.querySelector('[data-ev=pass]').style.color = r.pass ? 'var(--accent)' : 'var(--danger)';
+  set('e0', `${r.energy.initial.toFixed(2)} J`);
+  set('e1', `${r.energy.final.toFixed(2)} J`);
+  set('drift', `${r.energy.driftPct.toFixed(2)}%`);
+  if (r.reference) set('ref', `${r.reference.value.toFixed(3)} m/s (H=${r.reference.h.toFixed(3)} m)`);
+  const note = document.createElement('div');
+  note.className = 'hint';
+  note.textContent = `公式 ${r.theoretical.formula}（h = ${r.theoretical.h.toFixed(3)} m）。${r.energy.note}`;
+  box.appendChild(note);
+  // 假设核对
+  const t = document.createElement('div');
+  t.className = 'k';
+  t.style.cssText = 'font-size:10px;color:var(--faint);margin-top:8px';
+  t.textContent = '假设核对';
+  const ul = document.createElement('ul');
+  ul.className = 'plist';
+  for (const c of r.checks) {
+    const li = document.createElement('li');
+    li.textContent = `${c.ok ? '成立' : '不成立'}: ${c.text}`;
+    li.style.color = c.ok ? 'var(--dim)' : 'var(--danger)';
+    ul.appendChild(li);
+  }
+  box.append(t, ul);
+  // 解释文本
+  const p = document.createElement('div');
+  p.className = 'hint';
+  p.style.marginTop = '8px';
+  p.textContent = r.summary;
+  box.appendChild(p);
 }
 
 // ============ Agent / 自动化只读接口（白名单操作的编程入口，P1 复用） ============
@@ -974,6 +1095,7 @@ window.MECH = {
     correctionCount: agentCorrections.length,
     entities: agentPlan ? agentPlan.entities.map((e) => ({ type: e.type, given: { ...e.given } })) : [],
   }),
+  explainState: () => agentExplain ? JSON.parse(JSON.stringify(agentExplain)) : null,
   // 物理自检：UI 同路径构造斜面场景，同步步进 5s，验证真实演化（非预录）
   selftest() {
     const prev = cloneDoc(doc);

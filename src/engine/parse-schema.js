@@ -62,33 +62,58 @@ function strs(v) { return Array.isArray(v) ? v.filter((x) => typeof x === 'strin
 function clamp01(v) { const n = Number(v); return Number.isFinite(n) ? Math.min(Math.max(n, 0), 1) : null; }
 
 // ---------- 建场计划：plan → 每实体的 registry overrides（位置/参数/物理） ----------
-// 布局规则：地面板铺底；斜面置原点；球按斜面几何放到顶端面；其余放原点上方。
+// 布局规则：斜面置原点；球按斜面几何放到近顶端面（留球半径避让高墙）；其余放原点上方。
+// 几何语义：题目"斜面长"= 坡面长（斜边）；registry 的 length/height 是底边水平长与高，
+// 故给 angleDeg 时做换算 base = L·cosθ, height = L·sinθ（球心实际可滑全程 ≠ 全长，解释层处理）。
 export function planToOverrides(plan) {
   const ramp = plan.entities.find((e) => e.type === 'ramp');
   let rampGeom = null;
   if (ramp) {
     const g = ramp.given;
-    const length = g.length ?? 2.0;
     const width = g.width ?? 0.5;
-    const angle = g.angleDeg ?? (g.height != null ? Math.atan2(g.height, length) * 180 / Math.PI : 30);
-    rampGeom = { length, width, angle, height: +(Math.tan(angle * Math.PI / 180) * length).toFixed(4) };
+    if (g.angleDeg != null) {
+      const Lslope = g.length ?? 2.0;                       // 坡面长（斜边）
+      const th = g.angleDeg * Math.PI / 180;
+      const base = Lslope * Math.cos(th);
+      const height = Lslope * Math.sin(th);
+      rampGeom = { base, height, angleDeg: g.angleDeg };
+    } else {
+      const base = g.length ?? 2.0;                          // 无角度：length 按底边处理
+      const height = g.height ?? base * Math.tan(30 * Math.PI / 180);
+      rampGeom = { base, height, angleDeg: Math.atan2(height, base) * 180 / Math.PI };
+    }
   }
 
   const out = [];
-  // 摩擦是成对属性：题目"不计摩擦"常被模型标在斜面上，球应继承接触面摩擦
-  const surfaceFriction = ramp && ramp.given.friction != null ? ramp.given.friction : null;
+  // 摩擦是成对属性，模型可能把"不计摩擦"标在球上或斜面上（都是正确物理位置）：
+  // 取两侧显式给定摩擦的最小值应用到整对（Rapier 默认取平均，min 注入两侧即得意图配对值）。
+  const ballEnt = plan.entities.find((e) => e.type === 'sphere');
+  const fBall = ballEnt ? ballEnt.given.friction : null;
+  const fRamp = ramp ? ramp.given.friction : null;
+  const explicitF = [fBall, fRamp].filter((v) => v != null);
+  const pairFriction = explicitF.length ? Math.min(...explicitF) : null;
   for (const e of plan.entities) {
     const o = { type: e.type, name: e.name, source: 'agent' };
     if (e.type === 'ramp' && rampGeom) {
-      o.params = { length: rampGeom.length, height: rampGeom.height, width: rampGeom.width };
+      o.params = {
+        length: +rampGeom.base.toFixed(4),
+        height: +rampGeom.height.toFixed(4),
+        width: ramp.given.width ?? 0.5,
+      };
       o.transform = { pos: [0, 0.05, 0], rot: [0, 0, 0] };
-      o.physics = { body: 'fixed' };                  // 斜面固定（assumption 默认）
+      // 摩擦是成对属性：固定斜面也必须带上题目给的摩擦（缺省 0.4），否则 Rapier 取平均把光滑面变粗糙
+      o.physics = {
+        body: 'fixed',
+        friction: fRamp ?? pairFriction ?? 0.4,
+        restitution: ramp.given.restitution ?? 0.05,
+      };
     } else if (e.type === 'sphere') {
       o.params = { radius: e.given.radius ?? 0.15 };
       o.physics = {
         mass: e.given.mass ?? 1,
-        friction: e.given.friction ?? (surfaceFriction != null ? surfaceFriction : 0.3),
+        friction: e.given.friction ?? pairFriction ?? 0.3,
         restitution: e.given.restitution ?? 0.1,
+        linDamping: 0, angDamping: 0.02,       // 教学演化不加空气阻尼，守恒量才可对照理论
       };
       o.transform = { pos: ballOnRamp(rampGeom), rot: [0, 0, 0] };
       if (e.given.velocity) o.physics.linvel = e.given.velocity;
@@ -110,15 +135,13 @@ export function planToOverrides(plan) {
   return out;
 }
 
-// 球心位置：斜面高墙在 -x；球放坡面上段（local x = -length*0.3 处）
+// 球心位置：高墙在 -x，球心距墙留出半径+间隙，置于坡面近顶端
 function ballOnRamp(rampGeom) {
   if (!rampGeom) return [0, 0.5, 0];
-  const { length, angle, height } = rampGeom;
-  const xl = -length * 0.3;                                    // 斜面局部 x（0 为底边中点…楔体中心原点）
-  const surfLocal = height * (1 - (xl + length / 2) / length); // 面高（局部，底面 y=0）
   const r = 0.15;
-  const yOff = r / Math.cos(angle * Math.PI / 180);
-  const worldY = 0.05 + surfLocal + yOff + 0.01;               // 0.05 = 斜面放置高度
-  const worldX = xl;                                            // 斜面 pos x=0
-  return [+worldX.toFixed(3), +worldY.toFixed(3), 0];
+  const xl = -rampGeom.base / 2 + r + 0.01;
+  const surfLocal = rampGeom.height * (1 - (xl + rampGeom.base / 2) / rampGeom.base);
+  const yOff = r / Math.cos(rampGeom.angleDeg * Math.PI / 180);
+  const worldY = 0.05 + surfLocal + yOff + 0.01;     // 0.05 = 斜面放置高度
+  return [+xl.toFixed(3), +worldY.toFixed(3), 0];
 }

@@ -82,6 +82,26 @@ try {
     `v=${run.speed.toFixed(2)} y=${run.pos[1].toFixed(2)} x=${run.pos[0].toFixed(2)}`);
   await page.click('#btnReset');
 
+  // ---- 运行并生成解释（确定性解释器：理论 vs 实测）
+  await page.click('#tabAgent');
+  await page.click('#btnRunExplain');
+  await page.waitForFunction(() => {
+    const g = document.getElementById('explainGrp');
+    return g && g.style.display !== 'none' && document.querySelector('[data-ev=pass]') && document.querySelector('[data-ev=pass]').textContent.length > 1;
+  }, null, { timeout: 25000 });
+  const ex = await page.evaluate(() => window.MECH.explainState());
+  check('解释器: 结构化输出(斜面题型)', ex && ex.supported && ex.kind === 'incline-slide', ex ? `v_th=${ex.theoretical.value.toFixed(3)}` : 'null');
+  const vFullExpect = Math.sqrt(2 * 10 * (2 * Math.sin(Math.PI / 6)));     // √(2gH), H=L·sinθ=1.0
+  check('解释器: 题目全长参考=√(2gH)', Math.abs(ex.reference.value - vFullExpect) < 0.01,
+    `ref=${ex.reference.value.toFixed(3)} 期望=${vFullExpect.toFixed(3)}`);
+  check('解释器: 实测与理论(Δh)偏差<3%', ex.pass && ex.errorPct < 3,
+    `measured=${ex.measured.value.toFixed(3)} th=${ex.theoretical.value.toFixed(3)} err=${ex.errorPct.toFixed(2)}%`);
+  check('解释器: 机械能漂移<3%', Math.abs(ex.energy.driftPct) < 3, `drift=${ex.energy.driftPct.toFixed(2)}%`);
+  check('解释器: 假设核对全成立', ex.checks.every((c) => c.ok), JSON.stringify(ex.checks.map((c) => c.ok)));
+  check('解释器: 理论<全长参考(球心避让)', ex.theoretical.value < ex.reference.value && ex.reference.value - ex.theoretical.value < 0.5,
+    `Δ=${(ex.reference.value - ex.theoretical.value).toFixed(3)}`);
+  await page.screenshot({ path: 'shots/13-explain.png' });
+
   // ---- 真实 API 单次调用（step-5-preview）；失败最多重试 1 次，仍败则记 BLOCKED 继续
   let realOk = false, realDetail = '';
   for (let attempt = 1; attempt <= 2 && !realOk; attempt++) {

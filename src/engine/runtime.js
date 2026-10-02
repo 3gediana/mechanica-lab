@@ -17,6 +17,7 @@ export class Runtime {
     this.acc = 0;
     this.dropped = 0;            // 因背压丢弃的模拟秒数（诊断）
     this.collisions = [];        // [{t, a, b}] 碰撞事件（动量等场景用），上限 200
+    this.recording = null;       // 轨迹采样 {id, points:[{t,pos,speed,vel}], every, n}
     this._bindDocs = null;
   }
 
@@ -39,6 +40,7 @@ export class Runtime {
   clear() {
     if (this.world) this.world.free();
     this.world = null;
+    this.recording = null;
     for (const b of this.binds.values()) {
       this.scene.remove(b.mesh);
       b.mesh.geometry.dispose();
@@ -93,6 +95,13 @@ export class Runtime {
     this._drainCollisions();
     this._syncMeshes();
     this.simT += FIXED_H;
+    if (this.recording) {
+      const r = this.recording;
+      if (r.n++ % r.every === 0 && r.points.length < r.cap) {
+        const t = this.telemetry(r.id);
+        if (t) r.points.push({ t: this.simT, pos: t.pos, speed: t.speed, vel: t.vel });
+      }
+    }
   }
 
   advance(dt) {
@@ -133,6 +142,16 @@ export class Runtime {
       b.mesh.position.copy(b.body.translation());
       b.mesh.quaternion.copy(b.body.rotation());
     }
+  }
+
+  // ============ 轨迹采样（解释器/未来教学叠加层用） ============
+  startRecording(id) {
+    this.recording = { id, points: [], every: 2, n: 0, cap: 2400 };   // 60Hz 采样，~80s 上限
+  }
+  stopRecording() {
+    const r = this.recording;
+    this.recording = null;
+    return r ? r.points : [];
   }
 
   // ============ 遥测（检查器实时区 / 底栏 / 未来 Agent 解释用） ============
