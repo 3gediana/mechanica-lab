@@ -16,6 +16,7 @@ CALL_TIMEOUT = 90                    # 单次解析超时 s
 PARSE_PROMPT = """你是大学物理题解析器。看图中的物理题，输出严格 JSON（不要 markdown 代码块，不要解释文字），schema：
 {
  "questionType": "题型短语",
+ "kind": "题型类别：斜面/抛体类留空，两球碰撞留空，天体引力填 astro，转台/角动量/转动惯量类填 rotation",
  "goal": "实验或求解目标",
  "gravity": 数值m/s2 或 null,
  "entities": [
@@ -26,9 +27,13 @@ PARSE_PROMPT = """你是大学物理题解析器。看图中的物理题，输�
  ],
  "observations": ["要求观察或求解的量"],
  "unknowns": ["图中未给出的量（不要编造数值）"],
+ "joint": {"from": 实体索引, "to": 实体索引, "axis": [1,0,0], "limits": [0.15, 1.05], "anchor1": [0,0.14,0], "anchor2": [0,0,0]},
  "assumptions": ["你做的假设"],
  "confidence": 0到1
 }
+规则补充：
+- kind 填 "rotation" 时给 joint（转台体索引 from、滑块体索引 to、径向滑槽参数）。
+- 转台初始角速度写在其 given.angvel = [0, ω, 0]。
 规则：
 - type 必须从五个值中选：斜面/楔子=ramp，球=sphere，方块=box，圆柱=cylinder，地面=ground。无关实体不要列。
 - given 只写题目文字或图中明确给出的数值；没给的键不要写。

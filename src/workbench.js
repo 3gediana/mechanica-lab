@@ -119,6 +119,7 @@ function commitChange(label) {
 
 function rebuildAll(rerenderInspector = true) {
   runtime.rebuild(doc);
+  rotationBase = null; momentumBase = null; astroBase = null;   // 基准必须在初始态重采
   selectedIds = selectedIds.filter((x) => runtime.binds.has(x));
   if (selectedId && !selectedIds.includes(selectedId)) {
     selectedId = selectedIds.length ? selectedIds[selectedIds.length - 1] : null;
@@ -335,7 +336,9 @@ function bindUI() {
   $('btnReset').onclick = resetSim;
   $('selSpeed').onchange = (e) => { timeScale = parseFloat(e.target.value); };
   $('btnVectors').onclick = () => setVectors(!vectorsOn);
+  $('btnForces').onclick = () => setForces(!forcesOn);
   $('btnTrails').onclick = () => setTrails(!trailsOn);
+  $('btnCurves').onclick = () => setCurves(!curvesOn);
   $('btnCons').onclick = () => setCons(!consOn);
 
   $('sceneName').onchange = (e) => { doc.name = e.target.value || '未命名场景'; e.target.value = doc.name; autosave(); };
@@ -681,13 +684,28 @@ function triRow(parent, label, unit, values, step, onCommit) {
 
 // ============ 教学叠加层：速度向量 + 轨迹线 + 守恒量条 ============
 let vectorsOn = false;
+let forcesOn = false;
 let trailsOn = false;
 let consOn = false;
+let curvesOn = false;
+const curveData = { t: [], speed: [], height: [], ke: [] };
+let curveEntityId = null;
 
 function setVectors(on) {
   vectorsOn = on;
   viewport.setVelocityArrows(on);
   $('btnVectors').classList.toggle('hot', on);
+}
+function setForces(on) {
+  forcesOn = on;
+  viewport.setForceArrows(on);
+  $('btnForces').classList.toggle('hot', on);
+}
+function setCurves(on) {
+  curvesOn = on;
+  $('curvePanel').classList.toggle('on', on);
+  $('btnCurves').classList.toggle('hot', on);
+  if (on) { curveData.t.length = 0; curveData.speed.length = 0; curveData.height.length = 0; curveData.ke.length = 0; }
 }
 function setTrails(on) {
   trailsOn = on;
@@ -789,10 +807,23 @@ function rotationInfo() {
   return { Lz, KE, I, omega, sliderR, torque: 0, simT: runtime.simT };
 }
 
-function updateRotationCons() {
+function rotationWithDrift() {
   const r = rotationInfo();
+  if (!r) return null;
+  if (!rotationBase || rotationBase.epoch !== runtime.epoch) {
+    rotationBase = { epoch: runtime.epoch, L: r.Lz, KE: r.KE, I: r.I, omega: r.omega };
+  }
+  return {
+    ...r,
+    L: r.Lz,                                  // 兼容别名（守恒量条/p4 断言用 L）
+    driftL: Math.abs(r.Lz - rotationBase.L) / Math.max(Math.abs(rotationBase.L), 1e-12) * 100,
+    base: rotationBase,
+  };
+}
+
+function updateRotationCons() {
+  const r = rotationWithDrift();
   if (!r) return;
-  if (!rotationBase || rotationBase.epoch !== runtime.epoch) rotationBase = { epoch: runtime.epoch, L: r.Lz, KE: r.KE };
   updateEnergyBar(r.KE / Math.max(rotationBase.KE, 1e-12));
   const dL = Math.abs(r.Lz - rotationBase.L) / Math.max(Math.abs(rotationBase.L), 1e-12) * 100;
   $('crOmega').textContent = `${r.omega.toFixed(3)} rad/s`;
@@ -907,6 +938,50 @@ function updateReadouts() {
   }
 }
 
+// ============ 时间曲线（选中体速率/高度 + 系统KE） ============
+function sampleCurves() {
+  if (selectedId && selectedId !== curveEntityId) {   // 换选中重采
+    curveEntityId = selectedId;
+    curveData.t.length = 0; curveData.speed.length = 0; curveData.height.length = 0; curveData.ke.length = 0;
+  }
+  const t = selectedId ? runtime.telemetry(selectedId) : null;
+  curveData.t.push(runtime.simT);
+  curveData.speed.push(t ? t.speed : 0);
+  curveData.height.push(t ? t.height : 0);
+  curveData.ke.push(runtime.systemTotals().ke);
+  if (curveData.t.length > 300) { curveData.t.shift(); curveData.speed.shift(); curveData.height.shift(); curveData.ke.shift(); }
+  drawCurves();
+}
+
+function drawCurves() {
+  const cv = $('curveCanvas');
+  const ctx = cv.getContext('2d');
+  const W = cv.width, H = cv.height;
+  ctx.clearRect(0, 0, W, H);
+  const n = curveData.t.length;
+  if (n < 2) return;
+  const series = [
+    { data: curveData.speed, color: '#d9a441' },
+    { data: curveData.height, color: '#7ba7d9' },
+    { data: curveData.ke, color: '#7dc87d' },
+  ];
+  let vmax = 1e-9;
+  for (const sr of series) for (const v of sr.data) if (Math.abs(v) > vmax) vmax = Math.abs(v);
+  const t0 = curveData.t[0], t1 = curveData.t[n - 1];
+  const span = Math.max(t1 - t0, 1e-6);
+  for (const sr of series) {
+    ctx.strokeStyle = sr.color;
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+      const x = ((curveData.t[i] - t0) / span) * (W - 8) + 4;
+      const y = H - 6 - (Math.abs(sr.data[i]) / vmax) * (H - 12);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+}
+
 // ============ 主循环 ============
 const clock = new THREE.Clock();
 function tick() {
@@ -924,6 +999,16 @@ function tick() {
     }
     viewport.updateVelocityArrows(items);
   }
+  if (forcesOn) {
+    const items = [];
+    for (const e of doc.entities) {
+      if (e.physics.body !== 'dynamic' || e.visible === false) continue;
+      const t = runtime.telemetry(e.id);
+      if (!t) continue;
+      items.push({ pos: t.pos, contact: runtime.contactForces.get(e.id) || null, gravity: [0, 9.81 * (e.physics.gravityScale != null ? e.physics.gravityScale : 1) * t.mass, 0] });
+    }
+    viewport.updateForceArrows(items);
+  }
   if (trailsOn) viewport.updateTrails(runtime.trails);
   const nRep = runtime.collisionReports.length;
   if (nRep < _seenReports) _seenReports = 0;
@@ -937,7 +1022,12 @@ function tick() {
   viewport.render();
   viewport.tickImpacts(performance.now());
   roTimer += rawDt;
-  if (roTimer > 0.15) { roTimer = 0; updateReadouts(); updateConsbar(); }
+  if (roTimer > 0.15) {
+    roTimer = 0;
+    updateReadouts();
+    updateConsbar();
+    if (curvesOn && mode === 'run') sampleCurves();
+  }
 }
 
 // ============ Agent 题目解析面板 ============
@@ -1346,9 +1436,23 @@ function applyAgentPlan() {
   if (!agentPlan.gravityDefault) M.setGravity(agentPlan.gravity);
   if (agentPlan.G != null) M.setG(agentPlan.G);
   if (doc.entities.some((e) => e.physics.gravitating) && !trailsOn) setTrails(true);   // 天体场景轨道线是观察必需
+  if (agentPlan.kind === 'rotation') doc.kind = 'rotation';
   const overrides = planToOverrides(agentPlan);
   const created = [];
   for (const o of overrides) created.push(M.addComponent(o.type, o));
+  // rotation 类：plan.joint 的 from/to 为实体索引，建场后映射为真实 id 建滑槽约束
+  if (agentPlan.kind === 'rotation' && agentPlan.joint) {
+    const fromId = created[agentPlan.joint.from], toId = created[agentPlan.joint.to];
+    if (fromId && toId) {
+      M.updateEntity(fromId, {
+        joints: [{
+          type: 'prismatic', target: toId,
+          axis: agentPlan.joint.axis, limits: agentPlan.joint.limits,
+          anchor1: agentPlan.joint.anchor1, anchor2: agentPlan.joint.anchor2,
+        }],
+      }, '建立径向滑槽约束');
+    }
+  }
   M.setAgentMeta({
     assumptions: [...agentPlan.assumptions],
     corrections: [...agentCorrections],
@@ -1392,28 +1496,34 @@ let explainBusy = false;
 async function runAndExplain() {
   if (explainBusy) return;
   if (!agentPlan) { toast('请先完成解析并创建场景实体'); return; }
-  const ball = doc.entities.find((e) => (e.type === 'sphere' || e.type === 'celestial') && e.physics.body === 'dynamic');
-  if (!ball) { setParseStatus('解释器需要场景中存在动态小球/天体，请先创建实体', true); return; }
+  const ball = doc.entities.find((e) => (e.type === 'sphere' || e.type === 'celestial') && e.physics.body === 'dynamic')
+    || doc.entities.find((e) => e.physics.body === 'dynamic');
+  if (!ball) { setParseStatus('解释器需要场景中存在动态实体，请先创建实体', true); return; }
   const hasRamp = doc.entities.some((e) => e.type === 'ramp');
   const isAstro = doc.entities.some((e) => e.physics.gravitating);
+  const isRotation = doc.kind === 'rotation';
   if (mode !== 'edit') resetSim();
 
   explainBusy = true;
   const btn = $('btnRunExplain');
   btn.disabled = true;
   btn.textContent = '运行并记录中…';
+  const isMomentum = !hasRamp && !isAstro && !isRotation;
+  const needT = isAstro ? 11 : (isRotation ? 3.5 : 4);              // 天体需跑满两圈（两个方位角跳变才可测周期，T≈5s）
+  const u0 = ball.physics.linvel[0];
+  // 运行前预采守恒基准（初始态），避免首采落在演化中
+  if (isRotation) rotationWithDrift();
+  if (isAstro) astroWithDrift();
+  if (isMomentum) { const lv = runtime.systemTotals(); if (!momentumBase || momentumBase.epoch !== runtime.epoch) momentumBase = { epoch: runtime.epoch, KE: lv.ke }; }
   runtime.startRecording(ball.id);
   play();
   const ramp = doc.entities.find((e) => e.type === 'ramp');
   const exitX = ramp ? ramp.transform.pos[0] + ramp.params.length / 2 : Infinity;
-  const isMomentum = !hasRamp && !isAstro;
-  const needT = isAstro ? 11 : 4;              // 天体需跑满两圈（两个方位角跳变才可测周期，T≈5s）
-  const u0 = ball.physics.linvel[0];
   await new Promise((resolve) => {
     // 终止条件：斜面=球越过底边；对撞=出现使球速改变的碰撞报告（跳过出生触地）；天体=跑满时长；通用=超时
     const iv = setInterval(() => {
       const tel = runtime.telemetry(ball.id);
-      const done = isAstro
+      const done = isAstro || isRotation
         ? runtime.simT > needT
         : isMomentum
           ? runtime.collisionReports.some((r) => r.postVels && r.postVels[ball.id]
@@ -1428,7 +1538,8 @@ async function runAndExplain() {
   if (isMomentum) await new Promise((res) => setTimeout(res, 300));   // 缓冲几步让报告速度稳定
   if (mode === 'run' && !paused) pauseToggle();
   const series = runtime.stopRecording();
-  agentExplain = explainRun(agentPlan, doc, series, runtime.collisionReports, isAstro ? astroWithDrift() : null);
+  agentExplain = explainRun(agentPlan, doc, series, runtime.collisionReports,
+    isAstro ? astroWithDrift() : null, isRotation ? rotationWithDrift() : null);
   renderExplanation();
   btn.disabled = false;
   btn.textContent = '重新运行解释';
@@ -1460,6 +1571,30 @@ function renderAstroExplain(r, box) {
 }
 function a_of(r) {
   return (r.measured.rmin + r.measured.rmax) / 2;
+}
+
+function renderRotationExplain(r, box) {
+  const grid = document.createElement('div');
+  grid.className = 'ro-grid';
+  const rows = [
+    ['角速度 ω', `${r.omega0.toFixed(3)} → ${r.omegaNow.toFixed(3)} rad/s`],
+    ['转动惯量 I', `${r.I0.toFixed(3)} → ${r.INow.toFixed(3)} kg·m²`],
+    ['角动量 L', `${r.L.toFixed(3)} kg·m²/s（漂移 ${r.driftL.toFixed(3)}%）`],
+    ['滑块半径 r', `${r.sliderR.toFixed(3)} m`],
+    ['ω 理论（L/I(r) 反推）', `${r.theoryOmega.toFixed(3)} rad/s（偏差 ${r.errPct.toFixed(2)}%）`],
+    ['外力矩', '0（理想轴承）'],
+    ['判定', r.pass ? '通过' : '未通过'],
+  ];
+  grid.innerHTML = rows.map(([k], i) =>
+    `<div class="cell" style="grid-column:1/-1"><span class="k">${k}</span><span class="v ${i === 6 ? 'acc' : 'plain'}"></span></div>`
+  ).join('');
+  [...grid.querySelectorAll('.v')].forEach((el, i) => { el.textContent = rows[i][1]; });
+  box.appendChild(grid);
+  const p = document.createElement('div');
+  p.className = 'hint';
+  p.style.marginTop = '8px';
+  p.textContent = r.summary;
+  box.appendChild(p);
 }
 
 function renderMomentumExplain(r, box) {
@@ -1505,6 +1640,7 @@ function renderExplanation() {
   }
   if (r.kind === 'momentum-1d') { renderMomentumExplain(r, box); return; }
   if (r.kind === 'astro') { renderAstroExplain(r, box); return; }
+  if (r.kind === 'rotation') { renderRotationExplain(r, box); return; }
   // 观察项对比表（斜面）
   const grid = document.createElement('div');
   grid.className = 'ro-grid';
@@ -1616,6 +1752,8 @@ window.MECH = {
   vectorState: () => ({ on: vectorsOn, ...viewport.arrowStats() }),
   selectionState: () => ({ ids: [...selectedIds], main: selectedId }),
   impactCount: () => viewport.impactCount(),
+  forceState: () => ({ on: forcesOn, ...viewport.forceArrowStats() }),
+  curveState: () => ({ on: curvesOn, samples: curveData.t.length }),
   trailState: () => ({ on: trailsOn, lines: viewport.trailStats(), points: [...runtime.trails.values()].map((a) => a.length) }),
   trailsDump: () => [...runtime.trails.entries()].map(([id, pts]) => ({ id, pts: pts.map((p) => [...p]) })),
   agentImageState: () => ({
@@ -1626,16 +1764,7 @@ window.MECH = {
   }),
   loadFixture: (name) => loadFixtureData(name || 'incline'),
   astroState: () => astroWithDrift(),
-  rotationState: () => {
-    const r = rotationInfo();
-    if (!r) return null;
-    if (!rotationBase || rotationBase.epoch !== runtime.epoch) rotationBase = { epoch: runtime.epoch, L: r.Lz };
-    return {
-      omega: r.omega, I: r.I, L: r.Lz, KE: r.KE, sliderR: r.sliderR, torque: r.torque,
-      driftL: Math.abs(r.Lz - rotationBase.L) / Math.max(Math.abs(rotationBase.L), 1e-12) * 100,
-      simT: runtime.simT,
-    };
-  },
+  rotationState: () => rotationWithDrift(),
   // 物理自检：UI 同路径构造斜面场景，同步步进 5s，验证真实演化（非预录）
   selftest() {
     const prev = cloneDoc(doc);

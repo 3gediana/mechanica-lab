@@ -21,7 +21,8 @@ export class Runtime {
     this.jointFailures = [];     // 约束创建失败记录（UI/Agent 可见）
     this.recording = null;       // 轨迹采样 {id, points:[{t,pos,speed,vel}], every, n}（解释器用，单实体）
     this.trailsOn = false;
-    this.trails = new Map();     // 轨迹线数据 id -> [[x,y,z], ...]（叠加层用，多实体，每 2 步一点）
+    this.trails = new Map();
+    this.contactForces = new Map();   // id -> [fx,fy,fz] 接触合力（速度差分反推，受力箭头用）     // 轨迹线数据 id -> [[x,y,z], ...]（叠加层用，多实体，每 2 步一点）
     this._grav = [];             // 天体（velocity-Verlet 自积分，不建 Rapier 刚体）
     this._gravMap = new Map();   // id -> 天体状态（telemetry/trails 用）
     this.epoch = 0;              // rebuild 代数（守恒量基准重取依据）
@@ -47,6 +48,7 @@ export class Runtime {
     this.collisionReports.length = 0;
     this.jointFailures.length = 0;
     this.trails.clear();
+    this.contactForces.clear();
   }
 
   clear() {
@@ -222,6 +224,12 @@ export class Runtime {
     if (!this.world) return;
     const nCol0 = this.collisions.length;
     const pre = this.systemTotals();          // 上一步末速度 = 本次碰撞前状态
+    const prevVel = new Map();                // 受力差分基准
+    for (const [id, b] of this.binds) {
+      if (!b.body || b.entity.physics.body !== 'dynamic') continue;
+      const v = b.body.linvel();
+      prevVel.set(id, [v.x, v.y, v.z]);
+    }
     this._gravStep(FIXED_H);                  // 天体（自积分）先行；Rapier 步内不含天体
     this.world.step(this.eventQueue);         // 事件队列必须传入 step 才会被填充
     this._drainCollisions();
@@ -242,6 +250,21 @@ export class Runtime {
       }
       this.collisionReports.push({ t: this.simT, pBefore: pre.p, keBefore: pre.ke, pAfter: post.p, keAfter: post.ke, postVels, pos });
       if (this.collisionReports.length > 50) this.collisionReports.shift();
+    }
+    // 接触合力 = m·(a − g·gravityScale)（速度差分反推；阻尼小量忽略，教学近似）
+    const gy = this._bindDocs ? this._bindDocs.gravity : -9.81;
+    for (const [id, b] of this.binds) {
+      if (!b.body || b.entity.physics.body !== 'dynamic') continue;
+      const pv = prevVel.get(id);
+      if (!pv) continue;
+      const v = b.body.linvel();
+      const m = b.body.mass();
+      const gs = b.entity.physics.gravityScale != null ? b.entity.physics.gravityScale : 1;
+      this.contactForces.set(id, [
+        m * ((v.x - pv[0]) / FIXED_H - 0),
+        m * ((v.y - pv[1]) / FIXED_H - gy * gs),
+        m * ((v.z - pv[2]) / FIXED_H - 0),
+      ]);
     }
     this._syncMeshes();
     this.simT += FIXED_H;

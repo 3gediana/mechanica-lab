@@ -225,6 +225,15 @@
   #consbar .erow .k { flex: 0 0 auto; }
   #consbar .erow .v { flex: 0 0 52px; text-align: right; font-family: var(--mono); font-size: 11px; color: var(--accent); }
 
+  /* 时间曲线面板 */
+  #curvePanel {
+    position: fixed; right: calc(var(--right-w) + 10px); bottom: calc(var(--simbar-h) + 10px); z-index: 18;
+    display: none; background: var(--panel); border: 1px solid var(--line); border-radius: 2px; padding: 6px;
+  }
+  #curvePanel.on { display: block; }
+  #curvePanel canvas { display: block; background: rgba(0,0,0,.35); }
+  #curvePanel .clegend { display: flex; gap: 14px; justify-content: center; margin-top: 4px; font-size: 9px; color: var(--dim); letter-spacing: .1em; }
+
   /* 加载幕 / 错误条 */
   #veil {
     position: fixed; inset: 0; z-index: 60; background: var(--bg);
@@ -381,7 +390,9 @@
     <option value="1" selected>1.0x</option>
   </select>
   <button id="btnVectors" title="速度向量箭头（叠加层）">矢量</button>
+  <button id="btnForces" title="受力箭头：重力(红)+接触合力(绿)">受力</button>
   <button id="btnTrails" title="轨迹线（叠加层）">轨迹</button>
+  <button id="btnCurves" title="时间曲线：选中体速率/高度 + 系统动能">曲线</button>
   <button id="btnCons" title="守恒量读数">守恒</button>
   <span class="ro">t=<b id="roT">0.000</b>s</span>
   <span class="ro">步长 <b>1/120s</b></span>
@@ -421,6 +432,13 @@
     <div class="cell"><span class="k">滑块半径</span><span class="v" id="crR">--</span></div>
     <div class="cell"><span class="k">外力矩</span><span class="v" id="crTorque">0</span></div>
     <div class="cell"><span class="k">运行时长</span><span class="v" id="crTime">--</span></div>
+  </div>
+</div>
+
+<div id="curvePanel" style="display:none">
+  <canvas id="curveCanvas" width="320" height="96"></canvas>
+  <div class="clegend">
+    <span style="color:#d9a441">速率</span><span style="color:#7ba7d9">高度</span><span style="color:#7dc87d">系统KE</span>
   </div>
 </div>
 

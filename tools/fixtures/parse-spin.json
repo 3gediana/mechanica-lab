@@ -1,0 +1,70 @@
+{
+  "_fixture": true,
+  "_note": "本地示例解析数据（角动量守恒：转台+径向滑块），用于无 API Key 时验证转动链路；不是真实模型输出",
+  "kind": "rotation",
+  "questionType": "角动量守恒（转台+径向滑块）",
+  "goal": "观察滑块外滑时转台角速度的变化，验证角动量守恒与 I-ω 反比",
+  "gravity": 10,
+  "entities": [
+    {
+      "type": "cylinder",
+      "name": "转台",
+      "given": {
+        "radius": 1.2,
+        "height": 0.12,
+        "mass": 8,
+        "angvel": [
+          0,
+          3,
+          0
+        ]
+      },
+      "confidence": 0.94
+    },
+    {
+      "type": "box",
+      "name": "滑块",
+      "given": {
+        "mass": 1.5
+      },
+      "confidence": 0.92
+    }
+  ],
+  "joint": {
+    "type": "prismatic",
+    "from": 0,
+    "to": 1,
+    "axis": [
+      1,
+      0,
+      0
+    ],
+    "limits": [
+      0.15,
+      1.05
+    ],
+    "anchor1": [
+      0,
+      0.14,
+      0
+    ],
+    "anchor2": [
+      0,
+      0,
+      0
+    ]
+  },
+  "observations": [
+    "滑块外滑时转台角速度的变化",
+    "系统角动量是否守恒"
+  ],
+  "unknowns": [
+    "滑槽摩擦（按无摩擦理想化）"
+  ],
+  "assumptions": [
+    "对转轴无外力矩（理想轴承），系统角动量守恒",
+    "滑槽沿转台径向、槽内无摩擦",
+    "转台初始 ω=3 rad/s，滑块 m=1.5kg 初始 r=0.7m"
+  ],
+  "confidence": 0.91
+}

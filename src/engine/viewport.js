@@ -27,6 +27,8 @@ export class Viewport {
     this._highlights = [];       // 多选高亮 BoxHelper 池
     this.highlightIds = [];
     this._bindLookup = null;
+    this.forcesOn = false;
+    this._forceArrows = [];      // 受力箭头池：偶=接触合力(绿) 奇=重力(红)
     this._rubber = document.getElementById('rubber');
   }
 
@@ -61,6 +63,51 @@ export class Viewport {
   }
 
   impactCount() { return this._impacts.length; }
+
+  // ============ 受力箭头（重力红 + 接触合力绿） ============
+  setForceArrows(on) {
+    this.forcesOn = on;
+    for (const a of this._forceArrows) a.visible = false;
+  }
+
+  // items: [{pos, contact:[x,y,z]|null, gravity:[x,y,z]}]  每 tick 驱动
+  updateForceArrows(items) {
+    if (!this.forcesOn) return;
+    const need = items.length * 2;
+    while (this._forceArrows.length < need) {
+      const isG = this._forceArrows.length % 2 === 1;
+      const a = new THREE.ArrowHelper(new THREE.Vector3(0, -1, 0), new THREE.Vector3(), 0.4, isG ? 0xc96a5a : 0x7dc87d, 0.07, 0.045);
+      this.scene.add(a);
+      this._forceArrows.push(a);
+    }
+    let ai = 0;
+    for (const it of items) {
+      const gLen = Math.hypot(...it.gravity);
+      // 重力箭头（恒显）
+      const ga = this._forceArrows[ai++];
+      ga.visible = true;
+      ga.position.set(...it.pos);
+      ga.setDirection(new THREE.Vector3(...it.gravity).normalize());
+      ga.setLength(Math.min(0.12 + gLen * 0.04, 1.2), 0.07, 0.045);
+      // 接触合力箭头（超阈值显示）
+      const ca = this._forceArrows[ai++];
+      const c = it.contact;
+      const cLen = c ? Math.hypot(...c) : 0;
+      if (c && cLen > 0.35) {
+        ca.visible = true;
+        ca.position.set(...it.pos);
+        ca.setDirection(new THREE.Vector3(...c).normalize());
+        ca.setLength(Math.min(0.12 + cLen * 0.02, 1.6), 0.07, 0.045);
+      } else {
+        ca.visible = false;
+      }
+    }
+    for (; ai < this._forceArrows.length; ai++) this._forceArrows[ai].visible = false;
+  }
+
+  forceArrowStats() {
+    return { total: this._forceArrows.length, visible: this._forceArrows.filter((a) => a.visible).length };
+  }
 
   // ============ 多选高亮（BoxHelper 池，末位为主选中） ============
   setHighlights(ids) {

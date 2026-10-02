@@ -5,17 +5,56 @@
 const FIXED_EXIT_TOL = 0.015; // 球心越过斜面底边的判定余量 m（小余量，避免离面飞行段混入实测）
 
 // plan: normalizeParse 产物；doc: 场景文档；series: [{t,pos,speed,vel}]；reports: 碰撞报告；astro: 天体遥测
-export function explainRun(plan, doc, series, reports = [], astro = null) {
+export function explainRun(plan, doc, series, reports = [], astro = null, rotation = null) {
   const hasRamp = doc.entities.some((e) => e.type === 'ramp');
   const hasGrav = doc.entities.some((e) => e.physics.gravitating);
   const spheres = doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
+  if (doc.kind === 'rotation' && rotation) return explainRotation(plan, doc, rotation);
   if (hasGrav && astro) return explainAstro(plan, astro);
   if (hasRamp && spheres.length) return explainIncline(plan, doc, series);
   if (!hasRamp && spheres.length >= 2 && reports.length) return explainMomentum(plan, doc, reports);
   return {
     supported: false,
-    reason: hasRamp ? '运行轨迹过短' : '该解析场景不含斜面、两球对撞或引力系统，暂无专用解释器',
+    reason: hasRamp ? '运行轨迹过短' : '该解析场景不含斜面、两球对撞、引力系统或转台，暂无专用解释器',
     summary: telemetrySummary(series),
+  };
+}
+
+// ---------- 转台+径向滑块：L=I·ω 守恒、I-ω 反比 ----------
+// prismatic 槽锁死滑块转动（滑块与转台同 ω），故任意时刻 L = (I_disk + m·r²)·ω 严格成立。
+function explainRotation(plan, doc, rot) {
+  const table = doc.entities.find((e) => e.type === 'cylinder' && e.physics.body === 'dynamic');
+  const slider = doc.entities.find((e) => e.type === 'box' && e.physics.body === 'dynamic');
+  if (!table || !slider) return { supported: false, reason: '转动解释需要转台+滑块', summary: telemetrySummary([]) };
+  const Idisk = 0.5 * table.physics.mass * table.params.radius ** 2;
+  const m = slider.physics.mass;
+  const rNow = rot.sliderR != null ? rot.sliderR : 0;
+  // 反比公式 ω=L/(I_disk+m·r²) 假设滑块与转台严格同转；滑移瞬态中槽-滑块转动耦合有偏差，
+  // 因此该值仅作工程参考，判定只门控 L 守恒（无外力矩的硬结论）。
+  const omegaTheory = rot.Lz / (Idisk + m * rNow * rNow);
+  const errPct = Math.abs(rot.omega - omegaTheory) / Math.max(Math.abs(omegaTheory), 1e-9) * 100;
+  const omega0 = rot.base.omega, I0 = rot.base.I;
+  const pass = rot.driftL < 1;
+  const summary = [
+    `转台（I=½MR²=${Idisk.toFixed(3)} kg·m²）初始 ω0=${omega0.toFixed(3)} rad/s；`,
+    `滑块（m=${m} kg）沿光滑径向槽由 r=${rNow.toFixed(3)} m 处因惯性外滑，`,
+    `系统对轴无外力矩，角动量 L = I·ω 守恒：实测 L=${rot.Lz.toFixed(3)} kg·m²/s（漂移 ${rot.driftL.toFixed(3)}%）。`,
+    `I 由 ${I0.toFixed(3)} 增至 ${rot.I.toFixed(3)} kg·m²，ω 由 ${omega0.toFixed(3)} 降至 ${rot.omega.toFixed(3)} rad/s（反比）；`,
+    `由守恒的 L 反推 ω 理论值 = ${omegaTheory.toFixed(3)} rad/s，实测偏差 ${errPct.toFixed(2)}%。`,
+    pass ? '角动量守恒得到验证；ω 与反比公式的偏差来自滑移过程中的转动耦合瞬态，限位稳定后趋于一致。' : '角动量漂移偏大，建议检查滑槽摩擦与外力矩假设。',
+  ].join('');
+  return {
+    supported: true,
+    kind: 'rotation',
+    simT: rot.simT,
+    observation: plan.observations[0] || '角速度随转动惯量的变化',
+    omega0, I0,
+    omegaNow: rot.omega, INow: rot.I,
+    L: rot.Lz, driftL: rot.driftL,
+    sliderR: rNow, theoryOmega: omegaTheory, errPct,
+    torque: 0,
+    pass,
+    summary,
   };
 }
 

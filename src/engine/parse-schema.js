@@ -40,6 +40,11 @@ export function normalizeParse(raw) {
         if (arr && arr.length === 3 && arr.every(Number.isFinite)) given.position = arr;
         continue;
       }
+      if (k === 'angvel') {
+        const arr = Array.isArray(v) ? v.map((x) => Number(x)) : null;
+        if (arr && arr.length === 3 && arr.every(Number.isFinite)) given.angvel = arr;
+        continue;
+      }
       if (!(k in RANGES)) continue;                    // 未知键丢弃，不猜
       const n = num(v, RANGES[k]);
       if (n === null) errors.push(`${e.name || type}.${k} 值无效（${v}），已忽略`);
@@ -55,6 +60,16 @@ export function normalizeParse(raw) {
     goal: str(raw.goal, ''),
     gravity: num(raw.gravity, [0, 50]),
     G: num(raw.G, [1e-14, 1e6]),            // 场景引力常数（天体题给；null=保持 doc 现值）
+    kind: str(raw.kind, ''),                  // rotation = 角动量/转台类（需要自动 joint 布局）
+    joint: raw.joint && typeof raw.joint === 'object' ? {
+      type: 'prismatic',
+      from: Math.max(0, Number(raw.joint.from) | 0),
+      to: Math.max(0, Number(raw.joint.to) | 0),
+      axis: Array.isArray(raw.joint.axis) ? raw.joint.axis.map((x) => Number(x)) : [1, 0, 0],
+      limits: Array.isArray(raw.joint.limits) ? raw.joint.limits.map((x) => Number(x)) : [0.15, 1.05],
+      anchor1: Array.isArray(raw.joint.anchor1) ? raw.joint.anchor1.map((x) => Number(x)) : [0, 0.14, 0],
+      anchor2: Array.isArray(raw.joint.anchor2) ? raw.joint.anchor2.map((x) => Number(x)) : [0, 0, 0],
+    } : null,
     entities,                                        // 保留 given 供 UI 标来源
     observations: strs(raw.observations),
     unknowns: strs(raw.unknowns),
@@ -69,11 +84,51 @@ function str(v, d) { return typeof v === 'string' && v.trim() ? v.trim().slice(0
 function strs(v) { return Array.isArray(v) ? v.filter((x) => typeof x === 'string').map((s) => s.slice(0, 120)).slice(0, 8) : []; }
 function clamp01(v) { const n = Number(v); return Number.isFinite(n) ? Math.min(Math.max(n, 0), 1) : null; }
 
+// ---------- 角动量（转台+径向滑块）布局：自动 prismatic joint ----------
+// 第一个 cylinder = 转台（自动 4 辐条、ω0 默认 3 rad/s），第一个 box = 滑块（初始 r=0.7、切向速度匹配）。
+// joint 用实体索引引用（from/to），applyAgentPlan 建场后映射为真实 id。
+function rotationLayout(plan) {
+  const out = [];
+  const tableE = plan.entities.find((e) => e.type === 'cylinder');
+  const sliderE = plan.entities.find((e) => e.type === 'box') || plan.entities.find((e) => e.type === 'sphere');
+  if (!tableE || !sliderE) return out;
+  const R = tableE.given.radius ?? 1.2;
+  const H = tableE.given.height ?? 0.12;
+  const M = tableE.given.mass ?? 8;
+  const omega0 = (tableE.given.angvel ?? [0, 3, 0])[1];
+  const r0 = 0.7;
+  const ms = sliderE.given.mass ?? 1.5;
+  out.push({
+    type: 'cylinder', name: tableE.name || '转台', source: 'agent',
+    params: { radius: R, height: H, spokes: 4 },
+    transform: { pos: [0, 0.42, 0], rot: [0, 0, 0] },
+    physics: {
+      body: 'dynamic', mass: M, friction: 0, restitution: 0.1,
+      linvel: [0, 0, 0], angvel: [0, omega0, 0],
+      linDamping: 0, angDamping: 0, gravityScale: 0,
+    },
+    render: { material: 'wood' },
+  });
+  out.push({
+    type: 'box', name: sliderE.name || '滑块', source: 'agent',
+    params: { sx: 0.14, sy: 0.14, sz: 0.14 },
+    transform: { pos: [r0, 0.56, 0], rot: [0, 0, 0] },
+    physics: {
+      body: 'dynamic', mass: ms, friction: 0, restitution: 0.1,
+      linvel: [0, 0, -omega0 * r0], angvel: [0, 0, 0],
+      linDamping: 0, angDamping: 0, gravityScale: 0,
+    },
+    render: { material: 'chrome' },
+  });
+  return out;
+}
+
 // ---------- 建场计划：plan → 每实体的 registry overrides（位置/参数/物理） ----------
 // 布局规则：斜面置原点；球按斜面几何放到近顶端面（留球半径避让高墙）；其余放原点上方。
 // 几何语义：题目"斜面长"= 坡面长（斜边）；registry 的 length/height 是底边水平长与高，
 // 故给 angleDeg 时做换算 base = L·cosθ, height = L·sinθ（球心实际可滑全程 ≠ 全长，解释层处理）。
 export function planToOverrides(plan) {
+  if (plan.kind === 'rotation') return rotationLayout(plan);
   const ramp = plan.entities.find((e) => e.type === 'ramp');
   let rampGeom = null;
   if (ramp) {
