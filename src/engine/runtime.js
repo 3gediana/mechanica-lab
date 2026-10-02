@@ -71,6 +71,7 @@ export class Runtime {
     mesh.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
     mesh.visible = e.visible !== false;
     mesh.userData.entityId = e.id;
+    mesh.userData.locked = e.locked === true;
     this.scene.add(mesh);
 
     const bind = { entity: e, mesh, body: null, collider: null, geometry };
@@ -232,7 +233,14 @@ export class Runtime {
         const v = b.body.linvel();
         postVels[id] = [v.x, v.y, v.z];
       }
-      this.collisionReports.push({ t: this.simT, pBefore: pre.p, keBefore: pre.ke, pAfter: post.p, keAfter: post.ke, postVels });
+      // 碰撞位置：本次新事件两碰撞体的中点（视口碰撞时刻标记用）
+      const lastEvt = this.collisions[this.collisions.length - 1];
+      let pos = null;
+      const ca = lastEvt.a && this.binds.get(lastEvt.a), cb = lastEvt.b && this.binds.get(lastEvt.b);
+      if (ca && ca.mesh && cb && cb.mesh) {
+        pos = [(ca.mesh.position.x + cb.mesh.position.x) / 2, (ca.mesh.position.y + cb.mesh.position.y) / 2, (ca.mesh.position.z + cb.mesh.position.z) / 2];
+      }
+      this.collisionReports.push({ t: this.simT, pBefore: pre.p, keBefore: pre.ke, pAfter: post.p, keAfter: post.ke, postVels, pos });
       if (this.collisionReports.length > 50) this.collisionReports.shift();
     }
     this._syncMeshes();

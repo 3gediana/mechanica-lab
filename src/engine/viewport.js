@@ -21,6 +21,74 @@ export class Viewport {
     this._arrows = [];
     this.trailsVisible = false;
     this._trailLines = [];
+    this._impacts = [];          // 碰撞时刻标记环（1.5s 淡出）
+    this.boxSelectMode = false;
+    this._boxSel = null;         // {x0,y0,x1,y1} 屏幕坐标
+    this._highlights = [];       // 多选高亮 BoxHelper 池
+    this.highlightIds = [];
+    this._bindLookup = null;
+    this._rubber = document.getElementById('rubber');
+  }
+
+  // ============ 碰撞时刻标记（关键时刻可视化） ============
+  spawnImpact(pos) {
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.06, 0.1, 40),
+      new THREE.MeshBasicMaterial({ color: ACCENT, transparent: true, opacity: 0.95, side: THREE.DoubleSide, depthWrite: false })
+    );
+    ring.position.set(pos[0], pos[1] + 0.01, pos[2]);
+    ring.rotation.x = -Math.PI / 2;
+    ring.userData.spawnT = performance.now();
+    this.scene.add(ring);
+    this._impacts.push(ring);
+  }
+
+  tickImpacts(now) {
+    for (let i = this._impacts.length - 1; i >= 0; i--) {
+      const m = this._impacts[i];
+      const age = (now - m.userData.spawnT) / 1000;
+      if (age > 1.5) {
+        this.scene.remove(m);
+        m.geometry.dispose();
+        m.material.dispose();
+        this._impacts.splice(i, 1);
+        continue;
+      }
+      m.material.opacity = 0.95 * (1 - age / 1.5);
+      const s = 1 + age * 3.5;
+      m.scale.set(s, s, s);
+    }
+  }
+
+  impactCount() { return this._impacts.length; }
+
+  // ============ 多选高亮（BoxHelper 池，末位为主选中） ============
+  setHighlights(ids) {
+    for (const h of this._highlights) {
+      this.scene.remove(h);
+      h.geometry.dispose();
+    }
+    this._highlights = [];
+    let mainMesh = null;
+    for (const id of ids) {
+      const bind = this._bindLookup && this._bindLookup(id);
+      if (!bind || !bind.mesh) continue;
+      const h = new THREE.BoxHelper(bind.mesh, id === ids[ids.length - 1] ? ACCENT : 0x82878f);
+      h.material.transparent = true;
+      h.material.opacity = id === ids[ids.length - 1] ? 0.9 : 0.45;
+      this.scene.add(h);
+      this._highlights.push(h);
+      mainMesh = bind.mesh;
+    }
+    if (mainMesh && this.gizmoEnabled !== false && this.gizmoMode) {
+      this.gizmo.attach(mainMesh);
+      this.gizmo.enabled = true;
+    } else {
+      this.gizmo.detach();
+      this.gizmo.enabled = false;
+    }
+    this.selectedMesh = mainMesh || null;
+    this.highlightIds = ids;
   }
 
   // ============ 轨迹线叠加层 ============
@@ -181,7 +249,29 @@ export class Viewport {
     this.gizmo = gizmo;
     scene.add(gizmo.getHelper());
 
-    renderer.domElement.addEventListener('pointerdown', (e) => { this._downPos = [e.clientX, e.clientY]; });
+    renderer.domElement.addEventListener('pointerdown', (e) => {
+      this._downPos = [e.clientX, e.clientY];
+      if (this.boxSelectMode) {
+        this._boxSel = { x0: e.clientX, y0: e.clientY, x1: e.clientX, y1: e.clientY };
+        const rb = document.getElementById('rubber');
+        rb.style.display = 'block';
+        rb.style.left = e.clientX + 'px';
+        rb.style.top = e.clientY + 'px';
+        rb.style.width = '0px';
+        rb.style.height = '0px';
+      }
+    });
+    window.addEventListener('pointermove', (e) => {
+      if (this.boxSelectMode && this._boxSel) {
+        this._boxSel.x1 = e.clientX;
+        this._boxSel.y1 = e.clientY;
+        const rb = document.getElementById('rubber');
+        rb.style.left = Math.min(this._boxSel.x0, e.clientX) + 'px';
+        rb.style.top = Math.min(this._boxSel.y0, e.clientY) + 'px';
+        rb.style.width = Math.abs(e.clientX - this._boxSel.x0) + 'px';
+        rb.style.height = Math.abs(e.clientY - this._boxSel.y0) + 'px';
+      }
+    });
     renderer.domElement.addEventListener('pointerup', (e) => this._onUp(e));
     window.addEventListener('resize', () => this.resize());
   }
@@ -190,10 +280,44 @@ export class Viewport {
     if (!this._downPos) return;
     const dx = e.clientX - this._downPos[0], dy = e.clientY - this._downPos[1];
     this._downPos = null;
+    if (this.boxSelectMode && this._boxSel) {
+      const sel = this._boxSel;
+      this._boxSel = null;
+      if (this._rubber) this._rubber.style.display = 'none';
+      if (Math.abs(sel.x1 - sel.x0) + Math.abs(sel.y1 - sel.y0) < 6) return;   // 微小拖动=误触，忽略
+      const ids = this._idsInScreenRect(sel);
+      this.cb.onBoxSelect && this.cb.onBoxSelect(ids);
+      return;
+    }
     if (dx * dx + dy * dy > 25) return;          // 拖动视角不视为点选
     if (this.gizmo.dragging) return;
     const hit = this.pick(e.clientX, e.clientY);
-    this.cb.onSelect && this.cb.onSelect(hit);
+    this.cb.onSelect && this.cb.onSelect(hit, e.shiftKey === true);
+  }
+
+  // 屏幕矩形内（可见、未锁定）的实体 id
+  _idsInScreenRect(sel) {
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const x0 = Math.min(sel.x0, sel.x1), x1 = Math.max(sel.x0, sel.x1);
+    const y0 = Math.min(sel.y0, sel.y1), y1 = Math.max(sel.y0, sel.y1);
+    const ids = [];
+    const v = new THREE.Vector3();
+    for (const child of this.scene.children) {
+      if (!child.userData || !child.userData.entityId || !child.visible) continue;
+      if (child.userData.locked) continue;
+      v.copy(child.position).project(this.camera);
+      const sx = r.left + ((v.x + 1) / 2) * r.width;
+      const sy = r.top + ((1 - v.y) / 2) * r.height;
+      if (sx >= x0 && sx <= x1 && sy >= y0 && sy <= y1) ids.push(child.userData.entityId);
+    }
+    return ids;
+  }
+
+  setBoxSelect(on) {
+    this.boxSelectMode = on;
+    this.controls.enableRotate = !on;            // 框选时左键拖拽归选框，不转视角
+    this.renderer.domElement.style.cursor = on ? 'crosshair' : '';
+    if (this._rubber) this._rubber.style.display = 'none';
   }
 
   pick(clientX, clientY) {
@@ -210,38 +334,52 @@ export class Viewport {
     const hits = this.raycaster.intersectObjects(roots, true);   // 递归：Group 子网格（辐条等）也可点选
     if (!hits.length) return null;
     let o = hits[0].object;
-    while (o && !o.userData.entityId) o = o.parent;
-    return o ? o.userData.entityId : null;
+    while (o && (!o.userData || !o.userData.entityId)) o = o.parent;
+    const id = o ? o.userData.entityId : null;
+    if (id && o.userData.locked) return null;                    // 锁定实体不可被视口点选
+    return id;
   }
 
   // ============ 选择与 gizmo ============
+  // workbench 注入 id→bind 查询（viewport 不持有 runtime 引用）
+  setBindLookup(fn) { this._bindLookup = fn; }
+
   setSelected(mesh) {
-    if (this._highlight) {
-      this.scene.remove(this._highlight);
-      this._highlight.geometry.dispose();
-      this._highlight = null;
+    // 兼容旧单选接口：委托 setHighlights（mesh 为空=清空）
+    this.setHighlights(mesh ? [mesh.userData.entityId] : []);
+  }
+
+  setHighlights(ids) {
+    for (const h of this._highlights) {
+      this.scene.remove(h);
+      h.geometry.dispose();
     }
-    if (mesh) {
-      this._highlight = new THREE.BoxHelper(mesh, ACCENT);
-      this._highlight.material.transparent = true;
-      this._highlight.material.opacity = 0.9;
-      this.scene.add(this._highlight);
-      if (this.gizmoMode && this.gizmoEnabled !== false) {
-        this.gizmo.attach(mesh);
-        this.gizmo.enabled = true;
-      } else {
-        this.gizmo.detach();
-        this.gizmo.enabled = false;
-      }
+    this._highlights = [];
+    let mainMesh = null;
+    for (const id of ids) {
+      const bind = this._bindLookup && this._bindLookup(id);
+      if (!bind || !bind.mesh) continue;
+      const main = id === ids[ids.length - 1];
+      const h = new THREE.BoxHelper(bind.mesh, main ? ACCENT : 0x82878f);
+      h.material.transparent = true;
+      h.material.opacity = main ? 0.9 : 0.45;
+      this.scene.add(h);
+      this._highlights.push(h);
+      mainMesh = bind.mesh;
+    }
+    if (mainMesh && this.gizmoEnabled !== false && this.gizmoMode) {
+      this.gizmo.attach(mainMesh);
+      this.gizmo.enabled = true;
     } else {
       this.gizmo.detach();
       this.gizmo.enabled = false;
     }
-    this.selectedMesh = mesh || null;
+    this.selectedMesh = mainMesh || null;
+    this.highlightIds = ids;
   }
 
   refreshHighlight() {
-    if (this._highlight && this.selectedMesh) this._highlight.update();
+    for (const h of this._highlights) h.update();
   }
 
   setGizmoMode(mode) {

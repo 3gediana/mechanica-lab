@@ -3,7 +3,9 @@
 
 const TYPE_MAP = {
   ramp: 'ramp', sphere: 'sphere', box: 'box', cylinder: 'cylinder', ground: 'ground',
+  celestial: 'celestial', planet: 'celestial', star: 'celestial',
   斜面: 'ramp', 球: 'sphere', 方块: 'box', 圆柱: 'cylinder', 地面: 'ground',
+  天体: 'celestial', 行星: 'celestial', 恒星: 'celestial', 卫星: 'celestial',
 };
 
 const RANGES = {
@@ -33,6 +35,11 @@ export function normalizeParse(raw) {
         if (arr && arr.length === 3 && arr.every(Number.isFinite)) given.velocity = arr;
         continue;
       }
+      if (k === 'position') {
+        const arr = Array.isArray(v) ? v.map((x) => Number(x)) : null;
+        if (arr && arr.length === 3 && arr.every(Number.isFinite)) given.position = arr;
+        continue;
+      }
       if (!(k in RANGES)) continue;                    // 未知键丢弃，不猜
       const n = num(v, RANGES[k]);
       if (n === null) errors.push(`${e.name || type}.${k} 值无效（${v}），已忽略`);
@@ -47,6 +54,7 @@ export function normalizeParse(raw) {
     questionType: str(raw.questionType, '未知题型'),
     goal: str(raw.goal, ''),
     gravity: num(raw.gravity, [0, 50]),
+    G: num(raw.G, [1e-14, 1e6]),            // 场景引力常数（天体题给；null=保持 doc 现值）
     entities,                                        // 保留 given 供 UI 标来源
     observations: strs(raw.observations),
     unknowns: strs(raw.unknowns),
@@ -133,6 +141,13 @@ export function planToOverrides(plan) {
       o.physics = { mass: e.given.mass ?? 1, friction: e.given.friction ?? 0.4 };
       o.transform = { pos: [0.6, 0.35, 0], rot: [0, 0, 0] };
       if (e.given.velocity) o.physics.linvel = e.given.velocity;
+    } else if (e.type === 'celestial') {
+      o.params = { radius: e.given.radius ?? 0.5 };
+      o.physics = {
+        mass: e.given.mass ?? 100,
+        linvel: e.given.velocity ?? [0, 0, 0],
+      };
+      o.transform = { pos: e.given.position ?? [0, 0, 0], rot: [0, 0, 0] };
     } else if (e.type === 'cylinder') {
       o.params = { radius: e.given.radius ?? 0.12, height: 0.3 };
       o.physics = { mass: e.given.mass ?? 1 };

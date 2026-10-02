@@ -36,7 +36,8 @@ function toast(msg) {
 
 // ============ 全局状态 ============
 let doc = null;                 // 当前场景文档（唯一事实源）
-let selectedId = null;
+let selectedId = null;          // 主选中（gizmo/检查器对象）
+let selectedIds = [];           // 多选集合（末位=主选中）
 let mode = 'edit';              // edit | run
 let paused = false;
 let timeScale = 1;
@@ -55,7 +56,13 @@ const AUTOSAVE_KEY = 'mechanica.autosave.v1';
 
     setLoad('正在初始化视口');
     viewport = new Viewport($('stage'), {
-      onSelect: (id) => selectEntity(id),
+      onSelect: (id, additive) => selectEntity(id, additive),
+      onBoxSelect: (ids) => {
+        selectedIds = ids;
+        selectedId = ids.length ? ids[ids.length - 1] : null;
+        syncSelectionUI();
+        if (ids.length) toast('框选 ' + ids.length + ' 个实体');
+      },
       onGizmoCommit: () => {
         const e = getEntity(doc, selectedId);
         if (!e) return;
@@ -73,6 +80,7 @@ const AUTOSAVE_KEY = 'mechanica.autosave.v1';
     setLoad('正在构建场景');
     runtime = new Runtime(RAPIER, M, viewport.scene);
     attachRegistry(runtime, registry);
+    viewport.setBindLookup((id) => runtime.binds.get(id));
 
     const saved = loadAutosave();
     doc = saved || getPreset('incline');
@@ -111,8 +119,11 @@ function commitChange(label) {
 
 function rebuildAll(rerenderInspector = true) {
   runtime.rebuild(doc);
-  if (selectedId && !runtime.binds.has(selectedId)) selectedId = null;
-  viewport.setSelected(selectedId ? runtime.binds.get(selectedId).mesh : null);
+  selectedIds = selectedIds.filter((x) => runtime.binds.has(x));
+  if (selectedId && !selectedIds.includes(selectedId)) {
+    selectedId = selectedIds.length ? selectedIds[selectedIds.length - 1] : null;
+  }
+  viewport.setHighlights(selectedIds);
   renderOutline();
   if (rerenderInspector) renderInspector();
   updateSimbarStatic();
@@ -128,12 +139,28 @@ function applyDoc(doc0, label) {   // 整文档替换（预置/打开/新建/撤
   commitChange(label);
 }
 
-// ============ 选择 ============
-function selectEntity(id) {
-  selectedId = id;
-  viewport.setSelected(id ? runtime.binds.get(id).mesh : null);
-  renderOutline();
+// ============ 选择（单选 + shift 加选 + 框选多选） ============
+function selectEntity(id, additive = false) {
+  if (additive && id) {
+    const i = selectedIds.indexOf(id);
+    if (i >= 0) selectedIds.splice(i, 1); else selectedIds.push(id);
+  } else {
+    selectedIds = id ? [id] : [];
+  }
+  selectedId = selectedIds.length ? selectedIds[selectedIds.length - 1] : null;
+  syncSelectionUI();
+}
+
+function syncSelectionUI() {
+  viewport.setHighlights(selectedIds.filter((x) => runtime.binds.has(x)));
+  updateOutlineSelection();     // 只刷高亮，不重建（重建会打断行内改名）
   renderInspector();
+}
+
+function updateOutlineSelection() {
+  for (const row of $('outline').querySelectorAll('.ol-row')) {
+    row.classList.toggle('sel', selectedIds.includes(row.dataset.id));
+  }
 }
 
 // ============ 实体操作（UI 与 Agent 共用） ============
@@ -160,12 +187,19 @@ function opUpdateEntity(id, patch, label, { rebuild = true, rerender = true } = 
   return true;
 }
 function opRemoveEntity(id) {
-  const e = getEntity(doc, id);
-  if (!e) return false;
-  docRemove(doc, id);
-  if (selectedId === id) selectedId = null;
+  const targets = selectedIds.includes(id) && selectedIds.length > 1 ? [...selectedIds] : [id];
+  const names = [];
+  for (const tid of targets) {
+    const e = getEntity(doc, tid);
+    if (!e) continue;
+    docRemove(doc, tid);
+    names.push(e.name);
+  }
+  if (!names.length) return false;
+  selectedIds = selectedIds.filter((x) => getEntity(doc, x));
+  if (!getEntity(doc, selectedId)) selectedId = selectedIds.length ? selectedIds[selectedIds.length - 1] : null;
   rebuildAll();
-  commitChange('删除 ' + e.name);
+  commitChange('删除 ' + names.join('、'));
   return true;
 }
 function opDuplicate(id) {
@@ -210,6 +244,10 @@ function updateSimbarStatic() {
   $('btnPause').classList.toggle('hot', mode === 'run' && paused);
   $('btnStep').disabled = false;
   $('btnReset').disabled = false;
+  if (mode !== 'edit' && viewport.boxSelectMode) {
+    viewport.setBoxSelect(false);
+    $('btnBoxSel').classList.remove('hot');
+  }
   const chip = $('modeChip');
   chip.textContent = mode === 'edit' ? '编辑态' : (paused ? '暂停态' : '运行态');
   chip.className = 'chip ' + (mode === 'edit' ? '' : (paused ? 'pause' : 'run'));
@@ -274,6 +312,12 @@ function bindUI() {
 
   $('btnModeMove').onclick = () => setGizmoMode('translate');
   $('btnModeRotate').onclick = () => setGizmoMode('rotate');
+  $('btnBoxSel').onclick = () => {
+    if (mode !== 'edit') { toast('框选仅编辑态可用'); return; }
+    const on = !viewport.boxSelectMode;
+    viewport.setBoxSelect(on);
+    $('btnBoxSel').classList.toggle('hot', on);
+  };
   $('btnSnap').onclick = () => {
     const on = !$('btnSnap').classList.contains('hot');
     $('btnSnap').classList.toggle('hot', on);
@@ -361,7 +405,10 @@ function renderCatalog() {
   }
 }
 
+let outlineEditing = false;   // 大纲行改名中：禁止重建（重建会吞掉正在编辑的 input）
+
 function renderOutline() {
+  if (outlineEditing) return;
   const box = $('outline');
   box.innerHTML = '';
   if (!doc.entities.length) {
@@ -371,9 +418,40 @@ function renderOutline() {
   for (const e of doc.entities) {
     const c = registry.getComponent(e.type);
     const row = document.createElement('div');
-    row.className = 'ol-row' + (e.id === selectedId ? ' sel' : '');
-    row.innerHTML = `<span class="nm"></span><span class="ty"></span><span class="del" title="删除">×</span>`;
-    row.querySelector('.nm').textContent = e.name;
+    row.dataset.id = e.id;
+    row.className = 'ol-row' + (selectedIds.includes(e.id) ? ' sel' : '');
+    row.innerHTML = `<span class="nm"></span><span class="ty"></span><span class="lock" title="锁定（防误选/防拖动）"></span><span class="del" title="删除">×</span>`;
+    const nm = row.querySelector('.nm');
+    nm.textContent = e.name;
+    nm.ondblclick = () => {
+      if (mode === 'run') { toast('运行态不可重命名，请先重置'); return; }
+      outlineEditing = true;
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = e.name;
+      input.style.cssText = 'flex:1;min-width:0;background:rgba(255,255,255,.05);border:1px solid rgba(217,164,65,.5);color:var(--text);font-size:11px;padding:1px 4px;border-radius:2px';
+      nm.replaceWith(input);
+      input.focus();
+      input.select();
+      const commit = () => {
+        outlineEditing = false;
+        const v = input.value.trim();
+        if (v && v !== e.name) opUpdateEntity(e.id, { name: v }, '重命名', { rebuild: false });
+        else renderOutline();
+      };
+      input.onblur = commit;
+      input.onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); } if (ev.key === 'Escape') { input.value = e.name; input.blur(); } };
+    };
+    const lock = row.querySelector('.lock');
+    lock.textContent = e.locked ? '已锁' : '锁';
+    lock.style.cssText = 'cursor:pointer;font-size:9px;color:' + (e.locked ? 'var(--accent)' : 'var(--faint)');
+    lock.onclick = (ev) => {
+      ev.stopPropagation();
+      if (mode === 'run') { toast('运行态不可锁定，请先重置'); return; }
+      opUpdateEntity(e.id, { locked: !e.locked }, e.locked ? '解锁 ' + e.name : '锁定 ' + e.name, { rebuild: false });
+      const mesh = runtime.binds.get(e.id);
+      if (mesh) mesh.mesh.userData.locked = e.locked;   // opUpdate 后 e.locked 即新值
+    };
     row.querySelector('.ty').textContent = c.label;
     row.onclick = () => selectEntity(e.id);
     row.querySelector('.del').onclick = (ev) => { ev.stopPropagation(); opRemoveEntity(e.id); };
@@ -675,7 +753,8 @@ function astroInfo() {
 }
 
 // ---------- 转动守恒量（rotation 模式：转台+径向滑块等绕 y 系统） ----------
-let rotationBase = null;   // {epoch, L}
+let rotationBase = null;   // {epoch, L, KE}
+let momentumBase = null;   // {epoch, KE}
 
 function rotationInfo() {
   const items = [];
@@ -713,7 +792,8 @@ function rotationInfo() {
 function updateRotationCons() {
   const r = rotationInfo();
   if (!r) return;
-  if (!rotationBase || rotationBase.epoch !== runtime.epoch) rotationBase = { epoch: runtime.epoch, L: r.Lz };
+  if (!rotationBase || rotationBase.epoch !== runtime.epoch) rotationBase = { epoch: runtime.epoch, L: r.Lz, KE: r.KE };
+  updateEnergyBar(r.KE / Math.max(rotationBase.KE, 1e-12));
   const dL = Math.abs(r.Lz - rotationBase.L) / Math.max(Math.abs(rotationBase.L), 1e-12) * 100;
   $('crOmega').textContent = `${r.omega.toFixed(3)} rad/s`;
   $('crI').textContent = `${r.I.toFixed(3)} kg·m²`;
@@ -726,6 +806,13 @@ function updateRotationCons() {
   $('crTime').textContent = `t=${r.simT.toFixed(1)}s`;
 }
 
+function updateEnergyBar(rate) {
+  const pct = Math.max(0, Math.min(rate, 1.5)) * 100 / 1.5;   // 条量程 0-150%，66.7% 刻度=100%
+  $('ebFill').style.width = pct + '%';
+  $('ebFill').style.background = rate > 1.02 ? 'var(--text)' : 'var(--accent)';
+  $('ebPct').textContent = (rate * 100).toFixed(1) + '%';
+}
+
 function updateConsbar() {
   if (!consOn) return;
   const astro = doc.entities.some((e) => e.physics.gravitating);
@@ -736,6 +823,8 @@ function updateConsbar() {
   if (astro) { updateAstroCons(); return; }
   if (rotation) { updateRotationCons(); return; }
   const live = runtime.systemTotals();
+  if (!momentumBase || momentumBase.epoch !== runtime.epoch) momentumBase = { epoch: runtime.epoch, KE: live.ke };
+  updateEnergyBar(live.ke / Math.max(momentumBase.KE, 1e-12));
   $('cbP').textContent = `${live.p[0].toFixed(3)} N·s`;
   $('cbKE').textContent = `${live.ke.toFixed(3)} J`;
   const rep = runtime.collisionReports[runtime.collisionReports.length - 1];
@@ -756,10 +845,21 @@ function updateConsbar() {
   $('cbKEa').textContent = `${rep.keAfter.toFixed(3)} J`;
 }
 
-function updateAstroCons() {
+function astroWithDrift() {
   const a = astroInfo();
-  if (!a) return;
+  if (!a) return null;
   if (!astroBase || astroBase.epoch !== runtime.epoch) astroBase = { epoch: runtime.epoch, E: a.E, L: a.Lz };
+  return {
+    ...a, simT: runtime.simT,
+    driftE: Math.abs(a.E - astroBase.E) / Math.max(Math.abs(astroBase.E), 1e-12) * 100,
+    driftL: Math.abs(a.Lz - astroBase.L) / Math.max(Math.abs(astroBase.L), 1e-12) * 100,
+  };
+}
+
+function updateAstroCons() {
+  const a = astroWithDrift();
+  if (!a) return;
+  updateEnergyBar(a.E / astroBase.E);   // E 为负，比值仍为正 = 能量保持率
   const dE = Math.abs(a.E - astroBase.E) / Math.max(Math.abs(astroBase.E), 1e-12) * 100;
   const dL = Math.abs(a.Lz - astroBase.L) / Math.max(Math.abs(astroBase.L), 1e-12) * 100;
   $('caE').textContent = `${a.E.toFixed(3)} J`;
@@ -776,6 +876,7 @@ function updateAstroCons() {
 
 // ============ 底栏读数 + 检查器实时区 ============
 let roTimer = 0;
+let _seenReports = 0;
 function updateReadouts() {
   $('roT').textContent = runtime.simT.toFixed(3);
   $('roN').textContent = doc.entities.length;
@@ -824,7 +925,17 @@ function tick() {
     viewport.updateVelocityArrows(items);
   }
   if (trailsOn) viewport.updateTrails(runtime.trails);
+  const nRep = runtime.collisionReports.length;
+  if (nRep < _seenReports) _seenReports = 0;
+  if (nRep > _seenReports) {
+    for (let i = _seenReports; i < nRep; i++) {
+      const r = runtime.collisionReports[i];
+      if (r.pos) viewport.spawnImpact(r.pos);
+    }
+    _seenReports = nRep;
+  }
   viewport.render();
+  viewport.tickImpacts(performance.now());
   roTimer += rawDt;
   if (roTimer > 0.15) { roTimer = 0; updateReadouts(); updateConsbar(); }
 }
@@ -853,6 +964,10 @@ const PEDIT = {
     ['radius', '半径', 'm', 0.12, [0.01, 2]],
   ],
   ground: [],
+  celestial: [
+    ['mass', '质量', 'kg', 100, [0.01, 1000000]],
+    ['radius', '半径', 'm', 0.5, [0.05, 4]],
+  ],
 };
 
 function selectTab(which) {
@@ -1229,6 +1344,8 @@ function applyAgentPlan() {
   if (mode !== 'edit') { toast('运行态不可建场，请先重置'); return; }
   const M = window.MECH;
   if (!agentPlan.gravityDefault) M.setGravity(agentPlan.gravity);
+  if (agentPlan.G != null) M.setG(agentPlan.G);
+  if (doc.entities.some((e) => e.physics.gravitating) && !trailsOn) setTrails(true);   // 天体场景轨道线是观察必需
   const overrides = planToOverrides(agentPlan);
   const created = [];
   for (const o of overrides) created.push(M.addComponent(o.type, o));
@@ -1275,9 +1392,10 @@ let explainBusy = false;
 async function runAndExplain() {
   if (explainBusy) return;
   if (!agentPlan) { toast('请先完成解析并创建场景实体'); return; }
-  const ball = doc.entities.find((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
-  if (!ball) { setParseStatus('解释器需要场景中存在动态小球，请先创建实体', true); return; }
+  const ball = doc.entities.find((e) => (e.type === 'sphere' || e.type === 'celestial') && e.physics.body === 'dynamic');
+  if (!ball) { setParseStatus('解释器需要场景中存在动态小球/天体，请先创建实体', true); return; }
   const hasRamp = doc.entities.some((e) => e.type === 'ramp');
+  const isAstro = doc.entities.some((e) => e.physics.gravitating);
   if (mode !== 'edit') resetSim();
 
   explainBusy = true;
@@ -1288,17 +1406,20 @@ async function runAndExplain() {
   play();
   const ramp = doc.entities.find((e) => e.type === 'ramp');
   const exitX = ramp ? ramp.transform.pos[0] + ramp.params.length / 2 : Infinity;
-  const isMomentum = !hasRamp;
+  const isMomentum = !hasRamp && !isAstro;
+  const needT = isAstro ? 11 : 4;              // 天体需跑满两圈（两个方位角跳变才可测周期，T≈5s）
   const u0 = ball.physics.linvel[0];
   await new Promise((resolve) => {
-    // 终止条件：斜面=球越过底边；对撞=出现使球速改变的碰撞报告（跳过出生触地）；通用=4s 超时
+    // 终止条件：斜面=球越过底边；对撞=出现使球速改变的碰撞报告（跳过出生触地）；天体=跑满时长；通用=超时
     const iv = setInterval(() => {
       const tel = runtime.telemetry(ball.id);
-      const done = isMomentum
-        ? runtime.collisionReports.some((r) => r.postVels && r.postVels[ball.id]
-          && Math.abs(r.postVels[ball.id][0] - u0) > 0.05)
-        : (!runtime.world || !tel || tel.pos[0] > exitX);
-      if (done || runtime.simT > 4 || !runtime.world) {
+      const done = isAstro
+        ? runtime.simT > needT
+        : isMomentum
+          ? runtime.collisionReports.some((r) => r.postVels && r.postVels[ball.id]
+            && Math.abs(r.postVels[ball.id][0] - u0) > 0.05)
+          : (!runtime.world || !tel || tel.pos[0] > exitX);
+      if (done || runtime.simT > needT || !runtime.world) {
         clearInterval(iv);
         resolve();
       }
@@ -1307,11 +1428,38 @@ async function runAndExplain() {
   if (isMomentum) await new Promise((res) => setTimeout(res, 300));   // 缓冲几步让报告速度稳定
   if (mode === 'run' && !paused) pauseToggle();
   const series = runtime.stopRecording();
-  agentExplain = explainRun(agentPlan, doc, series, runtime.collisionReports);
+  agentExplain = explainRun(agentPlan, doc, series, runtime.collisionReports, isAstro ? astroWithDrift() : null);
   renderExplanation();
   btn.disabled = false;
   btn.textContent = '重新运行解释';
   explainBusy = false;
+}
+
+function renderAstroExplain(r, box) {
+  const grid = document.createElement('div');
+  grid.className = 'ro-grid';
+  const rows = [
+    ['轨道半长轴 a', r.theoretical.vcirc != null ? `${a_of(r).toFixed(3)} m` : '--'],
+    ['周期（理论 2π√(a³/GM)）', r.theoretical.period != null ? `${r.theoretical.period.toFixed(2)} s` : '--'],
+    ['周期（实测）', r.measured.period != null ? `${r.measured.period.toFixed(2)} s` : '采样中'],
+    ['偏心率 e', r.measured.ecc != null ? r.measured.ecc.toFixed(4) : '--'],
+    ['机械能漂移', r.driftE.toExponential(1)],
+    ['角动量漂移', r.driftL.toExponential(1)],
+    ['判定', r.pass ? '通过（近圆、闭合、守恒）' : '未通过'],
+  ];
+  grid.innerHTML = rows.map(([k], i) =>
+    `<div class="cell" style="grid-column:1/-1"><span class="k">${k}</span><span class="v ${i >= 4 && i <= 6 ? 'acc' : 'plain'}"></span></div>`
+  ).join('');
+  [...grid.querySelectorAll('.v')].forEach((el, i) => { el.textContent = rows[i][1]; });
+  box.appendChild(grid);
+  const p = document.createElement('div');
+  p.className = 'hint';
+  p.style.marginTop = '8px';
+  p.textContent = r.summary;
+  box.appendChild(p);
+}
+function a_of(r) {
+  return (r.measured.rmin + r.measured.rmax) / 2;
 }
 
 function renderMomentumExplain(r, box) {
@@ -1356,6 +1504,7 @@ function renderExplanation() {
     return;
   }
   if (r.kind === 'momentum-1d') { renderMomentumExplain(r, box); return; }
+  if (r.kind === 'astro') { renderAstroExplain(r, box); return; }
   // 观察项对比表（斜面）
   const grid = document.createElement('div');
   grid.className = 'ro-grid';
@@ -1422,6 +1571,14 @@ window.MECH = {
   undo, redo,
   loadPreset: (id) => applyDoc(getPreset(id), '载入预置'),
   // 重力用正数表示向下的模长（存 doc.gravity 为负）；越界抛错由调用方处理
+  setG: (g) => {
+    const v = Number(g);
+    if (!Number.isFinite(v) || v <= 0 || v > 1e6) throw new Error('引力常数无效: ' + g);
+    doc.G = v;
+    rebuildAll();
+    commitChange('设引力常数 G=' + v);
+    return doc.G;
+  },
   setGravity: (g) => {
     const v = Number(g);
     if (!Number.isFinite(v) || v < 0 || v > 50) throw new Error('重力值无效: ' + g);
@@ -1457,6 +1614,8 @@ window.MECH = {
     })),
   }),
   vectorState: () => ({ on: vectorsOn, ...viewport.arrowStats() }),
+  selectionState: () => ({ ids: [...selectedIds], main: selectedId }),
+  impactCount: () => viewport.impactCount(),
   trailState: () => ({ on: trailsOn, lines: viewport.trailStats(), points: [...runtime.trails.values()].map((a) => a.length) }),
   trailsDump: () => [...runtime.trails.entries()].map(([id, pts]) => ({ id, pts: pts.map((p) => [...p]) })),
   agentImageState: () => ({
@@ -1466,17 +1625,7 @@ window.MECH = {
     src: agentImageCanvas ? { w: agentImageCanvas.width, h: agentImageCanvas.height } : null,
   }),
   loadFixture: (name) => loadFixtureData(name || 'incline'),
-  astroState: () => {
-    const a = astroInfo();
-    if (!a) return null;
-    if (!astroBase || astroBase.epoch !== runtime.epoch) astroBase = { epoch: runtime.epoch, E: a.E, L: a.Lz };
-    return {
-      G: a.G, E: a.E, KE: a.KE, PE: a.PE, Lz: a.Lz,
-      driftE: Math.abs(a.E - astroBase.E) / Math.max(Math.abs(astroBase.E), 1e-12) * 100,
-      driftL: Math.abs(a.Lz - astroBase.L) / Math.max(Math.abs(astroBase.L), 1e-12) * 100,
-      ecc: a.ecc, period: a.period, rmin: a.rmin, rmax: a.rmax, simT: runtime.simT,
-    };
-  },
+  astroState: () => astroWithDrift(),
   rotationState: () => {
     const r = rotationInfo();
     if (!r) return null;

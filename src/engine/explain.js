@@ -4,16 +4,55 @@
 
 const FIXED_EXIT_TOL = 0.015; // 球心越过斜面底边的判定余量 m（小余量，避免离面飞行段混入实测）
 
-// plan: normalizeParse 产物；doc: 场景文档；series: [{t,pos,speed,vel}]；reports: 碰撞报告
-export function explainRun(plan, doc, series, reports = []) {
+// plan: normalizeParse 产物；doc: 场景文档；series: [{t,pos,speed,vel}]；reports: 碰撞报告；astro: 天体遥测
+export function explainRun(plan, doc, series, reports = [], astro = null) {
   const hasRamp = doc.entities.some((e) => e.type === 'ramp');
+  const hasGrav = doc.entities.some((e) => e.physics.gravitating);
   const spheres = doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
+  if (hasGrav && astro) return explainAstro(plan, astro);
   if (hasRamp && spheres.length) return explainIncline(plan, doc, series);
   if (!hasRamp && spheres.length >= 2 && reports.length) return explainMomentum(plan, doc, reports);
   return {
     supported: false,
-    reason: hasRamp ? '运行轨迹过短' : '该解析场景不含斜面或两球对撞，暂无专用解释器（需运行产生碰撞记录）',
+    reason: hasRamp ? '运行轨迹过短' : '该解析场景不含斜面、两球对撞或引力系统，暂无专用解释器',
     summary: telemetrySummary(series),
+  };
+}
+
+// ---------- 天体：圆轨道理论 vs 实测（E/L 漂移、周期、偏心率） ----------
+// astro = workbench astroInfo() 结果 {E, KE, PE, Lz, ecc, period, rmin, rmax, simT}
+function explainAstro(plan, astro) {
+  const G = astro.G;
+  const center = plan.entities.find((e) => e.type === 'celestial');
+  const sat = plan.entities.filter((x) => x.type === 'celestial')[1];
+  const M = center ? (center.given.mass ?? 100) : 100;
+  const r0 = sat ? (sat.given.radius != null ? null : null) : null;   // 半径是渲染尺寸，不用
+  // 圆轨道理论用轨道半径（实测 rmax/rmin 的中点近似半长轴）
+  const a = astro.rmin != null && astro.rmax != null ? (astro.rmin + astro.rmax) / 2 : null;
+  const Ttheory = a != null ? 2 * Math.PI * Math.sqrt(a * a * a / (G * M)) : null;
+  const vcirc = a != null ? Math.sqrt(G * M / a) : null;
+  const driftOk = astro.driftE < 2 && astro.driftL < 2;
+  const eccOk = astro.ecc != null && astro.ecc < 0.1;
+  const periodOk = astro.period != null && Ttheory != null
+    && Math.abs(astro.period - Ttheory) / Ttheory * 100 < 5;
+  const pass = driftOk && eccOk && periodOk;
+  const summary = [
+    `两体引力系统（G=${G}，中心质量 ${M}）：轨道半长轴 a≈${a != null ? a.toFixed(3) : '?'} m，`,
+    `圆轨道理论周期 T = 2π√(a³/GM) = ${Ttheory != null ? Ttheory.toFixed(2) : '?'} s。`,
+    `模拟实测周期 ${astro.period != null ? astro.period.toFixed(2) + ' s' : '采样中'}、偏心率 e=${astro.ecc != null ? astro.ecc.toFixed(4) : '?'}，`,
+    `机械能漂移 ${astro.driftE.toExponential(1)}、角动量漂移 ${astro.driftL.toExponential(1)}（velocity-Verlet 辛积分，能量长期有界）。`,
+    driftOk && eccOk ? '轨道闭合稳定，开普勒轨道动力学得到验证。' : '存在明显漂移或轨道变形，建议检查步长与初始条件。',
+  ].join('');
+  return {
+    supported: true,
+    kind: 'astro',
+    simT: astro.simT,
+    observation: plan.observations[0] || '轨道周期与偏心率',
+    theoretical: { period: Ttheory, vcirc, formula: 'T = 2π√(a³/GM)' },
+    measured: { period: astro.period, ecc: astro.ecc, rmin: astro.rmin, rmax: astro.rmax },
+    driftE: astro.driftE, driftL: astro.driftL,
+    pass,
+    summary,
   };
 }
 

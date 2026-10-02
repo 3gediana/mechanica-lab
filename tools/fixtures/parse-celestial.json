@@ -1,0 +1,57 @@
+{
+  "_fixture": true,
+  "_note": "本地示例解析数据（天体运动：恒星+卫星圆轨道），用于无 API Key 时验证天体链路；不是真实模型输出",
+  "questionType": "天体运动（圆轨道）",
+  "goal": "观察卫星绕恒星的圆轨道运动，验证开普勒轨道动力学",
+  "gravity": null,
+  "entities": [
+    {
+      "type": "celestial",
+      "name": "中心恒星",
+      "given": {
+        "mass": 100,
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "radius": 0.6
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "celestial",
+      "name": "卫星",
+      "given": {
+        "mass": 1,
+        "position": [
+          4,
+          0,
+          0
+        ],
+        "velocity": [
+          0,
+          0,
+          -5
+        ],
+        "radius": 0.15
+      },
+      "confidence": 0.93
+    }
+  ],
+  "observations": [
+    "卫星轨道周期",
+    "轨道偏心率",
+    "机械能与角动量是否守恒"
+  ],
+  "unknowns": [
+    "真实天体物理尺度（本场景为教学缩放）"
+  ],
+  "assumptions": [
+    "两体引力 F=G·m1·m2/r²（场景引力常数 G=1）",
+    "卫星以圆轨道速度 √(GM/r)=5 m/s 入轨",
+    "渲染半径与引力质量分离"
+  ],
+  "confidence": 0.9,
+  "G": 1
+}

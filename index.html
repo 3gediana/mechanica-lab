@@ -218,6 +218,12 @@
   #consbar .k { font-family: var(--sans); font-size: 9px; color: var(--faint); letter-spacing: .1em; }
   #consbar .v { font-size: 12px; color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; }
   #consbar .v.acc { color: var(--accent); }
+  #consbar .erow { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  #consbar .ebar { flex: 1; height: 6px; background: rgba(255,255,255,.07); position: relative; border-radius: 1px; }
+  #consbar .efill { height: 100%; width: 0%; background: var(--accent); transition: width .15s; }
+  #consbar .emark { position: absolute; left: 66.67%; top: -2px; width: 1px; height: 10px; background: var(--line-strong); }
+  #consbar .erow .k { flex: 0 0 auto; }
+  #consbar .erow .v { flex: 0 0 52px; text-align: right; font-family: var(--mono); font-size: 11px; color: var(--accent); }
 
   /* 加载幕 / 错误条 */
   #veil {
@@ -255,6 +261,7 @@
 </head>
 <body>
 <div id="stage"></div>
+<div id="rubber" style="display:none;position:fixed;border:1px solid var(--accent);background:rgba(217,164,65,.10);z-index:12;pointer-events:none"></div>
 
 <header id="topbar">
   <div class="brand"><h1>MECHANICA</h1><div class="sub">物理教学工作台</div></div>
@@ -277,6 +284,7 @@
     <button id="btnModeMove" class="hot" title="移动 gizmo（W）">移动</button>
     <button id="btnModeRotate" title="旋转 gizmo（E）">旋转</button>
     <button id="btnSnap" title="网格吸附：平移 0.1m / 旋转 15°">吸附</button>
+    <button id="btnBoxSel" title="框选多选（编辑态，拖出矩形选中实体）">框选</button>
   </div>
   <div class="tb-group">
     <button id="btnViewReset" title="回到全局视角">全局</button>
@@ -383,6 +391,7 @@
 </footer>
 
 <div id="consbar">
+  <div class="erow"><span class="k">能量保持</span><div class="ebar"><div class="efill" id="ebFill"></div><div class="emark"></div></div><span class="v" id="ebPct">--</span></div>
   <div class="cgrid" id="consMomentum">
     <div class="cell"><span class="k">总动量</span><span class="v" id="cbP">--</span></div>
     <div class="cell"><span class="k">总动能</span><span class="v" id="cbKE">--</span></div>
