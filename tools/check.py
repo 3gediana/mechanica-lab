@@ -35,9 +35,10 @@ for js in [
     need(ROOT / js, (ROOT / js).exists(), f"缺失: {js}")
 for page in ["index.html", "classic.html"]:
     need(ROOT / page, (ROOT / page).exists(), f"缺失: {page}")
-for tool in ["tools/serve.py", "tools/ui-test/p0.mjs", "tools/ui-test/p1.mjs", "tools/ui-test/p2.mjs", "tools/ui-test/p3.mjs", "tools/ui-test/p4.mjs"]:
+for tool in ["tools/serve.py", "tools/ui-test/p0.mjs", "tools/ui-test/p1.mjs", "tools/ui-test/p2.mjs", "tools/ui-test/p3.mjs", "tools/ui-test/p4.mjs", "tools/ui-test/p5.mjs"]:
     need(ROOT / tool, (ROOT / tool).exists(), f"缺失: {tool}")
-for fx in ["tools/fixtures/question-incline.png", "tools/fixtures/parse-incline.json"]:
+for fx in ["tools/fixtures/question-incline.png", "tools/fixtures/parse-incline.json",
+           "tools/fixtures/question-momentum.png", "tools/fixtures/parse-momentum.json"]:
     need(ROOT / fx, (ROOT / fx).exists(), f"缺失: {fx}")
 
 # 1c. 密钥纪律：key / 上游端点 / 鉴权头只允许出现在服务端 tools/serve.py，前端零出现

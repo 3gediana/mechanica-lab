@@ -1,0 +1,46 @@
+{
+  "_fixture": true,
+  "_note": "本地示例解析数据（对应 question-momentum.png），用于无 API Key 时验证动量链路；不是真实模型输出",
+  "questionType": "一维对撞（动量守恒）",
+  "goal": "求碰后两球速度，验证系统总动量守恒",
+  "gravity": 10,
+  "entities": [
+    {
+      "type": "sphere",
+      "name": "球 A",
+      "given": {
+        "mass": 2.0,
+        "velocity": [
+          1.5,
+          0,
+          0
+        ],
+        "restitution": 0.8
+      },
+      "confidence": 0.96
+    },
+    {
+      "type": "sphere",
+      "name": "球 B",
+      "given": {
+        "mass": 1.0,
+        "restitution": 0.8
+      },
+      "confidence": 0.95
+    }
+  ],
+  "observations": [
+    "碰后两球的速度",
+    "系统总动量是否守恒"
+  ],
+  "unknowns": [
+    "恢复系数（题目未给，需取默认值）"
+  ],
+  "assumptions": [
+    "水平面光滑（无摩擦）",
+    "一维正碰（沿 x 轴）",
+    "恢复系数取 0.8（题目给定弹性碰撞程度）",
+    "由静止的球 B 被动碰撞"
+  ],
+  "confidence": 0.92
+}

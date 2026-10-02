@@ -115,7 +115,18 @@ export function planToOverrides(plan) {
         restitution: e.given.restitution ?? 0.1,
         linDamping: 0, angDamping: 0.02,       // 教学演化不加空气阻尼，守恒量才可对照理论
       };
-      o.transform = { pos: ballOnRamp(rampGeom), rot: [0, 0, 0] };
+      // 无斜面（对撞类）布局：沿 x 排开，悬浮于地面上方（gravityScale=0 + 无摩擦）——
+      // "光滑水平面"理想化：不落地不接触，水平动量不被地面摩擦污染，动量守恒才可对照
+      if (!rampGeom) {
+        const order = plan.entities.filter((x) => x.type === 'sphere').indexOf(e);
+        const n = plan.entities.filter((x) => x.type === 'sphere').length;
+        const r = e.given.radius ?? 0.15;
+        o.transform = { pos: [(order - (n - 1) / 2) * 1.6, r + 0.005, 0], rot: [0, 0, 0] };
+        o.physics.friction = 0;
+        o.physics.gravityScale = 0;
+      } else {
+        o.transform = { pos: ballOnRamp(rampGeom), rot: [0, 0, 0] };
+      }
       if (e.given.velocity) o.physics.linvel = e.given.velocity;
     } else if (e.type === 'box') {
       o.params = { sx: 0.3, sy: 0.3, sz: 0.3 };
@@ -131,6 +142,15 @@ export function planToOverrides(plan) {
       o.transform = { pos: [0, -0.05, 0], rot: [0, 0, 0] };
     }
     out.push(o);
+  }
+  // 对撞类（无斜面且 ≥2 球）：自动补光滑地面承接（对撞题的隐含装置，假设记录在 plan.assumptions）
+  if (!ramp && plan.entities.filter((e) => e.type === 'sphere').length >= 2) {
+    out.push({
+      type: 'ground', name: '光滑地面', source: 'agent',
+      params: { sx: 12, sy: 0.1, sz: 6 },
+      transform: { pos: [0, -0.05, 0], rot: [0, 0, 0] },
+      physics: { body: 'fixed', friction: pairFriction != null ? pairFriction : 0, restitution: 0.05 },
+    });
   }
   return out;
 }

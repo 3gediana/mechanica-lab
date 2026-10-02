@@ -310,15 +310,30 @@
     <div class="grp">
       <div class="grp-h">题目图片</div>
       <div id="dropZone">点击上传题目图片</div>
+      <div class="btnrow" style="margin-top:6px">
+        <button id="btnCamera">拍照</button>
+      </div>
+      <div id="camWrap" style="display:none">
+        <video id="camVideo" autoplay playsinline muted style="display:block;width:100%;border:1px solid var(--line)"></video>
+        <div class="btnrow" style="margin-top:6px">
+          <button id="btnCapture" class="hot">捕获此帧</button>
+          <button id="btnCamCancel">取消</button>
+        </div>
+      </div>
       <div id="imgPrevWrap" style="display:none">
-        <img id="imgPrev" alt="题目图片预览">
+        <div id="imgCropWrap" style="position:relative;display:inline-block;max-width:100%">
+          <img id="imgPrev" alt="题目图片预览" style="display:block;max-width:100%;max-height:240px;border:1px solid var(--line)">
+          <div id="cropRect" style="display:none;position:absolute;border:1px solid var(--accent);background:rgba(217,164,65,.12);pointer-events:none"></div>
+        </div>
+        <div class="hint" id="cropHint" style="display:none">已框选题目区域，解析时将只发送选区。 <button id="btnCropClear" style="appearance:none;background:none;border:none;padding:0;color:var(--accent);cursor:pointer;text-decoration:underline dotted;font-size:10px">清除选区</button></div>
         <div class="btnrow" style="margin-top:8px">
+          <button id="btnCropMode" title="在图上拖拽框选题目区域">框选区域</button>
           <button id="btnReUpload">重新上传</button>
           <button id="btnParse" class="hot">解析题目</button>
         </div>
       </div>
       <input type="file" id="agentFile" accept="image/*" style="display:none">
-      <div style="margin-top:8px"><button id="btnFixtureParse" style="appearance:none;background:transparent;border:none;padding:0;cursor:pointer;font-size:10px;color:var(--faint);letter-spacing:.06em;text-decoration:underline dotted">无 Key？载入本地示例解析数据（fixture，非真实模型输出）</button></div>
+      <div style="margin-top:8px"><button id="btnFixtureParse" style="appearance:none;background:none;border:none;padding:0;cursor:pointer;font-size:10px;color:var(--faint);letter-spacing:.06em;text-decoration:underline dotted">无 Key？载入本地示例解析数据（fixture，非真实模型输出）</button></div>
     </div>
     <div class="grp" id="parseStatusGrp" style="display:none">
       <div class="grp-h">解析状态</div>

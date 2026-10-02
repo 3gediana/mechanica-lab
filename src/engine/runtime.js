@@ -226,7 +226,13 @@ export class Runtime {
     this._drainCollisions();
     if (this.collisions.length > nCol0) {
       const post = this.systemTotals();
-      this.collisionReports.push({ t: this.simT, pBefore: pre.p, keBefore: pre.ke, pAfter: post.p, keAfter: post.ke });
+      const postVels = {};
+      for (const [id, b] of this.binds) {
+        if (!b.body) continue;
+        const v = b.body.linvel();
+        postVels[id] = [v.x, v.y, v.z];
+      }
+      this.collisionReports.push({ t: this.simT, pBefore: pre.p, keBefore: pre.ke, pAfter: post.p, keAfter: post.ke, postVels });
       if (this.collisionReports.length > 50) this.collisionReports.shift();
     }
     this._syncMeshes();

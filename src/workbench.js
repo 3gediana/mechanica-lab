@@ -866,6 +866,11 @@ function selectTab(which) {
 function bindAgentPanel() {
   const fileInput = $('agentFile');
   $('dropZone').onclick = () => fileInput.click();
+  $('btnCamera').onclick = () => startCamera();
+  $('btnCapture').onclick = () => captureFrame();
+  $('btnCamCancel').onclick = () => { stopCamera(); $('dropZone').style.display = 'block'; setParseStatus('已取消拍照'); };
+  $('btnCropMode').onclick = () => toggleCropMode();
+  $('btnCropClear').onclick = () => clearCrop();
   $('btnReUpload').onclick = () => fileInput.click();
   fileInput.onchange = () => {
     const f = fileInput.files[0];
@@ -877,6 +882,62 @@ function bindAgentPanel() {
   $('btnApplyParse').onclick = () => applyAgentPlan();
   $('btnClearParse').onclick = () => { resetAgentPanel(); };
   $('btnRunExplain').onclick = () => runAndExplain();
+  bindCropEvents();
+}
+
+// ============ 拍照（getUserMedia → canvas 采帧） ============
+let agentStream = null;
+
+async function startCamera() {
+  try {
+    agentStream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1920 } }, audio: false });
+    $('camVideo').srcObject = agentStream;
+    $('camWrap').style.display = 'block';
+    $('dropZone').style.display = 'none';
+    $('imgPrevWrap').style.display = 'none';
+    setParseStatus('相机已开启，对准题目后点击"捕获此帧"');
+  } catch (e) {
+    setParseStatus('相机不可用: ' + (e.name === 'NotAllowedError' ? '权限被拒绝' : (e.name || e.message)), true);
+  }
+}
+
+function stopCamera() {
+  if (agentStream) {
+    for (const t of agentStream.getTracks()) t.stop();
+    agentStream = null;
+  }
+  $('camWrap').style.display = 'none';
+}
+
+function captureFrame() {
+  const video = $('camVideo');
+  if (!agentStream || !video.videoWidth) { setParseStatus('相机未就绪，请稍候', true); return; }
+  const k = Math.min(1, 1400 / Math.max(video.videoWidth, video.videoHeight));
+  const cv = document.createElement('canvas');
+  cv.width = Math.round(video.videoWidth * k);
+  cv.height = Math.round(video.videoHeight * k);
+  cv.getContext('2d').drawImage(video, 0, 0, cv.width, cv.height);
+  setAgentImageFromCanvas(cv, '已捕获相机帧');
+}
+
+// ============ 题目图片状态（原图 canvas + 归一化选区） ============
+let agentImageCanvas = null;
+let agentCrop = null;
+let cropMode = false;
+let cropDragStart = null;
+
+function setAgentImageFromCanvas(cv, note = '') {
+  agentImageCanvas = cv;
+  agentImageDataUrl = cv.toDataURL('image/jpeg', 0.85);
+  agentCrop = null;
+  stopCamera();
+  $('imgPrev').src = agentImageDataUrl;
+  $('cropRect').style.display = 'none';
+  $('cropHint').style.display = 'none';
+  $('dropZone').style.display = 'none';
+  $('camWrap').style.display = 'none';
+  $('imgPrevWrap').style.display = 'block';
+  setParseStatus((note || `图片就绪 ${cv.width}x${cv.height}`) + `（${cv.width}x${cv.height}），可框选区域后解析`);
 }
 
 function readQuestionImage(file) {
@@ -889,16 +950,77 @@ function readQuestionImage(file) {
       cv.width = Math.round(img.width * k);
       cv.height = Math.round(img.height * k);
       cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
-      agentImageDataUrl = cv.toDataURL('image/jpeg', 0.85);
-      $('imgPrev').src = agentImageDataUrl;
-      $('dropZone').style.display = 'none';
-      $('imgPrevWrap').style.display = 'block';
-      setParseStatus(`已上传 ${img.width}x${img.height}，点击"解析题目"`);
+      setAgentImageFromCanvas(cv, `已上传 ${img.width}x${img.height}`);
     };
     img.onerror = () => setParseStatus('图片读取失败，请换一张', true);
     img.src = String(r.result);
   };
   r.readAsDataURL(file);
+}
+
+// 解析时真正发送的图：有选区则裁剪原图（质量不受显示压缩影响）
+function croppedCanvas() {
+  if (!agentCrop || !agentImageCanvas) return agentImageCanvas;
+  const c = agentImageCanvas;
+  const sx = Math.round(agentCrop.x * c.width), sy = Math.round(agentCrop.y * c.height);
+  const sw = Math.max(8, Math.round(agentCrop.w * c.width)), sh = Math.max(8, Math.round(agentCrop.h * c.height));
+  const cv = document.createElement('canvas');
+  cv.width = sw; cv.height = sh;
+  cv.getContext('2d').drawImage(c, sx, sy, sw, sh, 0, 0, sw, sh);
+  return cv;
+}
+
+function toggleCropMode() {
+  if (!agentImageCanvas) { setParseStatus('请先上传或拍照', true); return; }
+  cropMode = !cropMode;
+  cropDragStart = null;
+  $('imgCropWrap').style.cursor = cropMode ? 'crosshair' : '';
+  $('btnCropMode').classList.toggle('hot', cropMode);
+  setParseStatus(cropMode ? '框选模式：在图上拖拽框出题目区域' : '框选结束');
+}
+
+function clearCrop() {
+  agentCrop = null;
+  $('cropRect').style.display = 'none';
+  $('cropHint').style.display = 'none';
+}
+
+function bindCropEvents() {
+  const wrap = $('imgCropWrap'), rect = $('cropRect'), img = $('imgPrev');
+  wrap.addEventListener('pointerdown', (e) => {
+    if (!cropMode) return;
+    const r = img.getBoundingClientRect();
+    cropDragStart = { x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) };
+    e.preventDefault();
+  });
+  window.addEventListener('pointermove', (e) => {
+    if (!cropMode || !cropDragStart) return;
+    const r = img.getBoundingClientRect();
+    const cx = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+    const cy = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
+    agentCrop = {
+      x: Math.min(cropDragStart.x, cx), y: Math.min(cropDragStart.y, cy),
+      w: Math.abs(cx - cropDragStart.x), h: Math.abs(cy - cropDragStart.y),
+    };
+    rect.style.display = 'block';
+    rect.style.left = (agentCrop.x * 100) + '%';
+    rect.style.top = (agentCrop.y * 100) + '%';
+    rect.style.width = (agentCrop.w * 100) + '%';
+    rect.style.height = (agentCrop.h * 100) + '%';
+  });
+  window.addEventListener('pointerup', () => {
+    if (!cropMode || !cropDragStart) return;
+    cropDragStart = null;
+    cropMode = false;
+    wrap.style.cursor = '';
+    $('btnCropMode').classList.remove('hot');
+    if (agentCrop && agentCrop.w > 0.02 && agentCrop.h > 0.02) {
+      $('cropHint').style.display = 'block';
+      setParseStatus(`已框选区域 (${Math.round(agentCrop.w * 100)}x${Math.round(agentCrop.h * 100)}%)，点击"解析题目"只发送选区`);
+    } else {
+      clearCrop();
+    }
+  });
 }
 
 function setParseStatus(msg, isErr = false, busy = false) {
@@ -910,13 +1032,16 @@ function setParseStatus(msg, isErr = false, busy = false) {
 }
 
 async function parseQuestion() {
-  if (!agentImageDataUrl) { setParseStatus('请先上传题目图片', true); return; }
-  setParseStatus('正在解析（step-5-preview 视觉模型）…', false, true);
+  if (!agentImageDataUrl) { setParseStatus('请先上传或拍照题目图片', true); return; }
+  const send = croppedCanvas();
+  const dataUrl = send ? send.toDataURL('image/jpeg', 0.85) : agentImageDataUrl;
+  const tag = agentCrop ? `（仅选区 ${send.width}x${send.height}）` : '';
+  setParseStatus(`正在解析${tag}（step-5-preview 视觉模型）…`, false, true);
   try {
     const resp = await fetch('/api/parse-question', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image: agentImageDataUrl }),
+      body: JSON.stringify({ image: dataUrl }),
     });
     const out = await resp.json();
     if (!out.ok) { setParseStatus('解析失败：' + out.error + '（可重试，或用下方示例数据）', true); return; }
@@ -931,18 +1056,22 @@ async function parseQuestion() {
   }
 }
 
-async function loadFixtureParse() {
+async function loadFixtureParse() { loadFixtureData('incline'); }
+
+async function loadFixtureData(name) {
   try {
-    const resp = await fetch('./tools/fixtures/parse-incline.json');
+    const resp = await fetch(`./tools/fixtures/parse-${name}.json`);
     const raw = await resp.json();
     const n = normalizeParse(raw);
-    if (!n.ok) { setParseStatus('示例数据无效：' + n.errors.join('; '), true); return; }
+    if (!n.ok) { setParseStatus('示例数据无效：' + n.errors.join('; '), true); return null; }
     agentPlan = n.plan;
     agentCorrections = [];
     renderParseResult(n.errors);
-    setParseStatus('已载入本地示例解析数据（fixture，非真实模型输出）');
+    setParseStatus(`已载入本地示例解析数据「${n.plan.questionType}」（fixture，非真实模型输出）`);
+    return n.plan;
   } catch (e) {
     setParseStatus('示例数据读取失败', true);
+    return null;
   }
 }
 
@@ -1123,11 +1252,16 @@ function applyAgentPlan() {
 }
 
 function resetAgentPanel() {
+  stopCamera();
   agentImageDataUrl = null;
+  agentImageCanvas = null;
+  agentCrop = null;
+  cropMode = false;
   agentPlan = null;
   agentCorrections = [];
   agentExplain = null;
   $('dropZone').style.display = 'block';
+  $('camWrap').style.display = 'none';
   $('imgPrevWrap').style.display = 'none';
   $('parseStatusGrp').style.display = 'none';
   $('parseResultGrp').style.display = 'none';
@@ -1141,9 +1275,9 @@ let explainBusy = false;
 async function runAndExplain() {
   if (explainBusy) return;
   if (!agentPlan) { toast('请先完成解析并创建场景实体'); return; }
-  const ball = doc.entities.find((e) => e.type === 'sphere');
-  const ramp = doc.entities.find((e) => e.type === 'ramp');
-  if (!ball) { setParseStatus('解释器需要场景中存在小球，请先创建实体', true); return; }
+  const ball = doc.entities.find((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
+  if (!ball) { setParseStatus('解释器需要场景中存在动态小球，请先创建实体', true); return; }
+  const hasRamp = doc.entities.some((e) => e.type === 'ramp');
   if (mode !== 'edit') resetSim();
 
   explainBusy = true;
@@ -1152,24 +1286,53 @@ async function runAndExplain() {
   btn.textContent = '运行并记录中…';
   runtime.startRecording(ball.id);
   play();
+  const ramp = doc.entities.find((e) => e.type === 'ramp');
   const exitX = ramp ? ramp.transform.pos[0] + ramp.params.length / 2 : Infinity;
+  const isMomentum = !hasRamp;
+  const u0 = ball.physics.linvel[0];
   await new Promise((resolve) => {
-    // 终止条件：球越过斜面底边 / 超时 4s（防无限追跑）/ 场景被重建
+    // 终止条件：斜面=球越过底边；对撞=出现使球速改变的碰撞报告（跳过出生触地）；通用=4s 超时
     const iv = setInterval(() => {
       const tel = runtime.telemetry(ball.id);
-      if (!runtime.world || !tel || tel.pos[0] > exitX || runtime.simT > 4) {
+      const done = isMomentum
+        ? runtime.collisionReports.some((r) => r.postVels && r.postVels[ball.id]
+          && Math.abs(r.postVels[ball.id][0] - u0) > 0.05)
+        : (!runtime.world || !tel || tel.pos[0] > exitX);
+      if (done || runtime.simT > 4 || !runtime.world) {
         clearInterval(iv);
         resolve();
       }
     }, 40);
   });
+  if (isMomentum) await new Promise((res) => setTimeout(res, 300));   // 缓冲几步让报告速度稳定
   if (mode === 'run' && !paused) pauseToggle();
   const series = runtime.stopRecording();
-  agentExplain = explainRun(agentPlan, doc, series);
+  agentExplain = explainRun(agentPlan, doc, series, runtime.collisionReports);
   renderExplanation();
   btn.disabled = false;
   btn.textContent = '重新运行解释';
   explainBusy = false;
+}
+
+function renderMomentumExplain(r, box) {
+  const grid = document.createElement('div');
+  grid.className = 'ro-grid';
+  const rows = [
+    ['恢复系数 e', r.e.toFixed(2)],
+    ...r.pairs.map((p) => [`${p.name} 碰后速度`, `${p.vMeasured.toFixed(3)} m/s（理论 ${p.vTheory.toFixed(3)}，偏差 ${p.errPct.toFixed(1)}%）`]),
+    ['动量 前→后', `${r.momentum.before.toFixed(3)} → ${r.momentum.after.toFixed(3)} N·s（误差 ${r.momentum.errPct.toFixed(2)}%）`],
+    ['动能 前→后', `${r.ke.before.toFixed(3)} → ${r.ke.measuredAfter.toFixed(3)} J（理论 ${r.ke.theoryAfter.toFixed(3)} J）`],
+  ];
+  grid.innerHTML = rows.map(([k, v], i) =>
+    `<div class="cell" style="grid-column:1/-1"><span class="k">${k}</span><span class="v ${i === 2 ? 'acc' : 'plain'}"></span></div>`
+  ).join('');
+  [...grid.querySelectorAll('.v')].forEach((el, i) => { el.textContent = rows[i][1]; });
+  box.appendChild(grid);
+  const p = document.createElement('div');
+  p.className = 'hint';
+  p.style.marginTop = '8px';
+  p.textContent = r.summary;
+  box.appendChild(p);
 }
 
 function renderExplanation() {
@@ -1192,7 +1355,8 @@ function renderExplanation() {
     box.appendChild(s);
     return;
   }
-  // 观察项对比表
+  if (r.kind === 'momentum-1d') { renderMomentumExplain(r, box); return; }
+  // 观察项对比表（斜面）
   const grid = document.createElement('div');
   grid.className = 'ro-grid';
   grid.innerHTML = `
@@ -1289,12 +1453,19 @@ window.MECH = {
   consState: () => ({
     live: runtime.systemTotals(),
     reports: runtime.collisionReports.map((r) => ({
-      t: r.t, pBefore: r.pBefore, pAfter: r.pAfter, keBefore: r.keBefore, keAfter: r.keAfter,
+      t: r.t, pBefore: r.pBefore, pAfter: r.pAfter, keBefore: r.keBefore, keAfter: r.keAfter, postVels: r.postVels,
     })),
   }),
   vectorState: () => ({ on: vectorsOn, ...viewport.arrowStats() }),
   trailState: () => ({ on: trailsOn, lines: viewport.trailStats(), points: [...runtime.trails.values()].map((a) => a.length) }),
   trailsDump: () => [...runtime.trails.entries()].map(([id, pts]) => ({ id, pts: pts.map((p) => [...p]) })),
+  agentImageState: () => ({
+    hasImage: !!agentImageDataUrl,
+    hasCrop: !!agentCrop,
+    crop: agentCrop ? { ...agentCrop } : null,
+    src: agentImageCanvas ? { w: agentImageCanvas.width, h: agentImageCanvas.height } : null,
+  }),
+  loadFixture: (name) => loadFixtureData(name || 'incline'),
   astroState: () => {
     const a = astroInfo();
     if (!a) return null;
