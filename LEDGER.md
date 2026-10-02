@@ -237,13 +237,29 @@ fixture parse-spin.json + serve.py 解析 prompt 补 kind/joint 规则。
 **遗留**：组件目录搜索/最近使用/收藏/ghost preview；端点/表面/中心吸附；正交下 gizmo 尺寸手感；
 录制回放无时间轴拖拽；spin 题反比参考的滑移瞬态偏差（L 守恒 0.28% 是硬结论）。
 
-### 下一轮（Round 11 候选）
+### Round 11（10-03）当前任务徽标 + 目录搜索/最近使用 + 绳/弹簧约束 —— **PASS（p9 11/11，回归 p0-p8 全绿）**
 
-1. 组件目录搜索 + 最近使用（体验小补）。
-2. Agent 面板"当前任务"展示 + 绳/弹簧约束解析（constraint 类 fixture）。
-3. P3 收尾盘点：对照 Goal 十五逐项打勾，输出差距清单。
+**Goal 六/七缺口补齐**：
+- **Agent 面板"当前任务"**（Goal 六明文）：阶段徽标状态机（未开始/图片就绪/解析中/待确认/建场中/已建场/运行解释中/已解释/出错）+ 状态文字，全链路挂接。
+- **组件目录**：搜索框（跨分类过滤 label/desc）+ 最近使用分组（localStorage cap5，添加自动记录）。
+- **绳/弹簧约束实体**（Goal 五"绳和约束"分类首次落地）：registry `rope`（仅拉不推）/`spring`（胡克定律 k、原长、阻尼）连接类组件（isLink，attach 语义，无碰撞体）；
+  runtime rope/spring 关节 + _syncLinks 每帧拉伸同步（中点/朝向/长度）；rebuild 先非 link 后 link 保证 attach 依赖序。
+  手动搭建=选中两实体点目录（自动按距离定长）；Agent/解析=overrides.attach 直达。
 
-## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）
+**弹簧题拍题九步全通**：fixture（kind=spring + attaches）→ 布局（立柱墙+水平理想化振子）→ 建场（attaches 索引映射）→
+运行 → **spring 解释：T=2π√(m/k)=1.721s 理论 vs 1.617s 实测（峰值间隔法，偏差 6.05%，pass）**，振幅/阻尼说明。
+
+**本轮修的坑**：MECH.select 未透传 additive；opAddComponent 连接类缺 overrides.attach 直达路径；loadFixtureData 漏挂阶段徽标。
+
+**遗留**：绳的"仅拉不推"在压缩段表现为松弛（视觉无弯折）；滑轮/铰链未做；Agent 面板"已完成/失败操作"明细列表未做。
+
+### 下一轮（Round 12 候选）
+
+1. 受力分解：支持力/摩擦力分列箭头（斜面场景语义）。
+2. P3 收尾盘点：对照 Goal 十五逐项打勾输出差距清单（单位标尺/端点吸附/正交 gizmo 手感/组件 ghost preview/约束可视化）。
+3. 弹簧振动阻尼对比预置（阻尼 0 vs 有阻尼并排）。
+
+## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）
 
 仪器级暗色摄影棚工具界面。冷灰烟色 + 单点缀琥珀（仪表读数与激活态）；直角 hairline（radius 2px）；
 无渐变无玻璃拟态无 emoji 无 em-dash；数字等宽；动效只做状态反馈。
