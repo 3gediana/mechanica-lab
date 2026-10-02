@@ -1,0 +1,20 @@
+{
+  "_fixture": true,
+  "_note": "本地示例解析数据（对应 question-incline.png），用于无 API Key 时验证后续物理链路；不是真实模型输出",
+  "questionType": "斜面下滑（光滑固定斜面）",
+  "goal": "求小球滑到斜面底端时速度的大小，观察下滑过程",
+  "gravity": 10,
+  "entities": [
+    { "type": "ramp", "name": "固定斜面", "given": { "angleDeg": 30, "length": 2.0 }, "confidence": 0.98 },
+    { "type": "sphere", "name": "小球", "given": { "mass": 1.0, "friction": 0 }, "confidence": 0.95 }
+  ],
+  "observations": ["小球滑到斜面底端时的速度大小"],
+  "unknowns": ["小球半径（题述可忽略，需取默认值）"],
+  "assumptions": [
+    "斜面固定于地面",
+    "不计空气阻力",
+    "小球半径取默认 0.15 m",
+    "小球置于斜面顶端由静止释放（Agent 布局）"
+  ],
+  "confidence": 0.93
+}

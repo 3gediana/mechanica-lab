@@ -146,7 +146,8 @@ export function catalog() {
   return cats;
 }
 
-// 由组件默认值构造完整实体文档（带类型化初始名）
+// 由组件默认值构造完整实体（带类型化初始名）。overrides 的 params/physics/render/transform 做键级合并，
+// 其余键直接覆盖 —— 保证 partial override 不丢默认字段（如 linvel）。
 export function createEntity(typeId, overrides = {}, nameSeq = {}) {
   const c = getComponent(typeId);
   nameSeq[typeId] = (nameSeq[typeId] || 0) + 1;
@@ -162,9 +163,15 @@ export function createEntity(typeId, overrides = {}, nameSeq = {}) {
     render: { ...c.defaults.render },
     measured: false,
     source: 'user',
-    ...(overrides || {}),
   };
-  if (overrides && overrides.transform) e.transform = { pos: [0, 0, 0], rot: [0, 0, 0], ...overrides.transform };
+  for (const [k, v] of Object.entries(overrides || {})) {
+    if (k === 'id' || k === 'type') continue;
+    if (v && typeof v === 'object' && !Array.isArray(v) && ['params', 'physics', 'render', 'transform'].includes(k)) {
+      Object.assign(e[k], v);
+    } else {
+      e[k] = v;
+    }
+  }
   return e;
 }
 

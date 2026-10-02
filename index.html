@@ -144,6 +144,40 @@
   .btnrow button:hover { color: var(--text); border-color: var(--line-strong); }
   .btnrow button.danger:hover { color: var(--danger); border-color: rgba(201,106,90,.5); }
 
+  #rtabs { display: flex; border-bottom: 1px solid var(--line); user-select: none; }
+  .rtab {
+    flex: 1; appearance: none; background: transparent; border: none; cursor: pointer;
+    font-size: 10px; color: var(--faint); letter-spacing: .2em; text-indent: .2em;
+    padding: 11px 0 9px; border-bottom: 2px solid transparent; transition: color .12s, border-color .12s;
+  }
+  .rtab:hover { color: var(--dim); }
+  .rtab.hot { color: var(--accent); border-bottom-color: var(--accent); }
+
+  #dropZone {
+    margin: 2px 0 4px; padding: 22px 10px; text-align: center; cursor: pointer;
+    border: 1px dashed var(--line-strong); border-radius: 2px;
+    font-size: 11px; color: var(--dim); letter-spacing: .08em;
+    transition: border-color .12s, color .12s;
+  }
+  #dropZone:hover { border-color: rgba(217,164,65,.5); color: var(--text); }
+  #imgPrev { display: block; max-width: 100%; max-height: 240px; margin: 2px auto 0; border: 1px solid var(--line); }
+  .pe-row { margin-bottom: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 2px; }
+  .pe-head { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+  .pe-head .nm { font-size: 12px; color: var(--text); }
+  .pe-head .conf { font-family: var(--mono); font-size: 10px; color: var(--faint); margin-left: auto; }
+  .badge.given { color: var(--accent); border-color: rgba(217,164,65,.4); }
+  .pgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; }
+  .pgrid .cell { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .pgrid label { flex: 0 0 auto; font-size: 10px; color: var(--dim); }
+  .pgrid input { width: 0; flex: 1; min-width: 0; background: rgba(255,255,255,.03); border: 1px solid var(--line);
+    color: var(--text); font-family: var(--mono); font-size: 12px; padding: 3px 6px; border-radius: 2px; }
+  .pgrid input:focus { outline: none; border-color: rgba(217,164,65,.55); }
+  .pgrid .u { font-size: 9px; color: var(--faint); font-family: var(--mono); }
+  .plist { margin: 6px 0 0; padding-left: 16px; }
+  .plist li { font-size: 11px; color: var(--dim); line-height: 1.8; }
+  .pmeta { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 12px; margin-bottom: 10px; }
+  .pmeta .k { font-size: 10px; color: var(--faint); }
+
   /* ============ 底部模拟控制栏 ============ */
   #simbar {
     position: fixed; left: 0; right: 0; bottom: 0; height: var(--simbar-h); z-index: 20;
@@ -247,9 +281,43 @@
 </aside>
 
 <aside id="right">
-  <div class="panel-title">属性检查器</div>
-  <div id="inspEmpty">在视口点击对象，或从左侧目录添加组件。<br><br>拖动 gizmo 移动 / 旋转；底部控制栏运行物理模拟。</div>
-  <div id="inspBody" style="display:none"></div>
+  <div id="rtabs">
+    <button id="tabInspector" class="rtab hot">属性检查器</button>
+    <button id="tabAgent" class="rtab">Agent 解析</button>
+  </div>
+  <div id="inspWrap">
+    <div id="inspEmpty">在视口点击对象，或从左侧目录添加组件。<br><br>拖动 gizmo 移动 / 旋转；底部控制栏运行物理模拟。</div>
+    <div id="inspBody" style="display:none"></div>
+  </div>
+  <div id="agentWrap" style="display:none">
+    <div class="grp">
+      <div class="grp-h">题目图片</div>
+      <div id="dropZone">点击上传题目图片</div>
+      <div id="imgPrevWrap" style="display:none">
+        <img id="imgPrev" alt="题目图片预览">
+        <div class="btnrow" style="margin-top:8px">
+          <button id="btnReUpload">重新上传</button>
+          <button id="btnParse" class="hot">解析题目</button>
+        </div>
+      </div>
+      <input type="file" id="agentFile" accept="image/*" style="display:none">
+      <div style="margin-top:8px"><button id="btnFixtureParse" style="appearance:none;background:transparent;border:none;padding:0;cursor:pointer;font-size:10px;color:var(--faint);letter-spacing:.06em;text-decoration:underline dotted">无 Key？载入本地示例解析数据（fixture，非真实模型输出）</button></div>
+    </div>
+    <div class="grp" id="parseStatusGrp" style="display:none">
+      <div class="grp-h">解析状态</div>
+      <div id="parseStatus" class="hint" style="margin-top:0"></div>
+    </div>
+    <div class="grp" id="parseResultGrp" style="display:none">
+      <div class="grp-h">结构化解析 <span id="parseSrcBadge" class="badge" style="margin-left:auto"></span></div>
+      <div id="parseMeta"></div>
+      <div id="parseEntities"></div>
+      <div id="parseLists"></div>
+      <div class="btnrow" style="margin-top:10px">
+        <button id="btnApplyParse" class="hot">创建场景实体</button>
+        <button id="btnClearParse">清空</button>
+      </div>
+    </div>
+  </div>
 </aside>
 
 <footer id="simbar">

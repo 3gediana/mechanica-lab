@@ -24,16 +24,32 @@ for rel, min_size in [
     p = ROOT / rel
     need(p, p.exists() and p.stat().st_size > min_size, f"{rel} 缺失或过小")
 
-# 1b. 源文件存在性（工作台 + 引擎 + legacy 保留版）
+# 1b. 源文件存在性（工作台 + 引擎 + legacy 保留版 + Agent 解析切片）
 for js in [
     "src/workbench.js",
     "src/engine/scene-doc.js", "src/engine/registry.js",
     "src/engine/runtime.js", "src/engine/viewport.js", "src/engine/presets.js",
+    "src/engine/parse-schema.js",
     "src/legacy-main.js", "src/track-curve.js", "src/materials.js",
 ]:
     need(ROOT / js, (ROOT / js).exists(), f"缺失: {js}")
 for page in ["index.html", "classic.html"]:
     need(ROOT / page, (ROOT / page).exists(), f"缺失: {page}")
+for tool in ["tools/serve.py", "tools/ui-test/p0.mjs", "tools/ui-test/p1.mjs"]:
+    need(ROOT / tool, (ROOT / tool).exists(), f"缺失: {tool}")
+for fx in ["tools/fixtures/question-incline.png", "tools/fixtures/parse-incline.json"]:
+    need(ROOT / fx, (ROOT / fx).exists(), f"缺失: {fx}")
+
+# 1c. 密钥纪律：key / 上游端点 / 鉴权头只允许出现在服务端 tools/serve.py，前端零出现
+SECRET_PATTERNS = ["3esUVr", "step_key", "api.stepfun", "Bearer"]
+for rel in ["index.html", "classic.html", "src/workbench.js", "src/legacy-main.js",
+            "src/materials.js", "src/track-curve.js",
+            "src/engine/scene-doc.js", "src/engine/registry.js", "src/engine/runtime.js",
+            "src/engine/viewport.js", "src/engine/presets.js", "src/engine/parse-schema.js"]:
+    txt = (ROOT / rel).read_text(encoding="utf-8")
+    for pat in SECRET_PATTERNS:
+        if pat in txt:
+            fails.append(f"前端密钥泄漏红线: {rel} 含 '{pat}'")
 
 # 2. importmap 路径可达
 html = (ROOT / "index.html").read_text(encoding="utf-8")

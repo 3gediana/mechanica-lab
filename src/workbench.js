@@ -11,6 +11,7 @@ import { Runtime, FIXED_H, attachRegistry } from './engine/runtime.js';
 import { Viewport } from './engine/viewport.js';
 import { getPreset } from './engine/presets.js';
 import { createMaterials } from './materials.js';
+import { normalizeParse, planToOverrides } from './engine/parse-schema.js';
 
 const $ = (id) => document.getElementById(id);
 const veil = $('veil'), veilStatus = $('veilStatus'), errbar = $('errbar');
@@ -283,6 +284,10 @@ function bindUI() {
   $('selSpeed').onchange = (e) => { timeScale = parseFloat(e.target.value); };
 
   $('sceneName').onchange = (e) => { doc.name = e.target.value || '未命名场景'; e.target.value = doc.name; autosave(); };
+
+  $('tabInspector').onclick = () => selectTab('inspector');
+  $('tabAgent').onclick = () => selectTab('agent');
+  bindAgentPanel();
 
   // 隐藏文件输入（动态挂载）
   const fi = document.createElement('input');
@@ -629,6 +634,304 @@ function tick() {
   if (roTimer > 0.15) { roTimer = 0; updateReadouts(); }
 }
 
+// ============ Agent 题目解析面板 ============
+// 链路：上传/预览 → POST /api/parse-question（key 在服务端）→ normalizeParse 校验 →
+// 用户查看/修正（全部可编辑，修改记录进 doc.meta.corrections）→ 确认后经 window.MECH 白名单建实体。
+let agentImageDataUrl = null;
+let agentPlan = null;
+let agentCorrections = [];
+
+const PEDIT = {
+  ramp: [
+    ['angleDeg', '倾角', '°', 30, [1, 80]],
+    ['length', '坡长', 'm', 2.0, [0.1, 12]],
+    ['width', '坡宽', 'm', 0.5, [0.05, 6]],
+  ],
+  sphere: [
+    ['mass', '质量', 'kg', 1, [0.01, 10000]],
+    ['radius', '半径', 'm', 0.15, [0.01, 2]],
+    ['friction', '摩擦', '', 0.3, [0, 2]],
+  ],
+  box: [['mass', '质量', 'kg', 1, [0.01, 10000]]],
+  cylinder: [
+    ['mass', '质量', 'kg', 1, [0.01, 10000]],
+    ['radius', '半径', 'm', 0.12, [0.01, 2]],
+  ],
+  ground: [],
+};
+
+function selectTab(which) {
+  const insp = which === 'inspector';
+  $('tabInspector').classList.toggle('hot', insp);
+  $('tabAgent').classList.toggle('hot', !insp);
+  $('inspWrap').style.display = insp ? 'block' : 'none';
+  $('agentWrap').style.display = insp ? 'none' : 'block';
+}
+
+function bindAgentPanel() {
+  const fileInput = $('agentFile');
+  $('dropZone').onclick = () => fileInput.click();
+  $('btnReUpload').onclick = () => fileInput.click();
+  fileInput.onchange = () => {
+    const f = fileInput.files[0];
+    if (f) readQuestionImage(f);
+    fileInput.value = '';
+  };
+  $('btnParse').onclick = () => parseQuestion();
+  $('btnFixtureParse').onclick = () => loadFixtureParse();
+  $('btnApplyParse').onclick = () => applyAgentPlan();
+  $('btnClearParse').onclick = () => { resetAgentPanel(); };
+}
+
+function readQuestionImage(file) {
+  const r = new FileReader();
+  r.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const k = Math.min(1, 1400 / Math.max(img.width, img.height));   // 降采样控请求体
+      const cv = document.createElement('canvas');
+      cv.width = Math.round(img.width * k);
+      cv.height = Math.round(img.height * k);
+      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+      agentImageDataUrl = cv.toDataURL('image/jpeg', 0.85);
+      $('imgPrev').src = agentImageDataUrl;
+      $('dropZone').style.display = 'none';
+      $('imgPrevWrap').style.display = 'block';
+      setParseStatus(`已上传 ${img.width}x${img.height}，点击"解析题目"`);
+    };
+    img.onerror = () => setParseStatus('图片读取失败，请换一张', true);
+    img.src = String(r.result);
+  };
+  r.readAsDataURL(file);
+}
+
+function setParseStatus(msg, isErr = false, busy = false) {
+  $('parseStatusGrp').style.display = 'block';
+  const el = $('parseStatus');
+  el.textContent = msg;
+  el.style.color = isErr ? 'var(--danger)' : 'var(--dim)';
+  $('btnParse').disabled = busy;
+}
+
+async function parseQuestion() {
+  if (!agentImageDataUrl) { setParseStatus('请先上传题目图片', true); return; }
+  setParseStatus('正在解析（step-5-preview 视觉模型）…', false, true);
+  try {
+    const resp = await fetch('/api/parse-question', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: agentImageDataUrl }),
+    });
+    const out = await resp.json();
+    if (!out.ok) { setParseStatus('解析失败：' + out.error + '（可重试，或用下方示例数据）', true); return; }
+    const n = normalizeParse(out.parse);
+    if (!n.ok) { setParseStatus('解析结果无效：' + n.errors.join('; '), true); return; }
+    agentPlan = n.plan;
+    agentCorrections = [];
+    renderParseResult(n.errors);
+    setParseStatus('解析完成。请检查/修正下方各项后再创建实体');
+  } catch (e) {
+    setParseStatus('解析请求失败（网络或服务不可用）。可重试，或用下方示例数据', true);
+  }
+}
+
+async function loadFixtureParse() {
+  try {
+    const resp = await fetch('./tools/fixtures/parse-incline.json');
+    const raw = await resp.json();
+    const n = normalizeParse(raw);
+    if (!n.ok) { setParseStatus('示例数据无效：' + n.errors.join('; '), true); return; }
+    agentPlan = n.plan;
+    agentCorrections = [];
+    renderParseResult(n.errors);
+    setParseStatus('已载入本地示例解析数据（fixture，非真实模型输出）');
+  } catch (e) {
+    setParseStatus('示例数据读取失败', true);
+  }
+}
+
+function renderParseResult(warnings = []) {
+  const plan = agentPlan;
+  $('parseResultGrp').style.display = 'block';
+  const badge = $('parseSrcBadge');
+  badge.textContent = plan.fixture ? '示例数据' : 'step-5-preview';
+  badge.className = 'badge' + (plan.fixture ? ' given' : '');
+
+  // 元信息（模型字符串一律 textContent，不做 innerHTML）
+  const meta = $('parseMeta');
+  meta.innerHTML = '';
+  const m1 = document.createElement('div');
+  m1.className = 'pmeta';
+  const typeCell = mrow('题型');
+  const confCell = mrow('总体置信度');
+  m1.append(typeCell, confCell);
+  meta.appendChild(m1);
+  typeCell.querySelector('.v').textContent = plan.questionType;
+  confCell.querySelector('.v').textContent = (plan.confidence * 100).toFixed(0) + '%';
+  if (plan.goal) {
+    const g = document.createElement('div');
+    g.className = 'k';
+    g.style.cssText = 'font-size:10px;color:var(--faint)';
+    g.textContent = '目标';
+    const gv = document.createElement('div');
+    gv.style.cssText = 'font-size:11px;color:var(--dim);margin:2px 0 8px';
+    gv.textContent = plan.goal;
+    meta.append(g, gv);
+  }
+  // 重力（可编辑）
+  const grow = document.createElement('div');
+  grow.className = 'frow';
+  grow.innerHTML = `<label style="flex:0 0 auto;font-size:10px;color:var(--dim)">重力</label>
+    <input type="number" step="0.1" min="0" max="50" style="flex:1"><span class="u">m/s²</span>
+    <span class="badge" style="margin-left:6px"></span>`;
+  const gInput = grow.querySelector('input');
+  gInput.value = plan.gravity;
+  gInput.onchange = () => {
+    const v = Number(gInput.value);
+    if (!Number.isFinite(v) || v < 0 || v > 50) { gInput.value = plan.gravity; return; }
+    recordCorrection('gravity', plan.gravity, v);
+    plan.gravity = v;
+  };
+  grow.querySelector('.badge').textContent = plan.gravityDefault ? '默认' : '题给';
+  grow.querySelector('.badge').className = 'badge' + (plan.gravityDefault ? '' : ' given');
+  meta.appendChild(grow);
+  if (warnings.length) {
+    const w = document.createElement('div');
+    w.className = 'hint';
+    w.style.color = 'var(--danger)';
+    w.textContent = '警告: ' + warnings.join('; ');
+    meta.appendChild(w);
+  }
+
+  // 实体行
+  const box = $('parseEntities');
+  box.innerHTML = '';
+  // 摩擦是成对属性：球未给摩擦时继承斜面摩擦（与 planToOverrides 建场逻辑一致）
+  const rampEnt = plan.entities.find((x) => x.type === 'ramp');
+  const surfF = rampEnt && rampEnt.given.friction != null ? rampEnt.given.friction : null;
+  plan.entities.forEach((e, i) => {
+    const row = document.createElement('div');
+    row.className = 'pe-row';
+    const head = document.createElement('div');
+    head.className = 'pe-head';
+    const nm = document.createElement('span');
+    nm.className = 'nm';
+    nm.textContent = e.name;
+    const ty = document.createElement('span');
+    ty.className = 'ty';
+    ty.style.cssText = 'font-family:var(--mono);font-size:10px;color:var(--dim)';
+    ty.textContent = registry.getComponent(e.type).label;
+    const conf = document.createElement('span');
+    conf.className = 'conf';
+    conf.textContent = e.confidence != null ? (e.confidence * 100).toFixed(0) + '%' : '--';
+    head.append(nm, ty, conf);
+    row.appendChild(head);
+    const grid = document.createElement('div');
+    grid.className = 'pgrid';
+    for (const [key, label, unit, def, range] of PEDIT[e.type]) {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      const lab = document.createElement('label');
+      lab.textContent = label;
+      const inp = document.createElement('input');
+      inp.type = 'number';
+      inp.step = 'any';
+      const given = plan.entities[i].given;
+      const defVal = (e.type === 'sphere' && key === 'friction' && surfF != null) ? surfF : def;
+      const val = given[key] !== undefined ? given[key] : defVal;
+      inp.value = val;
+      const src = document.createElement('span');
+      src.className = 'badge' + (given[key] !== undefined ? ' given' : '');
+      src.textContent = given[key] !== undefined ? '题给' : '默认';
+      inp.onchange = () => {
+        const v = Number(inp.value);
+        if (!Number.isFinite(v) || v < range[0] || v > range[1]) { inp.value = val; return; }
+        recordCorrection(`entities[${i}].${key}`, val, v);
+        plan.entities[i].given[key] = v;
+        src.textContent = '题给';
+        src.className = 'badge given';
+      };
+      cell.append(lab, inp);
+      if (unit) { const u = document.createElement('span'); u.className = 'u'; u.textContent = unit; cell.appendChild(u); }
+      cell.appendChild(src);
+      grid.appendChild(cell);
+    }
+    row.appendChild(grid);
+    box.appendChild(row);
+  });
+
+  // 观察 / 未知 / 假设
+  const lists = $('parseLists');
+  lists.innerHTML = '';
+  appendList(lists, '要求观察', plan.observations);
+  appendList(lists, '未知量', plan.unknowns);
+  appendList(lists, '假设', plan.assumptions);
+}
+
+function mrow(k) {
+  const d = document.createElement('div');
+  d.innerHTML = `<div class="k"></div><div class="v" style="font-family:var(--mono);font-size:12px;color:var(--accent)"></div>`;
+  d.querySelector('.k').textContent = k;
+  return d;
+}
+
+function appendList(parent, title, items) {
+  if (!items || !items.length) return;
+  const t = document.createElement('div');
+  t.className = 'k';
+  t.style.cssText = 'font-size:10px;color:var(--faint);margin-top:8px';
+  t.textContent = title;
+  const ol = document.createElement('ol');
+  ol.className = 'plist';
+  for (const it of items) {
+    const li = document.createElement('li');
+    li.textContent = it;
+    ol.appendChild(li);
+  }
+  parent.append(t, ol);
+}
+
+function recordCorrection(field, from, to) {
+  if (from === to) return;
+  agentCorrections.push({ field, from, to, at: new Date().toISOString() });
+}
+
+// 确认建场：全部经 window.MECH 白名单操作（与目录添加/Agent 未来调用同一条路径）
+function applyAgentPlan() {
+  if (!agentPlan) { toast('没有可用的解析结果'); return; }
+  if (mode !== 'edit') { toast('运行态不可建场，请先重置'); return; }
+  const M = window.MECH;
+  if (!agentPlan.gravityDefault) M.setGravity(agentPlan.gravity);
+  const overrides = planToOverrides(agentPlan);
+  const created = [];
+  for (const o of overrides) created.push(M.addComponent(o.type, o));
+  M.setAgentMeta({
+    assumptions: [...agentPlan.assumptions],
+    corrections: [...agentCorrections],
+    origin: {
+      questionType: agentPlan.questionType,
+      goal: agentPlan.goal,
+      fixture: agentPlan.fixture,
+      observations: [...agentPlan.observations],
+      unknowns: [...agentPlan.unknowns],
+      confidence: agentPlan.confidence,
+      at: new Date().toISOString(),
+    },
+  });
+  toast(`已按解析创建 ${created.length} 个实体${agentPlan.fixture ? '（示例数据）' : ''}`);
+  selectTab('inspector');
+}
+
+function resetAgentPanel() {
+  agentImageDataUrl = null;
+  agentPlan = null;
+  agentCorrections = [];
+  $('dropZone').style.display = 'block';
+  $('imgPrevWrap').style.display = 'none';
+  $('parseStatusGrp').style.display = 'none';
+  $('parseResultGrp').style.display = 'none';
+}
+
 // ============ Agent / 自动化只读接口（白名单操作的编程入口，P1 复用） ============
 window.MECH = {
   ready: () => appReady,
@@ -643,9 +946,34 @@ window.MECH = {
   play, pause: pauseToggle, step: stepOnce, resetSim,
   undo, redo,
   loadPreset: (id) => applyDoc(getPreset(id), '载入预置'),
+  // 重力用正数表示向下的模长（存 doc.gravity 为负）；越界抛错由调用方处理
+  setGravity: (g) => {
+    const v = Number(g);
+    if (!Number.isFinite(v) || v < 0 || v > 50) throw new Error('重力值无效: ' + g);
+    doc.gravity = v > 0 ? -v : v;
+    rebuildAll();
+    commitChange('设重力 ' + v);
+    return doc.gravity;
+  },
+  setAgentMeta: ({ assumptions, corrections, origin }) => {
+    doc.meta.source = 'agent';
+    if (assumptions) doc.meta.assumptions = assumptions;
+    if (corrections) doc.meta.corrections = corrections;
+    if (origin) doc.meta.origin = origin;
+    autosave();
+    commitChange('记录 Agent 解析元数据');
+    return cloneDoc(doc.meta);
+  },
   state: () => ({ mode, paused, simT: runtime.simT, timeScale, count: doc.entities.length, fixedH: FIXED_H }),
   telemetry: (id) => runtime.telemetry(id || selectedId),
   collisions: () => [...runtime.collisions],
+  agentState: () => ({
+    hasPlan: !!agentPlan,
+    fixture: agentPlan ? agentPlan.fixture : null,
+    gravity: agentPlan ? agentPlan.gravity : null,
+    correctionCount: agentCorrections.length,
+    entities: agentPlan ? agentPlan.entities.map((e) => ({ type: e.type, given: { ...e.given } })) : [],
+  }),
   // 物理自检：UI 同路径构造斜面场景，同步步进 5s，验证真实演化（非预录）
   selftest() {
     const prev = cloneDoc(doc);
