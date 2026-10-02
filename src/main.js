@@ -60,21 +60,29 @@ function nearestTrackIndex(pos) {
 }
 function constrainToPipe(body) {
   const q = body.translation();
-  let bi = trackClosest.idx, bd = Infinity;
-  const i0 = Math.max(0, trackClosest.idx - 8), i1 = Math.min(trackPts.length - 1, trackClosest.idx + 40);
+  // 找最近"线段"上的投影点（顶点最近点会把坡向分量混进 radial，形成锯齿阻力卡死球）
+  let bi = trackClosest.idx, bd = Infinity, bp = trackPts[trackClosest.idx];
+  const i0 = Math.max(0, trackClosest.idx - 8), i1 = Math.min(trackPts.length - 2, trackClosest.idx + 40);
   for (let i = i0; i <= i1; i++) {
-    const d = (trackPts[i].x - q.x) ** 2 + (trackPts[i].y - q.y) ** 2 + (trackPts[i].z - q.z) ** 2;
-    if (d < bd) { bd = d; bi = i; }
+    const a = trackPts[i], b = trackPts[i + 1];
+    const abx = b.x - a.x, aby = b.y - a.y, abz = b.z - a.z;
+    const apx = q.x - a.x, apy = q.y - a.y, apz = q.z - a.z;
+    const len2 = abx * abx + aby * aby + abz * abz;
+    let t = len2 > 0 ? (apx * abx + apy * aby + apz * abz) / len2 : 0;
+    t = Math.min(Math.max(t, 0), 1);
+    const px = a.x + abx * t, py = a.y + aby * t, pz = a.z + abz * t;
+    const d = (q.x - px) ** 2 + (q.y - py) ** 2 + (q.z - pz) ** 2;
+    if (d < bd) { bd = d; bi = i; bp = { x: px, y: py, z: pz }; }
   }
   trackClosest.idx = bi;
-  const n = trackPts[bi];
-  const rx = q.x - n.x, ry = q.y - n.y, rz = q.z - n.z;
+  const rx = q.x - bp.x, ry = q.y - bp.y, rz = q.z - bp.z;
   const r = Math.hypot(rx, ry, rz);
   if (r > 0.30) return;                                        // 离管太远（被抛出），不约束
   const LIMIT = TRACK_META.tubeRadius - TRACK_META.ballRadius; // 球心允许的最大径向距 0.05
   if (r <= LIMIT) return;
+  readouts.fixN++; readouts.fixMag += r - LIMIT;
   const nx = rx / r, ny = ry / r, nz = rz / r;
-  body.setTranslation({ x: n.x + nx * LIMIT, y: n.y + ny * LIMIT, z: n.z + nz * LIMIT }, true);
+  body.setTranslation({ x: bp.x + nx * LIMIT, y: bp.y + ny * LIMIT, z: bp.z + nz * LIMIT }, true);
   const v = body.linvel();
   const vn = v.x * nx + v.y * ny + v.z * nz;
   if (vn > 0) body.setLinvel({ x: v.x - vn * nx, y: v.y - vn * ny, z: v.z - vn * nz }, true);
@@ -585,7 +593,8 @@ function readouts() {
   $('roH').textContent = Math.max(0, p.y - TRACK_META.ballRadius).toFixed(2);
   $('roX').textContent = p.x.toFixed(2);
   $('roP').textContent = pendCross.avg > 0 ? pendCross.avg.toFixed(2) : '--';
-  document.title = `M x=${p.x.toFixed(3)} y=${p.y.toFixed(3)} z=${p.z.toFixed(3)} vx=${v.x.toFixed(2)} vy=${v.y.toFixed(2)} vz=${v.z.toFixed(2)}`;
+  document.title = `M x=${p.x.toFixed(3)} y=${p.y.toFixed(3)} z=${p.z.toFixed(3)} vx=${v.x.toFixed(2)} vy=${v.y.toFixed(2)} vz=${v.z.toFixed(2)} c=${readouts.fixN}/${readouts.fixMag.toExponential(1)} idx=${trackClosest.idx}`;
+  readouts.fixN = 0; readouts.fixMag = 0;
   // 诊断：球在异常位置停稳时，列出其 0.35m 邻域内的全部碰撞体句柄
   if (!readouts.probed && simT > 3 && Math.abs(p.x - 0.684) < 0.06 && speed < 0.05) {
     readouts.probed = true;
