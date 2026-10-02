@@ -29,15 +29,18 @@ python tools/serve.py            # 或 python -m http.server 8721
 - 场景自动保存到浏览器 localStorage；保存按钮下载 `.mechanica.json`，打开按钮载入
 - 编辑态改参数即时重建物理世界；运行态参数只读；重置 = 从场景文档全量重建回初始态
 
-## Agent 题目解析（P1 切片）
+## Agent 题目解析（P1 切片，链路完整）
 
 右栏"Agent 解析"标签：上传题图 → `POST /api/parse-question`（step-5-preview 视觉模型）→
-结构化解析（题型/实体/物理量/单位/置信度/未知量/假设）→ 用户逐项检查修正 → 确认后经白名单 API 创建真实场景实体 → 运行真实物理。
+结构化解析（题型/实体/物理量/单位/置信度/未知量/假设）→ 用户逐项检查修正 → 确认后经白名单 API 创建真实场景实体 →
+运行真实物理 → **"运行并生成解释"**：轨迹采样后对照理论（确定性物理计算，非模型生成——理论 √(2g·Δh) vs 实测、
+机械能漂移、假设核对、题目全长参考值）。
 
 - **密钥纪律**：key 只在服务端（环境变量 `MECHANICA_STEP_KEY` 或未跟踪文件 `tools/server/step_key.txt`），前端代码/Git/日志零出现（check.py 有泄漏扫描红线）
 - 无 Key 时可点"载入本地示例解析数据"（fixture，明确标注非真实模型输出）验证后续物理链路
 - 解析给出的值带"题给"徽标，Agent 补的默认值带"默认"徽标；用户修改会记录进场景文档 `meta.corrections`
 - 建场统一走 `window.MECH` 白名单 API（与组件目录同一路径），实体来源标 `agent`
+- 摩擦按成对属性处理：模型标在球上或斜面上等效（取显式值最小注入两侧）
 
 ## 架构（src/engine/）
 
@@ -57,7 +60,7 @@ python tools/serve.py            # 或 python -m http.server 8721
 
 ```
 cd tools/ui-test && npm i && node p0.mjs   # P0 工作台内核 19 项
-                            node p1.mjs   # P1 解析切片 13 项（需 8721 服务与有效 Key）
+                            node p1.mjs   # P1 解析+解释切片 19 项（需 8721 服务与有效 Key）
 ```
 
 ## 经典演示（classic.html）
