@@ -14,6 +14,7 @@ def need(p, cond=True, msg=None):
 for rel, min_size in [
     ("vendor/three/three.module.js", 100_000),
     ("vendor/three/three.core.js", 500_000),
+    ("vendor/three/addons/controls/TransformControls.js", 30_000),
     ("vendor/rapier/rapier.mjs", 1_000_000),
     ("assets/hdri/studio_1k.hdr", 500_000),
     ("assets/textures/marble/color.jpg", 30_000),
@@ -22,6 +23,17 @@ for rel, min_size in [
 ]:
     p = ROOT / rel
     need(p, p.exists() and p.stat().st_size > min_size, f"{rel} 缺失或过小")
+
+# 1b. 源文件存在性（工作台 + 引擎 + legacy 保留版）
+for js in [
+    "src/workbench.js",
+    "src/engine/scene-doc.js", "src/engine/registry.js",
+    "src/engine/runtime.js", "src/engine/viewport.js", "src/engine/presets.js",
+    "src/legacy-main.js", "src/track-curve.js", "src/materials.js",
+]:
+    need(ROOT / js, (ROOT / js).exists(), f"缺失: {js}")
+for page in ["index.html", "classic.html"]:
+    need(ROOT / page, (ROOT / page).exists(), f"缺失: {page}")
 
 # 2. importmap 路径可达
 html = (ROOT / "index.html").read_text(encoding="utf-8")
@@ -67,7 +79,9 @@ def balance(path):
     if in_s: return f"{path.name}: 字符串未闭合"
     return None
 
-for js in ["src/main.js", "src/track-curve.js", "src/materials.js"]:
+for js in ["src/legacy-main.js", "src/track-curve.js", "src/materials.js",
+           "src/workbench.js", "src/engine/scene-doc.js", "src/engine/registry.js",
+           "src/engine/runtime.js", "src/engine/viewport.js", "src/engine/presets.js"]:
     p = ROOT / js
     if p.exists():
         r = balance(p)
@@ -75,12 +89,19 @@ for js in ["src/main.js", "src/track-curve.js", "src/materials.js"]:
     else:
         fails.append(f"缺失: {js}")
 
-# 4. id 交叉核验：index.html 定义的 id vs main.js 绑定的 id
+# 3b. 页面入口指向正确
+if "src/workbench.js" not in html:
+    fails.append("index.html 未指向 src/workbench.js")
+classic = (ROOT / "classic.html").read_text(encoding="utf-8") if (ROOT / "classic.html").exists() else ""
+if "src/legacy-main.js" not in classic:
+    fails.append("classic.html 未指向 src/legacy-main.js")
+
+# 4. id 交叉核验：index.html 定义的 id vs workbench.js 绑定的 id
 html_ids = set(re.findall(r'id="([^"]+)"', html))
-js = (ROOT / "src/main.js").read_text(encoding="utf-8")
+js = (ROOT / "src/workbench.js").read_text(encoding="utf-8")
 used = set(re.findall(r"\$\('([^']+)'\)", js))
 missing = used - html_ids
-if missing: fails.append(f"main.js 引用了不存在的 DOM id: {missing}")
+if missing: fails.append(f"workbench.js 引用了不存在的 DOM id: {missing}")
 handlers = set(re.findall(r"\$\('([A-Za-z]\w+)'\)\.onclick", js))
 btns = set(re.findall(r'<button id="([^"]+)"', html))
 no_handler = btns - handlers

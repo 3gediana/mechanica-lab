@@ -1,7 +1,8 @@
-# MECHANICA · 牛顿力学拟真沙盘
+# MECHANICA · 物理教学工作台
 
-浏览器里的高保真物理实验台：真实刚体引擎（Rapier WASM）+ PBR 摄影棚渲染（three.js + HDRI + ACES）。
-一颗铬钢球从大理石滑道释放，下坡、钻环、撞出木块；旁边是可抓取抛掷的橡胶球与真切换的单摆，展台上是土星。
+浏览器里的 Agent 驱动物理沙盒工作台：真实刚体引擎（Rapier WASM）+ PBR 摄影棚渲染（three.js + HDRI + ACES）。
+当前处于 **P0 通用工作台内核** 阶段：场景文档驱动、组件可增删改、真实物理演化、可保存恢复。
+原固定轨道演示保留在 `classic.html`（见下）。
 
 ## 运行
 
@@ -9,58 +10,65 @@
 
 ```
 cd D:\mechanica-lab
-python -m http.server 8721
-# 浏览器打开 http://127.0.0.1:8721
+python tools/serve.py            # 或 python -m http.server 8721
+# 浏览器打开 http://127.0.0.1:8721          ← 工作台
+#            http://127.0.0.1:8721/classic.html ← 原轨道演示（保留版）
 ```
 
-## 操作
+## 工作台（index.html）
 
-- 左键拖动 = 旋转视角，滚轮 = 缩放
-- 按住左键抓取铬球 / 橡胶球 / 木块，甩动松手 = 抛掷
-- 底部控制台：抽开挡板（释放主角球）、暂停、慢速、重置
-- 键盘：`SPACE` 暂停 / `R` 重置 / `F` 慢速 / `G` 抽挡板
+```
+顶栏    新建 / 预置场景 / 保存 / 打开 / 撤销重做 / 移动·旋转 gizmo / 吸附 / 全局·顶·前·侧·聚焦
+左栏    组件目录（球·方块·圆柱·斜坡·地面板）+ 场景对象大纲
+中央    3D 视口：点选、gizmo 拖动、滚轮缩放、左键拖转视角
+右栏    属性检查器：变换 / 参数 / 物理（刚体类型·质量·摩擦·弹性·初速度）/ 外观 / 实时数据
+底栏    运行 / 暂停 / 单步(1/120s) / 重置 / 时间倍率 / 模拟时间 / 选中对象读数
+```
 
-## 场景清单
+- 键盘：`Space` 运行/暂停 · `W/E` 移动/旋转 gizmo · `F` 聚焦 · `R` 重置 · `Del` 删除 · `Ctrl+Z/Y` 撤销重做 · `Ctrl+S` 保存 · `Ctrl+D` 复制
+- 场景自动保存到浏览器 localStorage；保存按钮下载 `.mechanica.json`，打开按钮载入
+- 编辑态改参数即时重建物理世界；运行态参数只读；重置 = 从场景文档全量重建回初始态
 
-| 装置 | 物理内容 |
+## 架构（src/engine/）
+
+| 模块 | 职责 |
 |---|---|
-| 大理石滑道 + 竖直环轨 | 30° 下坡、C1 连续半管雪橇道（trimesh）、360° 环轨不掉落（能量守恒可行性已在注释给出推导） |
-| 橡木块 | 跑道末端碰撞对象，密度 560 kg/m³，滑动+倾翻 |
-| 单摆 | 轻绳关节（rope joint，仅拉不推），左仪表实时测摆动周期 |
-| 橡胶球 | 高弹性（e=0.72）大摩擦，抓来抛 |
-| 土星展台 | Solar System Scope CC-BY 真实贴图，黄铜座 |
+| `scene-doc.js` | 版本化 JSON 场景文档（实体/变换/物理/材质/来源），快照式撤销重做 |
+| `registry.js` | 组件注册表：几何构建 + 碰撞构建 + 参数 schema（单位/范围/校验）。新组件只在此登记 |
+| `runtime.js` | 文档 → three 网格 + Rapier 刚体全量重建；固定步长 1/120s；每帧步数上限 + 背压丢弃；碰撞事件；遥测 |
+| `viewport.js` | 视口：点选 / gizmo（TransformControls r186）/ 吸附 / 聚焦 / 三视图 |
+| `presets.js` | 预置场景（空场景、斜面小球），与 UI/Agent 同一条 createEntity 路径 |
+| `workbench.js` | UI 接线 + `window.MECH` 白名单编程接口（Agent 接入预备） |
+
+物理与视觉分离：每个实体 = 渲染网格 + 碰撞形状 + 质量动力学参数 + 刚体类型（动态/固定/仅视觉），全部可序列化。
+
+## P0 验收（tools/ui-test/）
+
+```
+cd tools/ui-test && npm i && node p0.mjs     # 需先起 8721 服务
+```
+
+单浏览器单标签走真实 UI 全流程：新建空场景 → 目录加斜坡 → 调倾角 → 加球 → 改质量/位置 → 运行滚落 → 暂停冻结 → 单步精确 → 重置 → 撤销重做 → 刷新自动保存恢复 → classic 存活。19 项断言 + 截图目检。
+
+## 经典演示（classic.html）
+
+Round 0 的铬钢球钻环场景原样保留：大理石半管滑道（C1 连续参数面 + 管道中心线解析约束）、抽开式挡板、
+弹簧-阻尼抓取抛掷、轻绳单摆周期测量、土星展台（Solar System Scope CC-BY 贴图）。`?run=1` 自动演示通道保留。
+README Round 0 版本描述的轨道物理细节以该页与 `src/track-curve.js` 注释为准。
 
 ## 技术
 
-- 物理引擎 `@dimforge/rapier3d-compat` 0.21（Rust→WASM，固定步长 1/120s，确定性）
-- 轨道 = 半管参数面：渲染 620 段 / 碰撞 trimesh 420×20，开口永远朝世界正上方，环顶不掉落按 2.7R 判据复核
-- 渲染 three r186：HDRI 环境光（Poly Haven CC0 摄影棚）+ ACES + PCFSoft 阴影 + Reflector 真镜面地板 + 轻 bloom
-- 材质全 PBR：ambientCG CC0 大理石/橡木贴图，铬钢球 metalness 1 / roughness 0.06
-- 全部资产本地化，断网可跑
+- three r186 + Rapier 0.21（WASM，固定步长 1/120s 确定性），全部 vendor 本地化，断网可跑
+- TransformControls 来自 three 官方 examples（MIT），已入 vendor
+- 材质 PBR：ambientCG CC0 大理石/橡木，Poly Haven CC0 HDRI；贴图缺失自动降级
 
 ## 自检
 
 ```
-python tools/check.py
-```
-
-vendor 完整性 / importmap 路径 / JS 括号配对 / DOM id 交叉核验 / 契约字段 / 文案红线（em-dash、emoji）。
-
-## 目录
-
-```
-index.html          页面壳 + importmap + UI
-src/main.js         场景搭建、物理、交互、渲染循环
-src/track-curve.js  滑道曲线数据（python 数值验证过）
-src/materials.js    PBR 材质库（贴图缺失自动降级）
-vendor/             three r186 + rapier 0.21 本地拷贝
-assets/             HDRI / PBR 贴图 / 行星贴图
-tools/check.py      静态自检
+python tools/check.py     # vendor 完整性 / 入口指向 / JS 括号 / DOM id 交叉 / 契约字段 / 文案红线
 ```
 
 ## 授权
 
-- 代码：本项目自有
-- three.js MIT；Rapier Apache-2.0
-- HDRI / PBR 贴图：Poly Haven、ambientCG（CC0）
-- 行星贴图：Solar System Scope（CC BY 4.0）
+- 代码：本项目自有；three.js MIT；Rapier Apache-2.0
+- HDRI / PBR 贴图：Poly Haven、ambientCG（CC0）；行星贴图：Solar System Scope（CC BY 4.0）

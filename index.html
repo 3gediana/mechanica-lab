@@ -3,97 +3,197 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MECHANICA · 牛顿力学拟真沙盘</title>
+<title>MECHANICA · 物理教学工作台</title>
 <style>
   :root {
     --bg: #0b0c0e;
-    --panel: rgba(13, 14, 16, 0.92);
+    --panel: rgba(13, 14, 16, 0.94);
+    --panel-solid: #101114;
     --line: rgba(255, 255, 255, 0.09);
     --line-strong: rgba(255, 255, 255, 0.18);
     --text: #e8e6e1;
     --dim: #82878f;
     --faint: #565b62;
     --accent: #d9a441;
+    --accent-dim: rgba(217, 164, 65, 0.14);
+    --danger: #c96a5a;
     --mono: "Cascadia Mono", Consolas, ui-monospace, "SF Mono", Menlo, monospace;
     --sans: system-ui, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+    --topbar-h: 46px;
+    --simbar-h: 52px;
+    --left-w: 208px;
+    --right-w: 292px;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); font-family: var(--sans); }
+  button { font-family: var(--sans); }
   #stage { position: fixed; inset: 0; }
   #stage canvas { display: block; }
 
-  /* 加载幕 */
+  /* ============ 顶栏 ============ */
+  #topbar {
+    position: fixed; top: 0; left: 0; right: 0; height: var(--topbar-h); z-index: 20;
+    display: flex; align-items: center; gap: 14px; padding: 0 14px;
+    background: var(--panel); border-bottom: 1px solid var(--line);
+    user-select: none;
+  }
+  #topbar .brand { display: flex; align-items: baseline; gap: 9px; margin-right: 4px; }
+  #topbar .brand h1 { font-size: 12px; font-weight: 500; letter-spacing: .34em; color: var(--text); }
+  #topbar .brand .sub { font-size: 10px; color: var(--faint); letter-spacing: .14em; }
+  #sceneName {
+    background: transparent; border: 1px solid transparent; color: var(--text);
+    font-family: var(--sans); font-size: 12px; padding: 4px 8px; width: 130px; border-radius: 2px;
+  }
+  #sceneName:hover, #sceneName:focus { border-color: var(--line-strong); outline: none; }
+  .tb-group { display: flex; align-items: stretch; border: 1px solid var(--line); border-radius: 2px; }
+  .tb-group button, .tb-group select {
+    appearance: none; background: transparent; border: none; border-right: 1px solid var(--line);
+    color: var(--dim); font-size: 11px; letter-spacing: .1em; padding: 7px 10px 6px; cursor: pointer;
+    white-space: nowrap; transition: color .12s, background .12s;
+  }
+  .tb-group button:last-child, .tb-group select:last-child { border-right: none; }
+  .tb-group button:hover, .tb-group select:hover { color: var(--text); background: rgba(255,255,255,.035); }
+  .tb-group button:active { transform: translateY(1px); }
+  .tb-group button.hot { color: var(--accent); background: var(--accent-dim); }
+  .tb-group button:disabled, .tb-group select:disabled { color: var(--faint); cursor: default; background: transparent; }
+  .tb-group select { font-family: var(--mono); }
+  .tb-group select option { background: var(--panel-solid); color: var(--text); }
+  #topbar .spacer { flex: 1; }
+  #linkClassic { font-size: 10px; color: var(--faint); text-decoration: none; letter-spacing: .12em; }
+  #linkClassic:hover { color: var(--dim); }
+  .chip {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .16em; text-indent: .16em;
+    padding: 4px 10px 3px; border: 1px solid var(--line); border-radius: 2px; color: var(--dim);
+  }
+  .chip.run { color: var(--accent); border-color: rgba(217,164,65,.45); background: var(--accent-dim); }
+  .chip.pause { color: var(--text); border-color: var(--line-strong); }
+
+  /* ============ 左侧：组件目录 + 场景对象 ============ */
+  #left {
+    position: fixed; top: var(--topbar-h); bottom: var(--simbar-h); left: 0; width: var(--left-w); z-index: 15;
+    background: var(--panel); border-right: 1px solid var(--line);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .panel-title {
+    font-size: 10px; color: var(--faint); letter-spacing: .24em; text-indent: .24em;
+    padding: 10px 14px 8px; border-bottom: 1px solid var(--line); user-select: none;
+  }
+  #catalogList { flex: 1; overflow-y: auto; padding-bottom: 8px; }
+  .cat-head { font-size: 10px; color: var(--dim); letter-spacing: .12em; padding: 10px 14px 4px; user-select: none; }
+  .comp-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 14px; cursor: pointer; border-left: 2px solid transparent;
+    transition: background .12s, border-color .12s;
+  }
+  .comp-item:hover { background: rgba(255,255,255,.045); border-left-color: var(--accent); }
+  .comp-item .nm { font-size: 12px; color: var(--text); }
+  .comp-item .plus { font-family: var(--mono); font-size: 13px; color: var(--faint); }
+  .comp-item:hover .plus { color: var(--accent); }
+  #outline { max-height: 34%; overflow-y: auto; border-top: 1px solid var(--line); }
+  .ol-row {
+    display: flex; align-items: center; gap: 6px; padding: 6px 10px 6px 14px; cursor: pointer;
+    border-left: 2px solid transparent; font-size: 12px; color: var(--dim);
+  }
+  .ol-row:hover { background: rgba(255,255,255,.04); color: var(--text); }
+  .ol-row.sel { background: var(--accent-dim); border-left-color: var(--accent); color: var(--text); }
+  .ol-row .ty { font-family: var(--mono); font-size: 9px; color: var(--faint); letter-spacing: .06em; }
+  .ol-row .del { margin-left: auto; color: var(--faint); font-size: 13px; padding: 0 4px; visibility: hidden; }
+  .ol-row:hover .del { visibility: visible; }
+  .ol-row .del:hover { color: var(--danger); }
+  .ol-empty { padding: 10px 14px; font-size: 11px; color: var(--faint); }
+
+  /* ============ 右侧：属性检查器 ============ */
+  #right {
+    position: fixed; top: var(--topbar-h); bottom: var(--simbar-h); right: 0; width: var(--right-w); z-index: 15;
+    background: var(--panel); border-left: 1px solid var(--line);
+    overflow-y: auto; overflow-x: hidden;
+  }
+  #inspEmpty { padding: 22px 16px; font-size: 11px; color: var(--faint); line-height: 1.9; }
+  .grp { border-bottom: 1px solid var(--line); padding: 10px 14px 12px; }
+  .grp-h { font-size: 10px; color: var(--faint); letter-spacing: .2em; margin-bottom: 9px; user-select: none;
+           display: flex; justify-content: space-between; align-items: center; }
+  .frow { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+  .frow:last-child { margin-bottom: 0; }
+  .frow label { flex: 0 0 58px; font-size: 11px; color: var(--dim); }
+  .frow .u { font-size: 9px; color: var(--faint); font-family: var(--mono); flex: 0 0 18px; }
+  .frow input[type=number], .frow select, .frow input[type=text] {
+    flex: 1; min-width: 0; background: rgba(255,255,255,.03); border: 1px solid var(--line);
+    color: var(--text); font-family: var(--mono); font-size: 12px; padding: 4px 7px; border-radius: 2px;
+  }
+  .frow input:focus, .frow select:focus { outline: none; border-color: rgba(217,164,65,.55); }
+  .frow input.bad { border-color: var(--danger); background: rgba(201,106,90,.08); }
+  .frow input:disabled, .frow select:disabled { opacity: .45; }
+  .frow input[type=checkbox] { accent-color: var(--accent); }
+  .tri { display: flex; gap: 6px; flex: 1; min-width: 0; }
+  .tri input { flex: 1 1 0px; width: 0; min-width: 0; }
+  .errmsg { font-size: 10px; color: var(--danger); margin: 4px 0 0 66px; display: none; }
+  .badge { font-family: var(--mono); font-size: 9px; padding: 2px 7px; border: 1px solid var(--line); border-radius: 2px; color: var(--dim); letter-spacing: .1em; }
+  .badge.src-agent { color: var(--accent); border-color: rgba(217,164,65,.4); }
+  .hint { font-size: 10px; color: var(--faint); line-height: 1.7; margin-top: 6px; }
+  .ro-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 12px; }
+  .ro-grid .cell { display: flex; justify-content: space-between; align-items: baseline; min-width: 0; }
+  .ro-grid .k { font-size: 10px; color: var(--faint); flex: 0 0 auto; }
+  .ro-grid .v { font-family: var(--mono); font-size: 12px; color: var(--accent); font-variant-numeric: tabular-nums; word-break: break-all; min-width: 0; text-align: right; }
+  .ro-grid .v.plain { color: var(--text); }
+  .btnrow { display: flex; gap: 8px; }
+  .btnrow button {
+    flex: 1; appearance: none; background: transparent; border: 1px solid var(--line); border-radius: 2px;
+    color: var(--dim); font-size: 11px; letter-spacing: .14em; text-indent: .14em; padding: 7px 0 6px; cursor: pointer;
+    transition: color .12s, border-color .12s;
+  }
+  .btnrow button:hover { color: var(--text); border-color: var(--line-strong); }
+  .btnrow button.danger:hover { color: var(--danger); border-color: rgba(201,106,90,.5); }
+
+  /* ============ 底部模拟控制栏 ============ */
+  #simbar {
+    position: fixed; left: 0; right: 0; bottom: 0; height: var(--simbar-h); z-index: 20;
+    display: flex; align-items: center; gap: 14px; padding: 0 16px;
+    background: var(--panel); border-top: 1px solid var(--line); user-select: none;
+  }
+  #simbar .sgroup { display: flex; align-items: stretch; border: 1px solid var(--line); border-radius: 2px; }
+  #simbar button {
+    appearance: none; background: transparent; border: none; border-right: 1px solid var(--line);
+    color: var(--dim); font-size: 11px; letter-spacing: .14em; text-indent: .14em; padding: 9px 16px 8px;
+    cursor: pointer; transition: color .12s, background .12s; white-space: nowrap;
+  }
+  #simbar button:last-child { border-right: none; }
+  #simbar button:hover { color: var(--text); background: rgba(255,255,255,.035); }
+  #simbar button:active { transform: translateY(1px); }
+  #simbar button.primary { color: var(--accent); }
+  #simbar button.hot { color: var(--accent); background: var(--accent-dim); }
+  #simbar button:disabled { color: var(--faint); cursor: default; }
+  #simbar .ro { font-family: var(--mono); font-size: 11px; color: var(--dim); letter-spacing: .04em; white-space: nowrap; }
+  #simbar .ro b { color: var(--accent); font-weight: 400; font-variant-numeric: tabular-nums; }
+  #simbar .spacer { flex: 1; }
+  #simbar select {
+    appearance: none; background: transparent; border: 1px solid var(--line); border-radius: 2px;
+    color: var(--dim); font-family: var(--mono); font-size: 11px; padding: 5px 8px; cursor: pointer;
+  }
+  #simbar select option { background: var(--panel-solid); }
+
+  /* 加载幕 / 错误条 */
   #veil {
-    position: fixed; inset: 0; z-index: 40; background: var(--bg);
+    position: fixed; inset: 0; z-index: 60; background: var(--bg);
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
-    transition: opacity .6s ease; 
+    transition: opacity .5s ease;
   }
   #veil.gone { opacity: 0; pointer-events: none; }
   #veil .brand { font-size: 15px; letter-spacing: .42em; text-indent: .42em; color: var(--text); font-weight: 300; }
   #veil .rule { width: 44px; height: 1px; background: var(--line-strong); }
   #veil .status { font-family: var(--mono); font-size: 11px; color: var(--dim); letter-spacing: .08em; }
-  #veil .status.err { color: #c96a5a; }
-
-  /* 左上铭牌 */
-  #brand { position: fixed; top: 22px; left: 26px; z-index: 20; user-select: none; }
-  #brand h1 { font-size: 13px; font-weight: 500; letter-spacing: .38em; color: var(--text); }
-  #brand .sub { margin-top: 7px; font-size: 11px; color: var(--dim); letter-spacing: .14em; }
-  #brand .bar { width: 30px; height: 1px; background: var(--accent); margin-top: 10px; opacity: .8; }
-
-  /* 左侧仪表 */
-  #panel {
-    position: fixed; left: 26px; top: 118px; z-index: 20; width: 158px;
-    background: var(--panel); border: 1px solid var(--line);
-    font-family: var(--mono); opacity: 0; transition: opacity .5s ease;
-  }
-  #panel.on { opacity: 1; }
-  #panel .row { display: flex; align-items: baseline; justify-content: space-between; padding: 9px 13px; border-bottom: 1px solid var(--line); }
-  #panel .row:last-child { border-bottom: none; }
-  #panel .k { font-family: var(--sans); font-size: 10px; color: var(--faint); letter-spacing: .18em; }
-  #panel .v { font-size: 14px; color: var(--accent); font-variant-numeric: tabular-nums; }
-  #panel .u { font-size: 10px; color: var(--faint); margin-left: 4px; }
-
-  /* 底部控制台 */
-  #console {
-    position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); z-index: 20;
-    display: flex; align-items: stretch; gap: 0;
-    background: var(--panel); border: 1px solid var(--line);
-    opacity: 0; transition: opacity .5s ease;
-  }
-  #console.on { opacity: 1; }
-  #console button {
-    appearance: none; background: transparent; border: none; border-right: 1px solid var(--line);
-    color: var(--dim); font-family: var(--sans); font-size: 11px; letter-spacing: .22em; text-indent: .22em;
-    padding: 13px 22px 12px; cursor: pointer; transition: color .15s, background .15s;
-    white-space: nowrap;
-  }
-  #console button:last-child { border-right: none; }
-  #console button:hover { color: var(--text); background: rgba(255,255,255,.035); }
-  #console button:active { transform: translateY(1px); }
-  #console button.primary { color: var(--text); }
-  #console button.hot { color: var(--accent); }
-  #console button:disabled { color: var(--faint); cursor: default; background: transparent; }
-
-  /* 右下键位 */
-  #keys {
-    position: fixed; right: 26px; bottom: 30px; z-index: 20;
-    font-family: var(--mono); font-size: 10px; color: var(--faint);
-    text-align: right; line-height: 2; letter-spacing: .06em; user-select: none;
-  }
-  #keys b { color: var(--dim); font-weight: 400; border: 1px solid var(--line); padding: 1px 5px; margin-left: 6px; }
-
-  /* 错误条 */
+  #veil .status.err { color: var(--danger); }
   #errbar {
-    position: fixed; top: 0; left: 0; right: 0; z-index: 50; display: none;
+    position: fixed; top: var(--topbar-h); left: 0; right: 0; z-index: 50; display: none;
     background: #2a1512; color: #e0a49a; border-bottom: 1px solid #6b3328;
-    font-family: var(--mono); font-size: 11px; padding: 7px 16px; white-space: pre-wrap;
+    font-family: var(--mono); font-size: 11px; padding: 6px 16px; white-space: pre-wrap;
   }
-
-  @media (max-width: 760px) {
-    #keys { display: none; }
-    #panel { top: 96px; width: 132px; }
-    #console button { padding: 11px 13px 10px; letter-spacing: .12em; }
+  #toast {
+    position: fixed; top: calc(var(--topbar-h) + 12px); left: 50%; transform: translateX(-50%);
+    z-index: 45; background: var(--panel-solid); border: 1px solid var(--line-strong); border-radius: 2px;
+    color: var(--text); font-size: 11px; letter-spacing: .08em; padding: 8px 16px;
+    opacity: 0; pointer-events: none; transition: opacity .25s;
   }
+  #toast.on { opacity: 1; }
 </style>
 <script type="importmap">
 {
@@ -108,41 +208,79 @@
 <body>
 <div id="stage"></div>
 
+<header id="topbar">
+  <div class="brand"><h1>MECHANICA</h1><div class="sub">物理教学工作台</div></div>
+  <input id="sceneName" value="未命名场景" spellcheck="false" title="场景名称">
+  <div class="tb-group">
+    <button id="btnNew" title="新建空场景">新建</button>
+    <select id="selPreset" title="载入预置场景">
+      <option value="">预置场景</option>
+      <option value="incline">斜面小球</option>
+    </select>
+    <button id="btnSave" title="下载场景 JSON">保存</button>
+    <button id="btnOpen" title="打开场景 JSON">打开</button>
+    <button id="btnUndo" title="Ctrl+Z">撤销</button>
+    <button id="btnRedo" title="Ctrl+Shift+Z">重做</button>
+  </div>
+  <div class="tb-group">
+    <button id="btnModeMove" class="hot" title="移动 gizmo（W）">移动</button>
+    <button id="btnModeRotate" title="旋转 gizmo（E）">旋转</button>
+    <button id="btnSnap" title="网格吸附：平移 0.1m / 旋转 15°">吸附</button>
+  </div>
+  <div class="tb-group">
+    <button id="btnViewReset" title="回到全局视角">全局</button>
+    <button id="btnViewTop" title="顶视图">顶</button>
+    <button id="btnViewFront" title="正视图">前</button>
+    <button id="btnViewSide" title="侧视图">侧</button>
+    <button id="btnFocus" title="聚焦选中（F）">聚焦</button>
+  </div>
+  <div class="spacer"></div>
+  <span id="modeChip" class="chip">编辑态</span>
+  <a id="linkClassic" href="./classic.html" title="原固定轨道演示页（保留）">经典演示</a>
+</header>
+
+<aside id="left">
+  <div class="panel-title">组件目录</div>
+  <div id="catalogList"></div>
+  <div class="panel-title">场景对象</div>
+  <div id="outline"></div>
+</aside>
+
+<aside id="right">
+  <div class="panel-title">属性检查器</div>
+  <div id="inspEmpty">在视口点击对象，或从左侧目录添加组件。<br><br>拖动 gizmo 移动 / 旋转；底部控制栏运行物理模拟。</div>
+  <div id="inspBody" style="display:none"></div>
+</aside>
+
+<footer id="simbar">
+  <div class="sgroup">
+    <button id="btnPlay" class="primary" title="从初始态运行">运行</button>
+    <button id="btnPause" title="暂停 / 继续（空格）">暂停</button>
+    <button id="btnStep" title="推进一个固定步长 1/120s">单步</button>
+    <button id="btnReset" title="回到初始态（R）">重置</button>
+  </div>
+  <select id="selSpeed" title="时间倍率">
+    <option value="0.1">0.1x</option>
+    <option value="0.25">0.25x</option>
+    <option value="0.5">0.5x</option>
+    <option value="1" selected>1.0x</option>
+  </select>
+  <span class="ro">t=<b id="roT">0.000</b>s</span>
+  <span class="ro">步长 <b>1/120s</b></span>
+  <span class="ro">实体 <b id="roN">0</b></span>
+  <div class="spacer"></div>
+  <span class="ro" id="roSel">未选中</span>
+</footer>
+
+<div id="toast"></div>
+<div id="errbar"></div>
+
 <div id="veil">
   <div class="brand">MECHANICA</div>
   <div class="rule"></div>
   <div class="status" id="veilStatus">正在加载物理内核与材质</div>
 </div>
 
-<div id="brand">
-  <h1>MECHANICA</h1>
-  <div class="sub">牛顿力学拟真沙盘</div>
-  <div class="bar"></div>
-</div>
-
-<div id="panel">
-  <div class="row"><span class="k">时间</span><span><span class="v" id="roT">0.00</span><span class="u">s</span></span></div>
-  <div class="row"><span class="k">球速</span><span><span class="v" id="roV">0.00</span><span class="u">m/s</span></span></div>
-  <div class="row"><span class="k">球高</span><span><span class="v" id="roH">0.00</span><span class="u">m</span></span></div>
-  <div class="row"><span class="k">球x</span><span><span class="v" id="roX">0.00</span><span class="u">m</span></span></div>
-  <div class="row"><span class="k">摆周期</span><span><span class="v" id="roP">--</span><span class="u">s</span></span></div>
-</div>
-
-<div id="console">
-  <button id="btnRelease" class="primary" disabled>抽开挡板</button>
-  <button id="btnPause" disabled>暂停</button>
-  <button id="btnSlow" disabled>慢速</button>
-  <button id="btnReset" disabled>重置</button>
-</div>
-
-<div id="keys">
-  旋转视角 / 缩放<div>左键拖动 · 滚轮</div>
-  抓取球与木块<div>按住左键拖动</div>
-  <b>SPACE</b> 暂停 &nbsp;<b>R</b> 重置 &nbsp;<b>F</b> 慢速
-</div>
-
-<div id="errbar"></div>
-
-<script type="module" src="./src/main.js?v=9"></script>
+<script type="module" src="./src/workbench.js?v=1"></script>
 </body>
 </html>
