@@ -3,7 +3,7 @@
 
 const TYPE_MAP = {
   ramp: 'ramp', sphere: 'sphere', box: 'box', cylinder: 'cylinder', ground: 'ground',
-  celestial: 'celestial', planet: 'celestial', star: 'celestial',
+  celestial: 'celestial', planet: 'celestial', star: 'celestial', pulley: 'pulley', 滑轮: 'pulley',
   斜面: 'ramp', 球: 'sphere', 方块: 'box', 圆柱: 'cylinder', 地面: 'ground',
   天体: 'celestial', 行星: 'celestial', 恒星: 'celestial', 卫星: 'celestial',
 };
@@ -94,6 +94,39 @@ function strs(v) { return Array.isArray(v) ? v.filter((x) => typeof x === 'strin
 function clamp01(v) { const n = Number(v); return Number.isFinite(n) ? Math.min(Math.max(n, 0), 1) : null; }
 
 // ---------- 弹簧振子布局：立柱墙 + 水平理想化小球（拉开 rest+0.4 静止释放，简谐振动） ----------
+// ---------- 阿特伍德布局：滑轮 + 双球（onPulley 指向滑轮 id，应用层已建滑轮后回填） ----------
+function atwoodLayout(plan) {
+  const out = [];
+  const pulley = plan.entities.find((e) => e.type === 'pulley');
+  const balls = plan.entities.filter((e) => e.type === 'sphere');
+  if (!pulley || balls.length !== 2) return out;
+  const plPos = pulley.given.position ?? [0, 3.0, 0];
+  out.push({
+    type: 'pulley', name: pulley.name || '定滑轮', source: 'agent',
+    params: { radius: pulley.given.radius ?? 0.3 },
+    transform: { pos: [...plPos], rot: [0, 0, 0] },
+    physics: { body: 'fixed' },
+  });
+  const R = pulley.given.radius ?? 0.3;
+  balls.forEach((e, i) => {
+    const m = e.given.mass ?? 1;
+    const x = (i === 0 ? -1 : 1) * (R + 0.05);
+    out.push({
+      type: 'sphere', name: e.name || ('球 ' + (i + 1)), source: 'agent',
+      params: { radius: 0.12 },
+      transform: { pos: [x, 1.0, 0], rot: [0, 0, 0] },
+      physics: {
+        body: 'dynamic', mass: m, friction: 0, restitution: 0,
+        linvel: [0, 0, 0], angvel: [0, 0, 0],
+        linDamping: 0, angDamping: 0, gravityScale: 1, onPulley: '__PULLEY__',
+      },
+      render: { material: i === 0 ? 'chrome' : 'brass' },
+      measured: true,
+    });
+  });
+  return out;
+}
+
 function springLayout(plan) {
   const out = [];
   const sphere = plan.entities.find((e) => e.type === 'sphere');
@@ -168,6 +201,7 @@ function rotationLayout(plan) {
 export function planToOverrides(plan) {
   if (plan.kind === 'rotation') return rotationLayout(plan);
   const hasSpringAttach = (plan.attaches || []).some((a) => a.type === 'spring');
+  if (plan.kind === 'atwood' || plan.entities.some((e) => e.type === 'pulley')) return atwoodLayout(plan);
   if (hasSpringAttach || plan.kind === 'spring') return springLayout(plan);
   const ramp = plan.entities.find((e) => e.type === 'ramp');
   let rampGeom = null;
@@ -236,6 +270,10 @@ export function planToOverrides(plan) {
       o.physics = { mass: e.given.mass ?? 1, friction: e.given.friction ?? 0.4 };
       o.transform = { pos: [0.6, 0.35, 0], rot: [0, 0, 0] };
       if (e.given.velocity) o.physics.linvel = e.given.velocity;
+    } else if (e.type === 'pulley') {
+      o.params = { radius: e.given.radius ?? 0.3 };
+      o.physics = { body: 'fixed' };
+      o.transform = { pos: e.given.position ?? [0, 3.0, 0], rot: [0, 0, 0] };
     } else if (e.type === 'celestial') {
       o.params = { radius: e.given.radius ?? 0.5 };
       o.physics = {

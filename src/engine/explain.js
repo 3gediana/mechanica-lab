@@ -5,13 +5,14 @@
 const FIXED_EXIT_TOL = 0.015; // 球心越过斜面底边的判定余量 m（小余量，避免离面飞行段混入实测）
 
 // plan: normalizeParse 产物；doc: 场景文档；series: [{t,pos,speed,vel}]；reports: 碰撞报告；astro: 天体遥测
-export function explainRun(plan, doc, series, reports = [], astro = null, rotation = null) {
+export function explainRun(plan, doc, series, reports = [], astro = null, rotation = null, atwood = null) {
   const hasRamp = doc.entities.some((e) => e.type === 'ramp');
   const hasGrav = doc.entities.some((e) => e.physics.gravitating);
   const hasSpring = doc.entities.some((e) => e.type === 'spring');
   const spheres = doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
   if (hasSpring && series.length > 10) return explainSpring(plan, doc, series);
   if (doc.kind === 'rotation' && rotation) return explainRotation(plan, doc, rotation);
+  if (atwood) return explainAtwood(plan, atwood);
   if (hasGrav && astro) return explainAstro(plan, astro);
   if (hasRamp && spheres.length) return explainIncline(plan, doc, series);
   if (!hasRamp && spheres.length >= 2 && reports.length) return explainMomentum(plan, doc, reports);
@@ -19,6 +20,35 @@ export function explainRun(plan, doc, series, reports = [], astro = null, rotati
     supported: false,
     reason: hasRamp ? '运行轨迹过短' : '该解析场景不含斜面、两球对撞、引力系统或转台，暂无专用解释器',
     summary: telemetrySummary(series),
+  };
+}
+
+// ---------- 阿特伍德机：a=(m1−m2)g/(m1+m2)、张力 T=2m1m2g/(m1+m2) ----------
+// atwood = workbench atwoodInfo() 结果 {m1, m2, aMeasured, y1, y2, simT}
+function explainAtwood(plan, atwood) {
+  const g = 9.81;
+  const { m1, m2, aMeasured } = atwood;
+  const aTheory = (m1 - m2) * g / (m1 + m2);
+  const T = 2 * m1 * m2 * g / (m1 + m2);
+  const errPct = Math.abs(aMeasured - aTheory) / Math.abs(aTheory) * 100;
+  const pass = errPct < 5;
+  const summary = [
+    `阿特伍德机（m1=${m1} kg 重侧，m2=${m2} kg 轻侧）：`,
+    `理论加速度 a = (m1−m2)g/(m1+m2) = ${aTheory.toFixed(3)} m/s²，`,
+    `绳张力 T = 2·m1·m2·g/(m1+m2) = ${T.toFixed(3)} N。`,
+    `模拟实测加速度 ${aMeasured.toFixed(3)} m/s²（重侧下落位移二次拟合），偏差 ${errPct.toFixed(2)}%。`,
+    pass ? '验证了连接体动力学：两球加速度大小相等、方向相反（绳不可伸长）。'
+         : '偏差偏大，建议检查绳长约束与导轨理想化设置。',
+  ].join('');
+  return {
+    supported: true,
+    kind: 'atwood',
+    simT: atwood.simT,
+    observation: plan.observations[0] || '两侧加速度与张力',
+    theoretical: { a: aTheory, tension: T, m1, m2, formula: 'a = (m1−m2)g/(m1+m2)' },
+    measured: { a: aMeasured },
+    errPct, pass,
+    summary,
   };
 }
 

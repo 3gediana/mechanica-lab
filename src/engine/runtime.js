@@ -47,6 +47,7 @@ export class Runtime {
     this._createJoints(doc);
     this._collectGravitating();
     this._collectTrackBalls(doc);
+    this._collectPulleyPairs(doc);
     this.epoch++;
     this.simT = 0;    this.acc = 0;
     this.dropped = 0;
@@ -152,9 +153,45 @@ export class Runtime {
     }
   }
 
+  // ============ 阿特伍德约束（pulley + onPulley 球对：绳长守恒 + 竖直导轨理想化） ============
+  _collectPulleyPairs(doc) {
+    this._pulleyPairs = [];
+    const pulleys = doc.entities.filter((e) => e.type === 'pulley');
+    if (!pulleys.length) return;
+    for (const pl of pulleys) {
+      const balls = doc.entities.filter((e) => e.physics.onPulley === pl.id && e.physics.body === 'dynamic');
+      if (balls.length !== 2) continue;
+      const states = balls.map((e) => {
+        const b = this.binds.get(e.id);
+        return { id: e.id, body: b.body, mesh: b.mesh, m: e.physics.mass || 1, home: [...e.transform.pos], y0: e.transform.pos[1] };
+      });
+      // 绳长常数 C = y_left + y_right（初始竖直坐标和，两侧绳段等高布置）
+      states.sort((a, b) => a.home[0] - b.home[0]);          // 左侧在前
+      this._pulleyPairs.push({ C: states[0].y0 + states[1].y0, balls: states });
+    }
+  }
+
+  _constrainAtwood() {
+    for (const pair of this._pulleyPairs) {
+      const [a, b] = pair.balls;
+      const pa = a.body.translation(), pb = b.body.translation();
+      const va = a.body.linvel(), vb = b.body.linvel();
+      // 位置投影：y1 + y2 = C，修正量按质量反比分配（轻侧多动 = 张力动力学正确）；
+      // 速度 = 重力积分速度 + 位置修正/h（PBD 一致性：投影隐含的冲量进入速度，重力不被吞）
+      const viol = pa.y + pb.y - pair.C;
+      const wA = b.m / (a.m + b.m), wB = a.m / (a.m + b.m);
+      const yA = pa.y - viol * wA, yB = pb.y - viol * wB;
+      a.body.setTranslation({ x: a.home[0], y: yA, z: a.home[2] }, true);
+      b.body.setTranslation({ x: b.home[0], y: yB, z: b.home[2] }, true);
+      a.body.setLinvel({ x: 0, y: va.y + (yA - pa.y) / FIXED_H, z: 0 }, true);
+      b.body.setLinvel({ x: 0, y: vb.y + (yB - pb.y) / FIXED_H, z: 0 }, true);
+    }
+  }
+
   // ============ 管道轨道约束（track 组件 + onTrack 球，光滑管道语义） ============
   _collectTrackBalls(doc) {
     this._trackBalls = [];
+    this._pulleyPairs = [];
     const hasTrack = doc.entities.some((e) => e.type === 'track');
     if (!hasTrack) return;
     for (const b of this.binds.values()) {
@@ -301,6 +338,7 @@ export class Runtime {
     this._gravStep(FIXED_H);                  // 天体（自积分）先行；Rapier 步内不含天体
     this.world.step(this.eventQueue);         // 事件队列必须传入 step 才会被填充
     for (const tb of this._trackBalls) this._constrainToPipe(tb);
+    this._constrainAtwood();
     this._drainCollisions();
     if (this.collisions.length > nCol0) {
       const post = this.systemTotals();

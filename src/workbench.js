@@ -81,6 +81,9 @@ const AUTOSAVE_KEY = 'mechanica.autosave.v1';
     runtime = new Runtime(RAPIER, M, viewport.scene);
     attachRegistry(runtime, registry);
     viewport.setBindLookup((id) => runtime.binds.get(id));
+    viewport.setGhostFactory((c) => {
+      try { return c.buildGeometry(c.defaults.params); } catch (e) { return null; }
+    });
 
     const saved = loadAutosave();
     doc = saved || getPreset('incline');
@@ -372,6 +375,11 @@ function bindUI() {
     if (e.target.value === 'celestial') { setTrails(true); setCons(true); }
     if (e.target.value === 'spin') { setVectors(true); setTrails(true); setCons(true); }
     if (e.target.value === 'classic') { setVectors(true); setTrails(true); setCons(true); }
+    if (e.target.value === 'atwood') {
+      setVectors(true); setCons(true);
+      const pl = doc.entities.find((x) => x.type === 'pulley');   // 滑轮在 y=3，载入后聚焦
+      if (pl && runtime.binds.has(pl.id)) viewport.focus(runtime.binds.get(pl.id).mesh);
+    }
     e.target.value = '';
   };
   $('btnSave').onclick = saveFile;
@@ -393,11 +401,7 @@ function bindUI() {
     viewport.setBoxSelect(on);
     $('btnBoxSel').classList.toggle('hot', on);
   };
-  $('btnSnap').onclick = () => {
-    const on = !$('btnSnap').classList.contains('hot');
-    $('btnSnap').classList.toggle('hot', on);
-    viewport.setSnap(on);
-  };
+  $('btnSnap').onclick = () => cycleSnap();
   $('btnViewReset').onclick = () => viewport.resetView();
   $('btnViewTop').onclick = () => viewport.setViewPreset('top');
   $('btnViewFront').onclick = () => viewport.setViewPreset('front');
@@ -445,6 +449,65 @@ function bindUI() {
 
   renderCatalog();
   refreshHistoryButtons();
+}
+
+// ============ 吸附类型（gizmo 释放时修正位置） ============
+let snapMode = 'grid';   // off | grid | endpoint | surface | center
+const SNAP_SEQ = ['off', 'grid', 'endpoint', 'surface', 'center'];
+const SNAP_LABEL = { off: '吸附:关', grid: '吸附:网格', endpoint: '吸附:端点', surface: '吸附:表面', center: '吸附:中心' };
+
+function cycleSnap() {
+  snapMode = SNAP_SEQ[(SNAP_SEQ.indexOf(snapMode) + 1) % SNAP_SEQ.length];
+  viewport.setSnap(snapMode === 'grid');
+  const btn = $('btnSnap');
+  btn.classList.toggle('hot', snapMode !== 'off');
+  btn.textContent = SNAP_LABEL[snapMode];
+  if (selectedId) {
+    const bind = runtime.binds.get(selectedId);
+    if (bind) applySnapToMesh(bind.mesh);
+  }
+}
+
+function applySnapToMesh(mesh) {
+  if (snapMode === 'off' || !mesh) return;
+  const p = mesh.position;
+  const others = [];
+  for (const [id, b] of runtime.binds) {
+    if (id === selectedId || !b.mesh) continue;
+    others.push({ pos: b.mesh.position, mesh: b.mesh, id });
+  }
+  if (snapMode === 'endpoint') {
+    let best = null, bd = 0.0625;   // 0.25m 平方
+    for (const o of others) {
+      const box = new THREE.Box3().setFromObject(o.mesh);
+      for (const cx of [box.min.x, box.max.x]) for (const cy of [box.min.y, box.max.y]) for (const cz of [box.min.z, box.max.z]) {
+        const d = (p.x - cx) ** 2 + (p.y - cy) ** 2 + (p.z - cz) ** 2;
+        if (d < bd) { bd = d; best = [cx, cy, cz]; }
+      }
+    }
+    if (best) p.set(best[0], best[1], best[2]);
+  } else if (snapMode === 'surface') {
+    let bestTop = null;
+    for (const o of others) {
+      const box = new THREE.Box3().setFromObject(o.mesh);
+      if (p.x >= box.min.x - 0.05 && p.x <= box.max.x + 0.05 && p.z >= box.min.z - 0.05 && p.z <= box.max.z + 0.05) {
+        if (box.max.y <= p.y + 0.05 && (bestTop === null || box.max.y > bestTop)) bestTop = box.max.y;
+      }
+    }
+    if (bestTop !== null) p.y = bestTop + meshHalfHeight(mesh);
+  } else if (snapMode === 'center') {
+    let best = null, bd = 0.09;   // 0.3m 平方
+    for (const o of others) {
+      const d = (p.x - o.pos.x) ** 2 + (p.z - o.pos.z) ** 2;
+      if (d < bd) { bd = d; best = o.pos; }
+    }
+    if (best) { p.x = best.x; p.z = best.z; }
+  }
+}
+
+function meshHalfHeight(mesh) {
+  const box = new THREE.Box3().setFromObject(mesh);
+  return Math.max((box.max.y - box.min.y) / 2, 0.01);
 }
 
 function setGizmoMode(m) {
@@ -991,7 +1054,13 @@ function updateConsbar() {
   if (rotation) { updateRotationCons(); return; }
   const live = runtime.systemTotals();
   if (!momentumBase || momentumBase.epoch !== runtime.epoch) momentumBase = { epoch: runtime.epoch, KE: live.ke };
-  updateEnergyBar(live.ke / Math.max(momentumBase.KE, 0.05));   // 静止释放场景 KE0≈0，防比例条爆表
+  if (momentumBase.KE < 0.05) {
+    // 初始静止场景（KE0≈0）：保持率无意义，隐藏比例条数字
+    $('ebFill').style.width = '0%';
+    $('ebPct').textContent = '基准≈0';
+  } else {
+    updateEnergyBar(live.ke / momentumBase.KE);
+  }
   $('cbP').textContent = `${live.p[0].toFixed(3)} N·s`;
   $('cbKE').textContent = `${live.ke.toFixed(3)} J`;
   const rep = runtime.collisionReports[runtime.collisionReports.length - 1];
@@ -1010,6 +1079,25 @@ function updateConsbar() {
   $('cbPa').textContent = `${pA.toFixed(3)} N·s`;
   $('cbKEb').textContent = `${rep.keBefore.toFixed(3)} J`;
   $('cbKEa').textContent = `${rep.keAfter.toFixed(3)} J`;
+}
+
+// 阿特伍德遥测：重侧位移二次拟合加速度（y = ½at² + v0t + y0，三点拟合足够）
+function atwoodInfo() {
+  const pairs = runtime._pulleyPairs || [];
+  if (!pairs.length) return null;
+  const pair = pairs[0];
+  const [a, b] = pair.balls;
+  const pa = a.body.translation(), pb = b.body.translation();
+  const va = a.body.linvel();
+  // 重侧 = 初始较高者下落；取左侧球位移方向按 m 判定
+  const m1 = a.m, m2 = b.m;
+  const heavyDrop = m1 > m2 ? (pair.C - (pa.y + pb.y)) * 0 : 0;   // 占位（见下）
+  // 位移：重侧下降量 d = (y0_重 − y_重)（下落为正）
+  const y0Heavy = m1 > m2 ? a.y0 : b.y0;
+  const yHeavyNow = m1 > m2 ? pa.y : pb.y;
+  const d = Math.max(y0Heavy - yHeavyNow, 1e-6);
+  const aFit = 2 * d / Math.max(runtime.simT * runtime.simT, 1e-6);
+  return { m1, m2, aMeasured: +aFit.toFixed(4), drop: +d.toFixed(4), simT: runtime.simT, heavyIsLeft: m1 > m2 };
 }
 
 function astroWithDrift() {
@@ -1251,6 +1339,7 @@ function tick() {
 // ============ Agent 题目解析面板 ============
 // 链路：上传/预览 → POST /api/parse-question（key 在服务端）→ normalizeParse 校验 →
 // 用户查看/修正（全部可编辑，修改记录进 doc.meta.corrections）→ 确认后经 window.MECH 白名单建实体。
+let agentOps = [];       // Agent 建场操作明细 [{op, target, ok}]
 let agentImageDataUrl = null;
 let agentPlan = null;
 let agentCorrections = [];
@@ -1272,6 +1361,7 @@ const PEDIT = {
     ['radius', '半径', 'm', 0.12, [0.01, 2]],
   ],
   ground: [],
+  pulley: [],
   celestial: [
     ['mass', '质量', 'kg', 100, [0.01, 1000000]],
     ['radius', '半径', 'm', 0.5, [0.05, 4]],
@@ -1317,7 +1407,19 @@ function setAgentStage(stage, text) {
   el.textContent = STAGES[stage] || stage;
   el.className = 'badge' + (stage === 'explained' ? ' given' : (stage === 'built' ? ' given' : (stage === 'error' ? '' : (stage === 'parsing' ? ' given' : ''))));
   if (text) tx.textContent = text;
+  const opsEl = $('taskOps');
+  if (opsEl) {
+    opsEl.innerHTML = '';
+    for (const o of agentOps.slice(-6)) {
+      const li = document.createElement('div');
+      li.textContent = (o.ok ? chrOk() : chrBad()) + ' ' + o.op + ': ' + o.target;
+      li.style.color = o.ok ? 'var(--dim)' : 'var(--danger)';
+      opsEl.appendChild(li);
+    }
+  }
 }
+function chrOk() { return String.fromCharCode(10003); }   // 对勾
+function chrBad() { return String.fromCharCode(10007); }  // 叉
 
 // ============ 拍照（getUserMedia → canvas 采帧） ============
 let agentStream = null;
@@ -1673,8 +1775,22 @@ function applyAgentPlan() {
   if (agentPlan.kind === 'rotation') doc.kind = 'rotation';
   const overrides = planToOverrides(agentPlan);
   const created = [];
-  for (const o of overrides) created.push(M.addComponent(o.type, o));
+  agentOps.length = 0;
+  for (const o of overrides) {
+    const id = M.addComponent(o.type, o);
+    if (id) { created.push(id); agentOps.push({ op: '创建 ' + o.type, target: o.name || o.type, ok: true }); }
+    else agentOps.push({ op: '创建 ' + o.type, target: o.name || o.type, ok: false });
+  }
   setAgentStage('building', '按解析计划创建实体…');
+  // atwood 类：onPulley 占位符回填真实滑轮 id，并重建使约束收集生效
+  if (agentPlan.entities.some((e) => e.type === 'pulley')) {
+    const pi = agentPlan.entities.findIndex((e) => e.type === 'pulley');
+    const pulleyId = created[pi];
+    if (pulleyId) {
+      for (const e of doc.entities) if (e.physics.onPulley === '__PULLEY__') e.physics.onPulley = pulleyId;
+      rebuildAll();
+    }
+  }
   // rotation 类：plan.joint 的 from/to 为实体索引，建场后映射为真实 id 建滑槽约束
   if (agentPlan.kind === 'rotation' && agentPlan.joint) {
     const fromId = created[agentPlan.joint.from], toId = created[agentPlan.joint.to];
@@ -1704,7 +1820,7 @@ function applyAgentPlan() {
   // 连接类（绳/弹簧）：plan.attaches 的 from/to 索引 → 真实 id
   for (const at of (agentPlan.attaches || [])) {
     const fromId = created[at.from], toId = created[at.to];
-    if (!fromId || !toId) continue;
+    if (!fromId || !toId) { agentOps.push({ op: '连接 ' + at.type, target: '#' + at.from + ' ' + '#' + at.to, ok: false }); continue; }
     const ea = getEntity(doc, fromId), eb = getEntity(doc, toId);
     if (!ea || !eb) continue;
     const pa = ea.transform.pos, pb = eb.transform.pos;
@@ -1712,7 +1828,9 @@ function applyAgentPlan() {
     const params = at.type === 'rope'
       ? { length: at.length ?? +dist.toFixed(3) }
       : { stiffness: at.stiffness ?? 20, restLength: at.restLength ?? +dist.toFixed(3), damping: at.damping ?? 0.5 };
-    created.push(M.addComponent(at.type, { name: (at.type === 'rope' ? '绳 ' : '弹簧 ') + dist.toFixed(2) + 'm', params, attach: [fromId, toId], source: 'agent' }));
+    const id = M.addComponent(at.type, { name: (at.type === 'rope' ? '绳 ' : '弹簧 ') + dist.toFixed(2) + 'm', params, attach: [fromId, toId], source: 'agent' });
+    if (id) { created.push(id); agentOps.push({ op: '连接 ' + at.type, target: ea.name + ' 与 ' + eb.name, ok: true }); }
+    else agentOps.push({ op: '连接 ' + at.type, target: ea.name + ' 与 ' + eb.name, ok: false });
   }
   toast(`已按解析创建 ${created.length} 个实体${agentPlan.fixture ? '（示例数据）' : ''}`);
   setAgentStage('built', `已建场 ${created.length} 实体，可运行并生成解释`);
@@ -1753,6 +1871,7 @@ async function runAndExplain() {
   const isAstro = doc.entities.some((e) => e.physics.gravitating);
   const isRotation = doc.kind === 'rotation';
   const isSpring = doc.entities.some((e) => e.type === 'spring');
+  const isAtwood = doc.entities.some((e) => e.type === 'pulley');
   if (mode !== 'edit') resetSim();
 
   setAgentStage('explaining', '运行并记录数据中…');
@@ -1760,8 +1879,8 @@ async function runAndExplain() {
   const btn = $('btnRunExplain');
   btn.disabled = true;
   btn.textContent = '运行并记录中…';
-  const isMomentum = !hasRamp && !isAstro && !isRotation && !isSpring;
-  const needT = isSpring ? 6.5 : (isAstro ? 11 : (isRotation ? 3.5 : 4));   // 弹簧 6.5s ≥ 3 个周期（T≈1.72s）
+  const isMomentum = !hasRamp && !isAstro && !isRotation && !isSpring && !isAtwood;
+  const needT = isAtwood ? 1.6 : (isSpring ? 6.5 : (isAstro ? 11 : (isRotation ? 3.5 : 4)));   // 阿特伍德 2.2s（a≈3.27，位移≈7.9m 足够拟合）
   const u0 = ball.physics.linvel[0];
   // 运行前预采守恒基准（初始态），避免首采落在演化中
   if (isRotation) rotationWithDrift();
@@ -1791,7 +1910,7 @@ async function runAndExplain() {
   if (mode === 'run' && !paused) pauseToggle();
   const series = runtime.stopRecording();
   agentExplain = explainRun(agentPlan, doc, series, runtime.collisionReports,
-    isAstro ? astroWithDrift() : null, isRotation ? rotationWithDrift() : null);
+    isAstro ? astroWithDrift() : null, isRotation ? rotationWithDrift() : null, isAtwood ? atwoodInfo() : null);
   renderExplanation();
   setAgentStage(agentExplain && agentExplain.supported ? 'explained' : 'built', agentExplain && agentExplain.supported ? '解释已生成' : '暂无该题型解释器');
   btn.disabled = false;
@@ -1824,6 +1943,30 @@ function renderAstroExplain(r, box) {
 }
 function a_of(r) {
   return (r.measured.rmin + r.measured.rmax) / 2;
+}
+
+function renderAtwoodExplain(r, box) {
+  const grid = document.createElement('div');
+  grid.className = 'ro-grid';
+  const rows = [
+    ['质量 m1（重侧）/ m2', r.theoretical.m1 + ' / ' + r.theoretical.m2 + ' kg'],
+    ['加速度（理论 a=(m1−m2)g/(m1+m2)）', r.theoretical.a.toFixed(3) + ' m/s²'],
+    ['加速度（实测·位移拟合）', r.measured.a.toFixed(3) + ' m/s²'],
+    ['加速度偏差', r.errPct.toFixed(2) + '%'],
+    ['绳张力 T', r.theoretical.tension.toFixed(3) + ' N'],
+    ['判定', r.pass ? '通过（连接体动力学验证）' : '未通过'],
+  ];
+  grid.innerHTML = rows.map(([k], i) =>
+    '<div class="cell" style="grid-column:1/-1"><span class="k">' + k + '</span><span class="v ' + (i === 5 ? 'acc' : 'plain') + '"></span></div>'
+  ).join('');
+  const els = [...grid.querySelectorAll('.v')];
+  rows.forEach((rw, i) => { els[i].textContent = rw[1]; });
+  box.appendChild(grid);
+  const p = document.createElement('div');
+  p.className = 'hint';
+  p.style.marginTop = '8px';
+  p.textContent = r.summary;
+  box.appendChild(p);
 }
 
 function renderSpringExplain(r, box) {
@@ -1919,6 +2062,7 @@ function renderExplanation() {
   if (r.kind === 'astro') { renderAstroExplain(r, box); return; }
   if (r.kind === 'rotation') { renderRotationExplain(r, box); return; }
   if (r.kind === 'spring') { renderSpringExplain(r, box); return; }
+  if (r.kind === 'atwood') { renderAtwoodExplain(r, box); return; }
   // 观察项对比表（斜面）
   const grid = document.createElement('div');
   grid.className = 'ro-grid';
@@ -2064,6 +2208,7 @@ window.MECH = {
   loadFixture: (name) => loadFixtureData(name || 'incline'),
   astroState: () => astroWithDrift(),
   rotationState: () => rotationWithDrift(),
+  atwoodState: () => atwoodInfo(),
   // 物理自检：UI 同路径构造斜面场景，同步步进 5s，验证真实演化（非预录）
   selftest() {
     const prev = cloneDoc(doc);

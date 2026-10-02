@@ -194,6 +194,18 @@ export const COMPONENTS = {
     inertiaY: (p, m) => m * (p.sx * p.sx + p.sz * p.sz) / 12,
   },
 
+  pulley: {
+    id: 'pulley', label: '定滑轮', category: '绳和约束',
+    desc: '定滑轮（固定轴承）：跨绳两侧挂 onPulley 小球可演示阿特伍德机张力与加速度',
+    defaults: { params: { radius: 0.3 }, physics: defaultPhysics('fixed', 0), render: { material: 'brass' } },
+    schema: [
+      { key: 'radius', label: '半径', unit: 'm', min: 0.1, max: 1.5, step: 0.05 },
+    ],
+    buildGeometry: (p) => new THREE.CylinderGeometry(p.radius, p.radius, 0.08, 32),
+    buildCollider: () => null,   // 轮体无碰撞：跨绳球走 onPulley 导轨约束（碰撞体会挡住上升侧）
+    spawnY: () => 3.0,
+  },
+
   rope: {
     id: 'rope', label: '绳', category: '绳和约束',
     desc: '连接两个实体的轻绳（仅拉不推）；先选中两个实体再点目录添加，或由解析自动连接',

@@ -174,6 +174,44 @@ export const PRESETS = {
     },
   },
 
+  atwood: {
+    id: 'atwood', label: '阿特伍德机（定滑轮）',
+    build() {
+      const doc = createEmptyDoc('阿特伍德机：张力与加速度');
+      const seq = {};
+      // 定滑轮（固定轴承，视觉轮体）
+      const pulley = createEntity('pulley', {
+        name: '定滑轮',
+        transform: { pos: [0, 3.0, 0], rot: [0, 0, 0] },
+        params: { radius: 0.3 },
+        source: 'preset',
+      }, seq);
+      // 两侧小球：m1=2（左/重）m2=1（右/轻）；绳长常数 C = 1.0 + 1.0 = 2.0
+      const mkBall = (side, x, m, mat) => createEntity('sphere', {
+        name: `${side}侧球 (${m}kg)`,
+        transform: { pos: [x, 1.0, 0], rot: [0, 0, 0] },
+        params: { radius: 0.12 },
+        physics: {
+          body: 'dynamic', mass: m, friction: 0, restitution: 0,
+          linvel: [0, 0, 0], angvel: [0, 0, 0],
+          linDamping: 0, angDamping: 0, gravityScale: 1, onPulley: pulley.id,
+        },
+        render: { material: mat },
+        measured: true,
+        source: 'preset',
+      }, seq);
+      const left = mkBall('左', -0.35, 1.2, 'chrome');
+      const right = mkBall('右', 0.35, 1, 'brass');
+      doc.entities.push(pulley, left, right);
+      doc.meta.assumptions = [
+        '轻绳不可伸长：y1+y2=常数（逐步投影约束），两侧竖直导轨理想化（无摆动）',
+        '理论加速度 a = (m1−m2)g/(m1+m2) = 0.2×9.81/2.2 ≈ 0.892 m/s²',
+        '滑轮与绳质量不计（理想滑轮），张力 T = 2·m1·m2·g/(m1+m2) ≈ 10.70 N',
+      ];
+      return doc;
+    },
+  },
+
   spin: {
     id: 'spin', label: '角动量守恒（转台+径向滑块）',
     build() {

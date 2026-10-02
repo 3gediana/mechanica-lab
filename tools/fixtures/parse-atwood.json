@@ -1,0 +1,62 @@
+{
+  "_fixture": true,
+  "_note": "本地示例解析数据（阿特伍德机），用于无 API Key 时验证滑轮链路；不是真实模型输出",
+  "kind": "atwood",
+  "questionType": "阿特伍德机（定滑轮两侧）",
+  "goal": "求两侧加速度与绳张力，验证连接体动力学",
+  "gravity": 10,
+  "entities": [
+    {
+      "type": "pulley",
+      "name": "定滑轮",
+      "given": {
+        "radius": 0.3,
+        "position": [
+          0,
+          3.0,
+          0
+        ]
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "sphere",
+      "name": "左球（重 1.2kg）",
+      "given": {
+        "mass": 1.2,
+        "position": [
+          -0.35,
+          1.0,
+          0
+        ]
+      },
+      "confidence": 0.94
+    },
+    {
+      "type": "sphere",
+      "name": "右球（轻 1kg）",
+      "given": {
+        "mass": 1,
+        "position": [
+          0.35,
+          1.0,
+          0
+        ]
+      },
+      "confidence": 0.94
+    }
+  ],
+  "observations": [
+    "两侧加速度",
+    "绳张力"
+  ],
+  "unknowns": [
+    "绳与滑轮质量（按理想化处理）"
+  ],
+  "assumptions": [
+    "轻绳不可伸长",
+    "滑轮无质量无摩擦（理想滑轮）",
+    "两侧竖直导轨理想化（无摆动）"
+  ],
+  "confidence": 0.9
+}

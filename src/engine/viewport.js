@@ -67,6 +67,26 @@ export class Viewport {
 
   impactCount() { return this._impacts.length; }
 
+  // ============ ghost preview（目录 hover：视口中央半透明预览） ============
+  setGhostFactory(fn) { this._ghostFactory = fn; }
+  showGhost(component) {
+    this.hideGhost();
+    if (!this._ghostFactory) return;
+    const geo = this._ghostFactory(component);
+    if (!geo) return;
+    const mat = new THREE.MeshStandardMaterial({ color: 0xd9a441, transparent: true, opacity: 0.35, roughness: 0.6 });
+    this._ghost = new THREE.Mesh(geo, mat);
+    this._ghost.position.set(0, component.spawnY ? component.spawnY(component.defaults.params) + 0.02 : 0.5, 0);
+    this.scene.add(this._ghost);
+  }
+  hideGhost() {
+    if (this._ghost) {
+      this.scene.remove(this._ghost);
+      this._ghost.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+      this._ghost = null;
+    }
+  }
+
   // ============ 受力/加速度箭头 ============
   // 分解模式：支持力(淡绿 N)+摩擦力(橙 f)+重力(红)+加速度(青)；合力模式：接触合力(绿)+重力(红)+加速度(青)
   setForceArrows(on, decompose = this.decompose) {
