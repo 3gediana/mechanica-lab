@@ -518,7 +518,8 @@ export class Runtime {
         m * ((v.z - pv[2]) / FIXED_H - 0),
       ]);
     }
-    // 接触法向（通用受力分解）：取第一个接触对的世界法向，定向为「对方表面指向本体」
+    // 接触法向（通用受力分解）：取第一个接触对的世界法向，定向为「对方表面指向本体」；
+    // 对方实体 params.inMeasure === false（「参与测量」关闭）时不作为测量接触面
     this.contactNormals.clear();
     if (this.wantContactNormals) {
       for (const [id, b] of this.binds) {
@@ -526,6 +527,11 @@ export class Runtime {
         const found = { n: null };
         this.world.contactPairsWith(b.collider, (other) => {
           if (found.n) return;
+          const oOwner = other && other.handle != null ? this._idOfCollider(other.handle) : null;
+          if (oOwner) {
+            const oe = this._bindDocs ? this._bindDocs.entities.find((x) => x.id === oOwner) : null;
+            if (oe && oe.params && oe.params.inMeasure === false) return;
+          }
           this.world.contactPair(b.collider, other, (mf) => {
             if (mf.numContacts() <= 0 || found.n) return;
             const n = mf.normal();
@@ -548,6 +554,7 @@ export class Runtime {
     if (this.trailsOn && this._stepN % 2 === 0) {
       for (const [id, b] of this.binds) {
         if (b.entity.physics.body !== 'dynamic') continue;
+        if (b.entity.params && b.entity.params.recordTrail === false) continue;   // per-entity「记录轨迹」关闭
         let arr = this.trails.get(id);
         if (!arr) { arr = []; this.trails.set(id, arr); }
         if (arr.length >= 1800) arr.shift();
@@ -732,18 +739,19 @@ export class Runtime {
   telemetry(id) {
     const b = this.binds.get(id);
     if (!b) return null;
-    let pos, vel, m;
+    let pos, vel, m, ang;
     if (b.body) {
-      const p = b.body.translation(), v = b.body.linvel();
+      const p = b.body.translation(), v = b.body.linvel(), w = b.body.angvel();
       pos = [p.x, p.y, p.z]; vel = [v.x, v.y, v.z]; m = b.body.mass();
+      ang = [w.x, w.y, w.z];
     } else {
       const g = this._gravMap.get(id);
       if (!g) return null;
-      pos = [...g.pos]; vel = [...g.vel]; m = g.m;
+      pos = [...g.pos]; vel = [...g.vel]; m = g.m; ang = [0, 0, 0];
     }
     const speed = Math.hypot(vel[0], vel[1], vel[2]);
     return {
-      pos, vel, angvel: [0, 0, 0],
+      pos, vel, angvel: ang,
       speed, mass: m,
       momentum: m * speed,
       keTrans: 0.5 * m * speed * speed,

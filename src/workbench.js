@@ -196,6 +196,22 @@ function updateOutlineSelection() {
 // ============ 实体操作（UI 与 Agent 共用） ============
 function opAddComponent(typeId, overrides = {}) {
   const c = registry.getComponent(typeId);
+  // 观察点（相机和观察点分类）：放置即保存当前相机位姿（位置→transform，注视点→params.target）
+  if (c.isViewpoint) {
+    const cp = viewport.camera.position, ct = viewport.controls.target;
+    const e = registry.createEntity(typeId, {
+      source: overrides.source || 'user',
+      params: { height: c.defaults.params.height, target: [+ct.x.toFixed(3), +ct.y.toFixed(3), +ct.z.toFixed(3)] },
+      transform: { pos: [+cp.x.toFixed(3), +cp.y.toFixed(3), +cp.z.toFixed(3)] },
+    });
+    addEntity(doc, e);
+    rebuildAll();
+    commitChange('保存观察点');
+    selectEntity(e.id);
+    noteRecentUse(typeId);
+    toast('观察点已保存（选中后可一键飞回）');
+    return e.id;
+  }
   // 传感器类（速度传感器/计时器）：选 1 个动态体绑定，读数存 runtime 不进文档
   if (c.isSensor) {
     if (selectedIds.length !== 1) { toast('先选中 1 个动态实体，再添加' + c.label); return null; }
@@ -463,6 +479,17 @@ function bindUI() {
   };
   $('btnRec').onclick = () => toggleFrameRec();
   $('btnReplay').onclick = () => startReplay();
+  // 回放时间轴：拖动中暂停自动推进、松手继续（拖动即逐帧 scrub）
+  {
+    const bar = $('replayBar');
+    bar.addEventListener('input', () => {
+      if (!replaying) return;
+      scrubbing = true;
+      replayIdx = Math.min(+bar.value, runtime.frames.length - 1);
+      runtime.applyFrame(replayIdx);
+    });
+    bar.addEventListener('change', () => { scrubbing = false; });
+  }
   $('btnBoxSel').onclick = () => {
     if (mode !== 'edit') { toast('框选仅编辑态可用'); return; }
     const on = !viewport.boxSelectMode;
@@ -704,6 +731,61 @@ function renderCatalog() {
     box.appendChild(h);
     const g = grid();
     for (const c of cat.items) addCatalogRow(g, c, favs.includes(c.id));
+  }
+  renderCatalogEnvMats(box, grid);
+}
+
+// 环境与材质特殊段（Goal 六目录分类建议项）：非放置组件的场景级卡——
+// 重力预设改 doc.gravity（世界重建生效），材质卡给选中实体换 render.material
+function renderCatalogEnvMats(box, grid) {
+  const head = (t) => {
+    const h = document.createElement('div');
+    h.className = 'cat-head';
+    h.textContent = t;
+    box.appendChild(h);
+  };
+  // 环境：重力预设（真实作用=改当前场景重力，世界重建）
+  head('环境');
+  const gg = grid();
+  const grav = (label, g0) => {
+    const card = document.createElement('div');
+    card.className = 'comp-item';
+    card.innerHTML = `<div class="thumbbox"><span class="gval"></span></div><span class="nm"></span>`;
+    card.querySelector('.gval').textContent = g0 === 0 ? '0' : g0;
+    card.querySelector('.gval').style.cssText = 'display:flex;align-items:center;justify-content:center;height:54px;width:54px;font-family:var(--mono);font-size:15px;color:var(--accent);background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:3px';
+    card.querySelector('.nm').textContent = label;
+    card.title = `把当前场景重力设为 ${g0} m/s²（${g0 === 0 ? '完全失重演示' : '行星表面重力'}）`;
+    card.onclick = () => {
+      window.MECH.setGravity(g0);
+      toast(`重力已设为 ${g0} m/s²`);
+    };
+    gg.appendChild(card);
+  };
+  grav('地球重力', 9.81);
+  grav('月球重力', 1.62);
+  grav('火星重力', 3.71);
+  grav('零 g', 0);
+  // 材质：给选中实体换 render.material（检查器同款材质库）
+  head('材质');
+  const mg = grid();
+  for (const mo of registry.MATERIAL_OPTIONS) {
+    const card = document.createElement('div');
+    card.className = 'comp-item';
+    card.innerHTML = `<div class="thumbbox"><span class="mswatch"></span></div><span class="nm"></span>`;
+    const sw = card.querySelector('.mswatch');
+    sw.style.cssText = 'display:block;height:54px;width:54px;border-radius:3px;border:1px solid var(--line);background:' + (M && M[mo.key] && M[mo.key].color ? '#' + M[mo.key].color.getHexString() : 'rgba(255,255,255,.06)');
+    card.querySelector('.nm').textContent = mo.label;
+    card.title = `把选中实体的材质换成${mo.label}（未选中实体时无效）`;
+    card.onclick = () => {
+      const eid = window.MECH.selectionState().main;
+      if (!eid) { toast('先选中一个实体，再点材质卡'); return; }
+      const e = getEntity(doc, eid);
+      if (!e) return;
+      e.render.material = mo.key;
+      patchRender(e, '换材质为' + mo.label);
+      toast(`${e.name} → ${mo.label}`);
+    };
+    mg.appendChild(card);
   }
 }
 
@@ -950,7 +1032,7 @@ function renderInspector() {
   for (const item of c.schema) {
     if (item.kind === 'rampAngle') continue;    // 斜坡倾角放最后展示当前值
     numRow(grpP, item.label, item.unit || '', e.params[item.key], item.step,
-      (v) => { e.params[item.key] = v; patchParams(e, '调参数', false); }, { min: item.min, max: item.max, schema: item });
+      (v) => { e.params[item.key] = v; patchParams(e, '调参数', !!c.paramsRebuild); }, { min: item.min, max: item.max, schema: item });
   }
   if (c.computed) {
     for (const cv of c.computed(e.params)) {
@@ -968,6 +1050,54 @@ function renderInspector() {
       (v) => { c.applySpecial(e.params, 'angle', v); patchParams(e, '调倾角'); }, { min: angItem.min, max: angItem.max, schema: angItem });
   }
   box.appendChild(grpP);
+
+  // 观察组（Goal 六检查器硬清单）：per-entity 记录轨迹/显示速度向量（动态体，默认开）
+  if (e.physics.body === 'dynamic' && !c.isLink && !c.isSensor && !c.isMeasure) {
+    const grpO = grp('观察');
+    const mkObs = (label, key, hint) => {
+      const row = document.createElement('div');
+      row.className = 'frow';
+      row.innerHTML = `<label>${label}</label><input type="checkbox" style="flex:0">`;
+      const cb = row.querySelector('input');
+      cb.checked = e.params[key] !== false;    // 未设置视为开（兼容历史实体）
+      cb.disabled = dis;
+      cb.title = hint;
+      cb.onchange = () => { e.params[key] = cb.checked; patchParams(e, `${cb.checked ? '开启' : '关闭'}${label}`, false); };
+      grpO.appendChild(row);
+    };
+    mkObs('记录轨迹', 'recordTrail', '关闭后该体不采样轨迹线（全局「轨迹」开关仍是总闸）');
+    mkObs('显示速度向量', 'showVel', '关闭后该体不画速度箭头（全局「矢量」开关仍是总闸）');
+    box.appendChild(grpO);
+  }
+  // 测量组（Goal 六检查器硬清单，斜坡）：显示法线/参与测量
+  if (e.type === 'ramp') {
+    const grpMs = grp('测量');
+    const mkMea = (label, key, def, hint) => {
+      const row = document.createElement('div');
+      row.className = 'frow';
+      row.innerHTML = `<label>${label}</label><input type="checkbox" style="flex:0">`;
+      const cb = row.querySelector('input');
+      cb.checked = e.params[key] != null ? e.params[key] : def;
+      cb.disabled = dis;
+      cb.title = hint;
+      cb.onchange = () => { e.params[key] = cb.checked; patchParams(e, `${cb.checked ? '开启' : '关闭'}${label}`, false); };
+      grpMs.appendChild(row);
+    };
+    mkMea('显示法线', 'showNormals', false, '在坡面中心画出坡面法线方向（倾角教学的 θ 与法线）');
+    mkMea('参与测量', 'inMeasure', true, '关闭后球在该坡面的接触不再进入受力分解（大场景降噪）');
+    box.appendChild(grpMs);
+  }
+
+  // 观察点：一键飞回保存的视角（相机和观察点分类）
+  if (e.type === 'viewpoint') {
+    const grpV = grp('观察点');
+    const fly = document.createElement('button');
+    fly.textContent = '✈ 飞到观察点';
+    fly.style.cssText = 'width:100%;padding:6px;cursor:pointer';
+    fly.onclick = () => viewport.flyToPose(e.transform.pos, e.params.target || [0, 0.5, 0]);
+    grpV.appendChild(fly);
+    box.appendChild(grpV);
+  }
 
   // 物理组
   const grpPh = grp('物理');
@@ -1025,6 +1155,7 @@ function renderInspector() {
     <div class="cell"><span class="k">动量</span><span class="v" data-lv="momentum">--</span></div>
     <div class="cell"><span class="k">平动动能</span><span class="v" data-lv="keTrans">--</span></div>
     <div class="cell"><span class="k">最近碰撞</span><span class="v plain" data-lv="coll">--</span></div>
+    <div class="cell"><span class="k">滚动状态</span><span class="v plain" data-lv="roll">--</span></div>
     <div class="cell" style="grid-column:1/-1"><span class="k">速度矢量</span><span class="v plain" data-lv="vel">--</span></div>`;
   grpR.appendChild(grid);
   const hint = document.createElement('div');
@@ -1445,8 +1576,18 @@ function updateReadouts() {
         set('vel', `[${t.vel.map((x) => x.toFixed(2)).join(', ')}]`);
         const col = runtime.lastCollisionFor(e.id);
         set('coll', col ? `t=${col.t.toFixed(2)}s` : '无');
+        // 滚动状态（Goal 六「滚动或滑动状态」）：|v| vs |ω|r 判定（r 已知且角速度非零才有意义）
+        const r = e.params && e.params.radius;
+        const w = Math.hypot(t.angvel[0], t.angvel[1], t.angvel[2]);
+        if (r > 0 && t.speed > 0.02) {
+          const vr = w * r;
+          const rel = Math.abs(t.speed - vr) / Math.max(t.speed, vr);
+          set('roll', rel < 0.08 ? `纯滚动 (ωr=${vr.toFixed(2)})` : `滑动 (ωr=${vr.toFixed(2)})`);
+        } else {
+          set('roll', t.speed <= 0.02 ? '静止' : '—');
+        }
       } else {
-        ['speed', 'height', 'mass', 'momentum', 'keTrans', 'vel', 'coll'].forEach((k) => set(k, '--'));
+        ['speed', 'height', 'mass', 'momentum', 'keTrans', 'vel', 'coll', 'roll'].forEach((k) => set(k, '--'));
       }
     }
   }
@@ -1588,6 +1729,7 @@ function updateScaleReadout() {
 // ============ 录制 / 回放 ============
 let replaying = false;
 let replayIdx = 0;
+let scrubbing = false;   // 回放时间轴拖动中：暂停自动推进，逐帧由 oninput 驱动
 
 function toggleFrameRec() {
   if (replaying) { stopReplay(); return; }
@@ -1613,16 +1755,23 @@ function startReplay() {
   if (runtime.frames.length < 2) { toast('请先录制'); return; }
   replaying = true;
   replayIdx = 0;
+  scrubbing = false;
   mode = 'run';
   paused = false;
   viewport.setGizmoEnabled(false);
   $('btnReplay').classList.add('hot');
+  const bar = $('replayBar');
+  bar.max = Math.max(1, runtime.frames.length - 1);
+  bar.value = 0;
+  bar.style.display = 'block';
   updateSimbarStatic();
-  toast('回放中（结束后自动恢复编辑态）');
+  toast('回放中（拖动时间轴可逐帧检查，结束后自动恢复编辑态）');
 }
 
 function stopReplay() {
   replaying = false;
+  scrubbing = false;
+  $('replayBar').style.display = 'none';
   mode = 'edit';
   paused = false;
   viewport.setGizmoEnabled(true);
@@ -1639,19 +1788,39 @@ function tick() {
   if (!appReady) return;
   const rawDt = Math.min(clock.getDelta(), 0.05);
   if (replaying) {
-    replayIdx += Math.max(1, Math.round(rawDt * 60));   // 60 帧/s 回放速率
+    if (!scrubbing) replayIdx += Math.max(1, Math.round(rawDt * 60));   // 60 帧/s 回放速率（拖动时逐帧）
     if (replayIdx >= runtime.frames.length) { stopReplay(); }
-    else runtime.applyFrame(replayIdx);
+    else {
+      runtime.applyFrame(replayIdx);
+      $('replayBar').value = replayIdx;
+    }
   } else if (mode === 'run' && !paused) runtime.advance(rawDt * timeScale);
   if (vectorsOn) {
-    // 编辑态显示初速度，运行/暂停显示当前速度（遥测即当前世界态）
+    // 编辑态显示初速度，运行/暂停显示当前速度（遥测即当前世界态）；
+    // per-entity「显示速度向量」关闭的体不画（检查器观察组）
     const items = [];
     for (const e of doc.entities) {
       if (e.physics.body !== 'dynamic' || e.visible === false) continue;
+      if (e.params && e.params.showVel === false) continue;
       const t = runtime.telemetry(e.id);
       if (t) items.push({ pos: t.pos, vel: t.vel });
     }
     viewport.updateVelocityArrows(items);
+  }
+  // 斜坡法线可视化（Goal 六「是否显示法线」per-entity）：坡面中心沿法向青色箭头
+  {
+    const nitems = [];
+    for (const e of doc.entities) {
+      if (e.type !== 'ramp' || e.visible === false) continue;
+      if (!(e.params && e.params.showNormals)) continue;
+      const b = runtime.binds.get(e.id);
+      if (!b || !b.mesh) continue;
+      const H = e.params.height, L = e.params.length;
+      const n = new THREE.Vector3(H, L, 0).normalize().applyQuaternion(b.mesh.quaternion);
+      const p = b.mesh.localToWorld(new THREE.Vector3(0, H / 2, 0));
+      nitems.push({ pos: [p.x, p.y, p.z], dir: [n.x, n.y, n.z] });
+    }
+    viewport.updateNormalViz(nitems);
   }
   if (forcesOn) {
     // 通用接触法向：Rapier 接触对收集（任意面：地面/斜坡/墙面/曲轨），运行过才有；
@@ -1747,6 +1916,7 @@ function tick() {
     _seenReports = nRep;
   }
   viewport.tickFocus();
+  viewport.tickPose();
   viewport.render();
   viewport.tickImpacts(performance.now());
   roTimer += rawDt;

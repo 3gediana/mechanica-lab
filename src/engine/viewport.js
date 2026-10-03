@@ -19,6 +19,7 @@ export class Viewport {
     this.snap = false;
     this.arrowsOn = false;
     this._arrows = [];
+    this._normViz = [];
     this.trailsVisible = false;
     this._trailLines = [];
     this._impacts = [];          // 碰撞时刻标记环（1.5s 淡出）
@@ -58,6 +59,24 @@ export class Viewport {
     const newLen = curLen + (a.dist - curLen) * 0.18;
     this.camera.position.copy(t).add(dir.setLength(newLen));
     if (t.distanceTo(a.target) < 0.02 && Math.abs(newLen - a.dist) < 0.05) this._focusAnim = null;
+    this.controls.update();
+  }
+
+  // ============ 观察点飞行（相机和观察点分类）：平滑移到保存的相机位姿 ============
+  flyToPose(pos, target) {
+    this._poseAnim = { pos: new THREE.Vector3(...pos), target: new THREE.Vector3(...target) };
+  }
+
+  tickPose() {
+    if (!this._poseAnim) return;
+    const a = this._poseAnim;
+    this.controls.target.lerp(a.target, 0.16);
+    this.camera.position.lerp(a.pos, 0.16);
+    if (this.camera.position.distanceTo(a.pos) < 0.02 && this.controls.target.distanceTo(a.target) < 0.02) {
+      this.camera.position.copy(a.pos);
+      this.controls.target.copy(a.target);
+      this._poseAnim = null;
+    }
     this.controls.update();
   }
 
@@ -539,6 +558,31 @@ export class Viewport {
 
   arrowStats() {
     return { total: this._arrows.length, visible: this._arrows.filter((a) => a.visible).length };
+  }
+
+  // ============ 斜坡法线可视化（Goal 六「是否显示法线」，per-entity） ============
+  // items: [{pos:[x,y,z], dir:[nx,ny,nz]}] 每 tick 由 workbench 从 ramp 几何算出
+  updateNormalViz(items) {
+    if (!items.length) {
+      for (const a of this._normViz) a.visible = false;
+      return;
+    }
+    while (this._normViz.length < items.length) {
+      const a = new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), new THREE.Vector3(), 1, 0x4fc3f7, 0.07, 0.045);
+      this.scene.add(a);
+      this._normViz.push(a);
+    }
+    this._normViz.forEach((a, i) => {
+      if (i >= items.length) { a.visible = false; return; }
+      a.visible = true;
+      a.position.set(...items[i].pos);
+      a.setDirection(new THREE.Vector3(...items[i].dir).normalize());
+      a.setLength(0.55, 0.07, 0.045);
+    });
+  }
+
+  normalVizCount() {
+    return this._normViz.filter((a) => a.visible).length;
   }
 
   async init() {

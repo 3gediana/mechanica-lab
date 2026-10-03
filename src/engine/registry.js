@@ -355,6 +355,36 @@ export const COMPONENTS = {
     spawnY: () => 0.02,
     isMeasure: true,                     // 放置语义同 isLink（选两实体），但产的是测量标注
   },
+
+  light: {
+    id: 'light', label: '点光源', category: '光源',
+    desc: '暖白点光源（固定、无碰撞）：给局部区域补光，gizmo 可移动位置',
+    compat: '纯视觉光源，不参与物理与测量；亮度/灯高在检查器调节（重建生效）',
+    defaults: { params: { intensity: 6, height: 1.2 }, physics: { body: 'fixed', mass: 0, friction: 0.4, restitution: 0.2, linvel: [0, 0, 0], angvel: [0, 0, 0], linDamping: 0.05, angDamping: 0.05, gravityScale: 1 }, render: { material: 'brass' } },
+    schema: [
+      { key: 'intensity', label: '亮度', unit: 'cd', min: 0.5, max: 30, step: 0.5 },
+      { key: 'height', label: '灯高', unit: 'm', min: 0.2, max: 4, step: 0.1 },
+    ],
+    buildGeometry: (p) => new THREE.SphereGeometry(0.07, 16, 12),
+    makeMesh: (p) => lightGroup(p),
+    buildCollider: () => null,
+    spawnY: (p) => p.height,
+    paramsRebuild: true,                 // 调参需重建（PointLight 属性在建体时挂载）
+  },
+
+  viewpoint: {
+    id: 'viewpoint', label: '观察点', category: '相机和观察点',
+    desc: '保存当前相机视角（固定、无碰撞）：放置时记录相机位姿，检查器一键飞回',
+    compat: '放置即记录当前视角；多观察点可保存教学场景的多个检查角度',
+    defaults: { params: { height: 0.14, target: [0, 0.5, 0] }, physics: { body: 'fixed', mass: 0, friction: 0.4, restitution: 0.2, linvel: [0, 0, 0], angvel: [0, 0, 0], linDamping: 0.05, angDamping: 0.05, gravityScale: 1 }, render: { material: 'brass' } },
+    schema: [
+      { key: 'height', label: '标记大小', unit: 'm', min: 0.06, max: 0.4, step: 0.02 },
+    ],
+    buildGeometry: (p) => new THREE.OctahedronGeometry(p.height),
+    buildCollider: () => null,
+    spawnY: (p) => p.height,
+    isViewpoint: true,                   // 放置语义：记录当前相机位姿（workbench 特殊分支）
+  },
 };
 
 function markerGroup(height, material) {
@@ -367,6 +397,17 @@ function markerGroup(height, material) {
   flag.position.y = height - 0.06;
   flag.rotation.z = -Math.PI / 2;
   g.add(pole, flag);
+  return g;
+}
+
+function lightGroup(p) {
+  // 点光源：小灯泡球体 + PointLight（暖白，照亮半径约 6m；不投影避免阴影重叠）
+  const g = new THREE.Group();
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.07, 16, 12),
+    new THREE.MeshStandardMaterial({ color: 0xffe0b0, emissive: 0xffc880, emissiveIntensity: 0.9, roughness: 0.4 }));
+  const lamp = new THREE.PointLight(0xffe2b8, p.intensity ?? 6, 7, 2);
+  lamp.position.y = 0;
+  g.add(bulb, lamp);
   return g;
 }
 

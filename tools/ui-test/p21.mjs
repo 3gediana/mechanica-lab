@@ -26,21 +26,24 @@ try {
   await page.waitForTimeout(600);   // 目录已渲染
 
   // ==== A. 分类视图：目录卡片带缩略图且与组件对应 ====
+  // （Round 33 起目录含「环境/材质」场景级特殊卡：色卡设计本无缩略图，覆盖率只统计组件卡）
   const cat = await page.evaluate(() => {
     const items = [...document.querySelectorAll('#catalogList .comp-item')];
+    const compCards = items.filter((r) => r.querySelector('img.thumb'));
     return {
       n: items.length,
-      withThumb: items.filter((r) => r.querySelector('.thumb') && r.querySelector('.thumb').src.startsWith('data:image/png')).length,
-      hidden: items.filter((r) => r.querySelector('.thumb') && r.querySelector('.thumb').style.display === 'none').length,
-      sample: items.slice(0, 3).map((r) => ({
+      compN: compCards.length,
+      withThumb: compCards.filter((r) => r.querySelector('.thumb').src.startsWith('data:image/png')).length,
+      hidden: compCards.filter((r) => r.querySelector('.thumb').style.display === 'none').length,
+      sample: compCards.slice(0, 3).map((r) => ({
         name: r.querySelector('.nm').textContent,
         srcLen: r.querySelector('.thumb') ? r.querySelector('.thumb').src.length : 0,
       })),
     };
   });
   check('目录卡片数量合理(>=10)', cat.n >= 10, `n=${cat.n}`);
-  check('缩略图覆盖率(全部卡片有 dataURL 图)', cat.withThumb === cat.n,
-    `with=${cat.withThumb}/${cat.n} hidden=${cat.hidden}`);
+  check('缩略图覆盖率(全部组件卡有 dataURL 图)', cat.withThumb === cat.compN && cat.compN >= 18,
+    `with=${cat.withThumb}/${cat.compN} (总卡 ${cat.n} 含环境/材质特殊卡) hidden=${cat.hidden}`);
   check('缩略图非空白(dataURL 有体量)', cat.sample.every((s) => s.srcLen > 2000), JSON.stringify(cat.sample.map((s) => s.name)));
   await page.screenshot({ path: 'shots/210-catalog-thumbs.png' });
 
