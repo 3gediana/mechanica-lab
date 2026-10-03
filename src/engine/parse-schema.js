@@ -11,6 +11,7 @@ const TYPE_MAP = {
 const RANGES = {
   angleDeg: [1, 80], length: [0.1, 12], height: [0.02, 6], width: [0.05, 6],
   radius: [0.01, 2], mass: [0.01, 10000], friction: [0, 2], restitution: [0, 1],
+  momentOfInertia: [0.001, 1e6], momentInertia: [0.001, 1e6],   // 转台类：模型两种拼写都收
 };
 
 function num(v, [min, max]) {
@@ -200,7 +201,11 @@ function rotationLayout(plan) {
   if (!tableE || !sliderE) return out;
   const R = tableE.given.radius ?? 1.2;
   const H = tableE.given.height ?? 0.12;
-  const M = tableE.given.mass ?? 8;
+  // 题目直给转动惯量（两种拼写）：反解盘质量使 ½MR² = I_given，仿真惯量与题目一致
+  const Igiven = tableE.given.momentOfInertia ?? tableE.given.momentInertia ?? null;
+  const M = (Igiven != null && tableE.type !== 'pulley')
+    ? Math.min(500, Math.max(0.05, 2 * Igiven / (R * R)))
+    : (tableE.given.mass ?? 8);
   const omega0 = (tableE.given.angvel ?? [0, 3, 0])[1];
   const r0 = 0.7;
   const ms = sliderE.given.mass ?? 1.5;
@@ -218,7 +223,7 @@ function rotationLayout(plan) {
     physics: {
       body: 'dynamic', mass: M, friction: 0, restitution: 0.1,
       linvel: [0, 0, 0], angvel: [0, omega0, 0],
-      linDamping: 0, angDamping: 0, gravityScale: 0,
+      linDamping: 0, angDamping: 0, gravityScale: 0, spinLock: true,
     },
     render: { material: 'wood' },
   });

@@ -1,0 +1,53 @@
+{
+  "questionType": "转台滑块角动量守恒",
+  "kind": "rotation",
+  "goal": "求滑块沿径向滑到距轴1.3 m时转台的角速度",
+  "gravity": null,
+  "entities": [
+    {
+      "type": "cylinder",
+      "name": "转台",
+      "given": {
+        "momentOfInertia": 6.5,
+        "angvel": [
+          0,
+          3,
+          0
+        ]
+      },
+      "confidence": 1.0
+    },
+    {
+      "type": "box",
+      "name": "滑块",
+      "given": {
+        "mass": 2,
+        "friction": 0
+      },
+      "confidence": 1.0
+    }
+  ],
+  "observations": [
+    "转台的末态角速度"
+  ],
+  "unknowns": [],
+  "joint": {
+    "from": 0,
+    "to": 1,
+    "axis": [
+      1,
+      0,
+      0
+    ],
+    "limits": [
+      0.7,
+      1.3
+    ]
+  },
+  "assumptions": [
+    "系统（转台+滑块）绕竖直轴角动量守恒",
+    "摩擦不计",
+    "转台转动惯量保持6.5 kg·m²不变，滑块视为质点"
+  ],
+  "confidence": 1.0
+}

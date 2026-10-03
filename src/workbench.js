@@ -886,8 +886,8 @@ let forcesOn = false;
 let trailsOn = false;
 let consOn = false;
 let curvesOn = false;
-const curveData = { t: [], speed: [], height: [], ke: [] };
-let curveEntityId = null;
+const CURVE_PALETTE = ['#d9a441', '#7ba7d9', '#c96a5a', '#9fd8a8', '#b08cd9', '#d88a5a'];
+const curveData = { t: [], byId: new Map(), ke: [], epoch: -1, legendN: -1 };
 
 function setVectors(on) {
   vectorsOn = on;
@@ -913,7 +913,10 @@ function setCurves(on) {
   curvesOn = on;
   $('curvePanel').classList.toggle('on', on);
   $('btnCurves').classList.toggle('hot', on);
-  if (on) { curveData.t.length = 0; curveData.speed.length = 0; curveData.height.length = 0; curveData.ke.length = 0; }
+  if (on) {
+    curveData.t.length = 0; curveData.ke.length = 0;
+    curveData.byId.clear(); curveData.epoch = -1; curveData.legendN = -1;
+  }
 }
 function setTrails(on) {
   trailsOn = on;
@@ -1199,18 +1202,27 @@ function updateReadouts() {
   }
 }
 
-// ============ 时间曲线（选中体速率/高度 + 系统KE） ============
+// ============ 时间曲线（多实体速率/高度 + 系统KE） ============
 function sampleCurves() {
-  if (selectedId && selectedId !== curveEntityId) {   // 换选中重采
-    curveEntityId = selectedId;
-    curveData.t.length = 0; curveData.speed.length = 0; curveData.height.length = 0; curveData.ke.length = 0;
+  if (curveData.epoch !== runtime.epoch) {   // rebuild 后重采
+    curveData.epoch = runtime.epoch;
+    curveData.t.length = 0; curveData.ke.length = 0;
+    curveData.byId.clear(); curveData.legendN = -1;
   }
-  const t = selectedId ? runtime.telemetry(selectedId) : null;
   curveData.t.push(runtime.simT);
-  curveData.speed.push(t ? t.speed : 0);
-  curveData.height.push(t ? t.height : 0);
   curveData.ke.push(runtime.systemTotals().ke);
-  if (curveData.t.length > 300) { curveData.t.shift(); curveData.speed.shift(); curveData.height.shift(); curveData.ke.shift(); }
+  for (const e of doc.entities) {
+    if (e.physics.body !== 'dynamic' || e.visible === false) continue;
+    let sr = curveData.byId.get(e.id);
+    if (!sr) { sr = { name: e.name, speed: [], height: [] }; curveData.byId.set(e.id, sr); }
+    const t = runtime.telemetry(e.id);
+    sr.speed.push(t ? t.speed : 0);
+    sr.height.push(t ? t.height : 0);
+  }
+  if (curveData.t.length > 300) {
+    curveData.t.shift(); curveData.ke.shift();
+    for (const sr of curveData.byId.values()) { sr.speed.shift(); sr.height.shift(); }
+  }
   drawCurves();
 }
 
@@ -1221,26 +1233,61 @@ function drawCurves() {
   ctx.clearRect(0, 0, W, H);
   const n = curveData.t.length;
   if (n < 2) return;
-  const series = [
-    { data: curveData.speed, color: '#d9a441' },
-    { data: curveData.height, color: '#7ba7d9' },
-    { data: curveData.ke, color: '#7dc87d' },
-  ];
   let vmax = 1e-9;
-  for (const sr of series) for (const v of sr.data) if (Math.abs(v) > vmax) vmax = Math.abs(v);
+  for (const v of curveData.ke) if (Math.abs(v) > vmax) vmax = Math.abs(v);
+  for (const sr of curveData.byId.values()) {
+    for (const v of sr.speed) if (Math.abs(v) > vmax) vmax = Math.abs(v);
+    for (const v of sr.height) if (Math.abs(v) > vmax) vmax = Math.abs(v);
+  }
   const t0 = curveData.t[0], t1 = curveData.t[n - 1];
   const span = Math.max(t1 - t0, 1e-6);
-  for (const sr of series) {
-    ctx.strokeStyle = sr.color;
+  const trace = (data, color, dash) => {
+    ctx.strokeStyle = color;
     ctx.lineWidth = 1.4;
+    ctx.setLineDash(dash || []);
     ctx.beginPath();
     for (let i = 0; i < n; i++) {
       const x = ((curveData.t[i] - t0) / span) * (W - 8) + 4;
-      const y = H - 6 - (Math.abs(sr.data[i]) / vmax) * (H - 12);
+      const y = H - 6 - (Math.abs(data[i]) / vmax) * (H - 12);
       if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     }
     ctx.stroke();
+    ctx.setLineDash([]);
+  };
+  let i = 0;
+  for (const sr of curveData.byId.values()) {
+    const c = CURVE_PALETTE[i % CURVE_PALETTE.length];
+    trace(sr.speed, c);              // 速率：实线
+    trace(sr.height, c, [3, 3]);     // 高度：同色虚线
+    i++;
   }
+  trace(curveData.ke, '#7dc87d');    // 系统KE：绿实线
+  if (curveData.legendN !== curveData.byId.size) {
+    curveData.legendN = curveData.byId.size;
+    updateCurveLegend();
+  }
+}
+
+function updateCurveLegend() {
+  const el = $('curveLegend');
+  if (!el) return;
+  el.innerHTML = '';
+  let i = 0;
+  for (const sr of curveData.byId.values()) {
+    const c = CURVE_PALETTE[i % CURVE_PALETTE.length];
+    const sp = document.createElement('span');
+    sp.style.color = c;
+    sp.textContent = `${sr.name}速率`;
+    const hp = document.createElement('span');
+    hp.style.color = c;
+    hp.textContent = `${sr.name}高度`;
+    el.append(sp, hp);
+    i++;
+  }
+  const ke = document.createElement('span');
+  ke.style.color = '#7dc87d';
+  ke.textContent = '系统KE';
+  el.appendChild(ke);
 }
 
 // ============ 单位标尺读数（网格 1 格 = 1 m，视野宽随相机距离） ============
@@ -1322,17 +1369,9 @@ function tick() {
     viewport.updateVelocityArrows(items);
   }
   if (forcesOn) {
-    const ramp = doc.entities.find((e) => e.type === 'ramp');
-    let nrm = null;
-    if (ramp) {
-      const th = Math.atan2(ramp.params.height, ramp.params.length);
-      nrm = [Math.sin(th), Math.cos(th), 0];                       // 坡面法向（局部=世界，rot 默认 0）
-      if (ramp.transform.rot && ramp.transform.rot.some((v) => Math.abs(v) > 1e-6)) {
-        const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(...ramp.transform.rot));
-        nrm = new THREE.Vector3(...nrm).applyQuaternion(q).toArray();
-      }
-    }
-    const decompose = viewport.decompose && !!ramp;
+    // 通用接触法向：Rapier 接触对收集（任意面：地面/斜坡/墙面/曲轨），运行过才有；
+    // 绳/弹簧类无接触对 → 不分解、显示接触合力（张力语义），不再依赖斜面几何特判
+    runtime.wantContactNormals = viewport.decompose;
     const items = [];
     for (const e of doc.entities) {
       if (e.physics.body !== 'dynamic' || e.visible === false) continue;
@@ -1341,10 +1380,11 @@ function tick() {
       const contact = runtime.contactForces.get(e.id) || null;
       const gravity = [0, 9.81 * (e.physics.gravityScale != null ? e.physics.gravityScale : 1) * t.mass, 0];
       const item = { pos: t.pos, contact, gravity, accel: runtime.accels.get(e.id) || [0, 0, 0] };
-      if (decompose && contact) {
+      const nrm = runtime.contactNormals.get(e.id);
+      if (viewport.decompose && contact && nrm) {
         const dot = contact[0] * nrm[0] + contact[1] * nrm[1] + contact[2] * nrm[2];
-        const normal = [dot * nrm[0], dot * nrm[1], dot * nrm[2]];         // 支持力 = (F·n)n
-        const friction = [contact[0] - normal[0], contact[1] - normal[1], contact[2] - normal[2]];   // 摩擦 = F − N
+        const normal = [dot * nrm[0], dot * nrm[1], dot * nrm[2]];         // 支持力 = (F·n̂)n̂
+        const friction = [contact[0] - normal[0], contact[1] - normal[1], contact[2] - normal[2]];   // 摩擦类 = F − N
         item.normal = normal;
         item.friction = friction;
         item.contact = null;                                                // 分解模式不显示合力
@@ -1655,18 +1695,23 @@ async function loadFixtureData(name) {
   try {
     const resp = await fetch(`./tools/fixtures/parse-${name}.json`);
     const raw = await resp.json();
-    const n = normalizeParse(raw);
-    if (!n.ok) { setParseStatus('示例数据无效：' + n.errors.join('; '), true); return null; }
-    agentPlan = n.plan;
-    agentCorrections = [];
-    renderParseResult(n.errors);
-    setAgentStage('parsed', `示例解析「${n.plan.questionType}」已载入，检查/修正后创建实体`);
-    setParseStatus(`已载入本地示例解析数据「${n.plan.questionType}」（fixture，非真实模型输出）`);
-    return n.plan;
+    return adoptParse(raw, `已载入本地示例解析数据「${raw.questionType || name}」（fixture，非真实模型输出）`);
   } catch (e) {
     setParseStatus('示例数据读取失败', true);
     return null;
   }
+}
+
+// 外部喂入解析结果（真实模型输出回归用）：与 fixture 走同一条 normalizeParse 生产路径
+function adoptParse(raw, statusLine) {
+  const n = normalizeParse(raw);
+  if (!n.ok) { setParseStatus('解析结果无效：' + n.errors.join('; '), true); return null; }
+  agentPlan = n.plan;
+  agentCorrections = [];
+  renderParseResult(n.errors);
+  setAgentStage('parsed', '解析完成，检查/修正后创建实体');
+  setParseStatus(statusLine || '解析结果已载入，请检查/修正后再创建实体');
+  return n.plan;
 }
 
 function renderParseResult(warnings = []) {
@@ -1856,8 +1901,14 @@ function applyAgentPlan() {
         jd = { type: 'revolute', target: toId, axis: agentPlan.joint.axis || [0, 0, 1],
           anchor1: agentPlan.joint.anchor1 || [0, 0, 0], anchor2: [-halfLen, 0, 0] };
       } else {
+        // 滑槽锚点：模型常省略 anchor → 按「滑块实际位置−转台位置」推导（即滑块挂点），
+        // 缺省 [0,0,0] 会让约束初始错位（猛拉注入能量，L 守恒崩坏）
+        const eFrom = getEntity(doc, fromId), eTo = getEntity(doc, toId);
+        const p1 = eFrom ? eFrom.transform.pos : [0, 0, 0], p2 = eTo ? eTo.transform.pos : [0, 0, 0];
+        const a1 = agentPlan.joint.anchor1 && agentPlan.joint.anchor1.some((v) => Math.abs(v) > 1e-9)
+          ? agentPlan.joint.anchor1 : [p2[0] - p1[0], p2[1] - p1[1], p2[2] - p1[2]];
         jd = { type: 'prismatic', target: toId, axis: agentPlan.joint.axis, limits: agentPlan.joint.limits,
-          anchor1: agentPlan.joint.anchor1, anchor2: agentPlan.joint.anchor2 };
+          anchor1: a1, anchor2: agentPlan.joint.anchor2 || [0, 0, 0] };
       }
       M.updateEntity(fromId, { joints: [jd] },
         agentPlan.joint.type === 'revolute' ? '建立铰链转轴' : '建立径向滑槽约束');
@@ -2288,7 +2339,7 @@ window.MECH = {
   selectionState: () => ({ ids: [...selectedIds], main: selectedId }),
   impactCount: () => viewport.impactCount(),
   tensionState: () => ({ on: viewport.tensionsOn, ...viewport.tensionStats() }),
-  forceState: () => ({ on: forcesOn, decompose: viewport.decompose, ...viewport.forceArrowStats() }),
+  forceState: () => ({ on: forcesOn, decompose: viewport.decompose, normals: runtime.contactNormals.size, ...viewport.forceArrowStats() }),
   forceDecompose: (id) => {
     // 斜面场景支持力/摩擦力数值（理论对照：N=mg·cosθ, f=μN 或实测差分）
     const b = runtime.binds.get(id || selectedId);
@@ -2309,7 +2360,7 @@ window.MECH = {
       contactMag: +Math.hypot(c[0], c[1], c[2]).toFixed(4),
     };
   },
-  curveState: () => ({ on: curvesOn, samples: curveData.t.length }),
+  curveState: () => ({ on: curvesOn, samples: curveData.t.length, entities: [...curveData.byId.keys()] }),
   frameState: () => ({ recording: runtime.recFrames, frames: runtime.frames.length, replaying }),
   trailState: () => ({ on: trailsOn, lines: viewport.trailStats(), points: [...runtime.trails.values()].map((a) => a.length) }),
   trailsDump: () => [...runtime.trails.entries()].map(([id, pts]) => ({ id, pts: pts.map((p) => [...p]) })),
@@ -2320,10 +2371,20 @@ window.MECH = {
     src: agentImageCanvas ? { w: agentImageCanvas.width, h: agentImageCanvas.height } : null,
   }),
   loadFixture: (name) => loadFixtureData(name || 'incline'),
+  loadParse: (obj) => (obj && typeof obj === 'object') ? adoptParse(obj, '已载入外部解析结果（回归用，走生产 normalizeParse 路径）') : null,
   astroState: () => astroWithDrift(),
   rotationState: () => rotationWithDrift(),
   atwoodState: () => atwoodInfo(),
-  dbg: () => ({ joints: runtime.world ? runtime.world.impulseJoints.len() : -1, epoch: runtime.epoch }),
+  dbg: () => ({
+    joints: runtime.world ? runtime.world.impulseJoints.len() : -1, epoch: runtime.epoch,
+    jointFailures: [...runtime.jointFailures],
+    bodies: [...runtime.binds.entries()].map(([id, b]) => ({
+      id, name: b.entity.name,
+      pos: b.body ? b.body.translation() : null,
+      rot: b.body ? b.body.rotation() : null,
+      w: b.body ? b.body.angvel() : null,
+    })),
+  }),
   // 物理自检：UI 同路径构造斜面场景，同步步进 5s，验证真实演化（非预录）
   selftest() {
     const prev = cloneDoc(doc);

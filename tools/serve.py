@@ -4,7 +4,7 @@
 密钥纪律：key 只从环境变量 MECHANICA_STEP_KEY 或本地未跟踪文件 tools/server/step_key.txt 读取；
 不写日志、不回显、不进错误消息。解析失败返回可展示的普通错误文案。
 """
-import http.server, sys, json, os, urllib.request, urllib.error, re
+import http.server, sys, json, os, urllib.request, urllib.error, re, tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -40,7 +40,7 @@ PARSE_PROMPT = """你是大学物理题解析器。看图中的物理题，输�
 - given 只写题目文字或图中明确给出的数值；没给的键不要写。
 - 题目说"不计摩擦"时 friction 写 0 并在 assumptions 说明；"由静止释放"时 velocity 不写（默认零）。
 - 缺失的重要条件写进 unknowns；你补充的工程默认值写进 assumptions。
-- 只输出 JSON 本体。"""
+- 只输出 JSON 本体，且必须紧凑：单行、无缩进、无多余空格与换行。"""
 
 
 def load_key():
@@ -53,11 +53,52 @@ def load_key():
     return ""
 
 
+def _extract_json(text):
+    """从模型输出（正文或思考流）中提取 JSON 本体。
+    返回 dict 或抛 JSONDecodeError。"""
+    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip(), flags=re.S)
+    candidates = []
+    # 主启发式：定位 "questionType" 键，回溯 JSON 起始、顺延到末尾大括号
+    qi = text.find('"questionType"')
+    if qi != -1:
+        start = text.rfind('{', 0, qi)
+        end = text.rfind('}')
+        if start != -1 and end > start:
+            candidates.append(text[start:end + 1])
+    # 兜底：首个 { 起做括号配平扫描（感知字符串），取最后一个 depth==0 闭合点
+    # ——同时处理「JSON 前后夹推理文字」与「思考流里模型自拟的样例 JSON」
+    fb = text.find('{')
+    if fb != -1:
+        depth = 0; in_str = False; esc = False; last_full = -1
+        for i in range(fb, len(text)):
+            ch = text[i]
+            if in_str:
+                if esc: esc = False
+                elif ch == '\\': esc = True
+                elif ch == '"': in_str = False
+                continue
+            if ch == '"': in_str = True
+            elif ch in '{[': depth += 1
+            elif ch in '}]':
+                depth -= 1
+                if depth == 0: last_full = i; break
+        if last_full != -1:
+            candidates.append(text[fb:last_full + 1])
+    for c in candidates:
+        try:
+            obj = json.loads(c)
+            if isinstance(obj, dict):
+                return obj
+        except json.JSONDecodeError:
+            continue
+    raise json.JSONDecodeError("no extractable JSON", text[:60], 0)
+
+
 def call_step(data_url):
     body = json.dumps({
         "model": STEP_MODEL,
         "temperature": 0.2,
-        "max_tokens": 4200,
+        "max_tokens": 8192,
         "messages": [{
             "role": "user",
             "content": [
@@ -73,20 +114,30 @@ def call_step(data_url):
     with urllib.request.urlopen(req, timeout=CALL_TIMEOUT) as resp:
         out = json.loads(resp.read().decode("utf-8"))
     msg = (out.get("choices") or [{}])[0].get("message", {})
-    text = msg.get("content") or ""
-    # step-5-preview 思考模型：部分响应把正文放在 reasoning_content，content 为空
-    if not text.strip():
-        text = msg.get("reasoning_content") or ""
-    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip(), flags=re.S)
-    # 思考流中 JSON 后可能有推理尾巴：截到最后一个闭合大括号
-    # 思考流启发式：定位 "questionType" 键，回溯 JSON 起始、顺延到末尾大括号
-    qi = text.find('"questionType"')
-    if qi != -1:
-        start = text.rfind('{', 0, qi)
-        end = text.rfind('}')
-        if start != -1 and end > start:
-            text = text[start:end + 1]
-    return json.loads(text)
+    if os.environ.get("MECH_PARSE_DEBUG"):
+        # 诊断转储：仅响应正文（不含 key），排查思考流提取失败
+        dump = {"finish_reason": (out.get("choices") or [{}])[0].get("finish_reason"),
+                "usage": out.get("usage"),
+                "content_len": len(msg.get("content") or ""),
+                "reasoning_len": len(msg.get("reasoning_content") or ""),
+                "content_head": (msg.get("content") or "")[:300],
+                "reasoning_head": (msg.get("reasoning_content") or "")[:300],
+                "reasoning_tail": (msg.get("reasoning_content") or "")[-400:]}
+        dump_path = os.path.join(tempfile.gettempdir(), "mech_step_raw.json")
+        with open(dump_path, "w", encoding="utf-8") as f:
+            json.dump(dump, f, ensure_ascii=False, indent=2)
+    # content 与 reasoning_content 走同一条提取链：正文直读优先，思考流启发式兜底
+    err = None
+    for src in (msg.get("content") or "", msg.get("reasoning_content") or ""):
+        if not src.strip():
+            continue
+        try:
+            return _extract_json(src)
+        except json.JSONDecodeError as e:
+            err = e
+    if err:
+        raise err
+    raise json.JSONDecodeError("empty content and reasoning", "", 0)
 
 
 class H(http.server.SimpleHTTPRequestHandler):

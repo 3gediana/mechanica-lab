@@ -111,3 +111,34 @@
 }
 ```
 
+
+
+## Round 18：spin 类复测通过（提取链加固后）
+
+Round 17 时 spin 类 502 BLOCKED。Round 18 诊断转储（MECH_PARSE_DEBUG）定位真根因：
+**finish_reason="length"**——思考流耗 ~3300 token 后 4200 max_tokens 把 content JSON 中途截断。
+三处修复：max_tokens→8192；提示词要求紧凑单行 JSON；`_extract_json` 统一提取链
+（content 与 reasoning_content 同路径：questionType 启发式 + 括号配平感知字符串的兜底扫描，
+离线 4 样本单测含「叙述中出现 questionType 字样」干扰项）。
+
+修复后 question-spin.png 连续两次真实调用全通（ok:true），第二次输出存档
+`tools/fixtures/parse-spin-real.json`（题给转动惯量 6.5 kg·m² 完整保留），
+并经 `MECH.loadParse` 生产路径完成九步 E2E（p15：I 反解命中 6.5、L 漂移 0.000%、
+末态 ω=2.271 与守恒解一致）。七类题型真实模型抽查至此全部打通。
+
+```json
+{
+  "questionType": "转台滑块角动量守恒",
+  "kind": "rotation",
+  "goal": "求滑块从距轴 0.7 m 径向滑到距轴 1.3 m 时转台的角速度",
+  "gravity": null,
+  "entities": [
+    { "type": "cylinder", "name": "转台", "given": { "momentOfInertia": 6.5, "angvel": [0, 3, 0] }, "confidence": 1.0 },
+    { "type": "box", "name": "滑块", "given": { "mass": 2, "friction": 0 }, "confidence": 1.0 }
+  ],
+  "joint": { "from": 0, "to": 1, "axis": [1, 0, 0], "limits": [0.7, 1.3] },
+  "observations": ["滑块滑到 1.3 m 时转台的角速度"],
+  "assumptions": ["系统（转台+滑块）绕竖直轴角动量守恒", "摩擦不计", "转台转动惯量保持6.5 kg·m²不变，滑块视为质点"],
+  "confidence": 1.0
+}
+```

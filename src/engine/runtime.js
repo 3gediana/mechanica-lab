@@ -6,6 +6,11 @@ import { TRACK_POINTS, TRACK_META } from '../track-curve.js';
 
 export const FIXED_H = 1 / 120;
 const MAX_STEPS_PER_FRAME = 8;
+// 滑槽约束临时向量（模块级复用，避免 120Hz 下 GC 抖动）
+const _sq = new THREE.Quaternion(), _sqInv = new THREE.Quaternion();
+const _sv = new THREE.Vector3(), _sw = new THREE.Vector3(), _ax = new THREE.Vector3();
+const _vt = new THREE.Vector3(), _vs = new THREE.Vector3();
+const _n1 = new THREE.Vector3(), _n2 = new THREE.Vector3();
 
 export class Runtime {
   constructor(RAPIER, materials, scene) {
@@ -24,12 +29,15 @@ export class Runtime {
     this.trailsOn = false;
     this.trails = new Map();
     this.contactForces = new Map();   // id -> [fx,fy,fz] 接触合力（速度差分反推，受力箭头用）
+    this.contactNormals = new Map();  // id -> [nx,ny,nz] 世界系接触法向（Rapier 接触对，通用受力分解用）
+    this.wantContactNormals = false;  // 分解模式开启时才收集（省 120Hz 下的遍历开销）
     this.accels = new Map();          // id -> [ax,ay,az] 加速度（差分）
     this.frames = [];                 // 录制帧 [{t, states:[[id,px,py,pz,qx,qy,qz,w],...]}]
     this.recFrames = false;     // 轨迹线数据 id -> [[x,y,z], ...]（叠加层用，多实体，每 2 步一点）
     this._grav = [];             // 天体（velocity-Verlet 自积分，不建 Rapier 刚体）
     this._gravMap = new Map();   // id -> 天体状态（telemetry/trails 用）
     this.epoch = 0;              // rebuild 代数（守恒量基准重取依据）
+    this._spinSlots = [];        // spinLock 转台的 PBD 径向滑槽（_createJoints 收集）
     this._bindDocs = null;
   }
 
@@ -124,6 +132,11 @@ export class Runtime {
         body.setLinearDamping(e.physics.linDamping);
         body.setAngularDamping(e.physics.angDamping);
         body.setGravityScale(e.physics.gravityScale, true);
+        // 理想轴承：薄盘转台在滑块载荷下会绕水平轴摇摆（真实但非题设），锁成只绕 Y 转+平动锁死
+        if (e.physics.spinLock) {
+          body.setEnabledTranslations(false, false, false, true);
+          body.setEnabledRotations(false, true, false, true);
+        }
       }
       const colDesc = c.buildCollider(RAPIER, e.params);
       if (colDesc) {                                 // track 等解析约束组件无碰撞体
@@ -143,11 +156,32 @@ export class Runtime {
 
   // ============ 约束（entity.joints，场景文档可序列化） ============
   _createJoints(doc) {
-    const vec = (a) => new this.RAPIER.Vector3(a[0], a[1], a[2]);   // Rapier 要求 Vector3 实例
+    this._spinSlots.length = 0;
+    const vec = (a) => new this.RAPIER.Vector3(a[0], a[1], a[2]);
     for (const e of doc.entities) {
       for (const j of (e.joints || [])) {
         const bindA = this.binds.get(e.id), bindB = this.binds.get(j.target);
         if (!bindA || !bindA.body || !bindB || !bindB.body) continue;
+        // 转台径向滑槽（spinLock）：Rapier 旋转 prismatic 在质量可比时限位泄漏，改走守恒律驱动
+        if (j.type === 'prismatic' && e.physics.spinLock) {
+          // 捕获初始对轴角动量 L0 = I_t·ω0 + m·(ρ×v)_y（与 rotationInfo 同口径）
+          const tp = bindA.body.translation(), sp = bindB.body.translation();
+          const sv0 = bindB.body.linvel(), tw0 = bindA.body.angvel();
+          const compT = this._reg.getComponent(e.type);
+          const compS = this._reg.getComponent(bindB.entity.type);
+          const It0 = compT && compT.inertiaY ? compT.inertiaY(e.params, e.physics.mass) : 0;
+          const Is0 = compS && compS.inertiaY ? compS.inertiaY(bindB.entity.params, bindB.entity.physics.mass) : 0;
+          const rx = sp.x - tp.x, rz = sp.z - tp.z;
+          const L0 = It0 * tw0.y
+            + bindB.entity.physics.mass * (rz * sv0.x - rx * sv0.z)
+            + Is0 * bindB.body.angvel().y;
+          this._spinSlots.push({
+            tableId: e.id, sliderId: j.target,
+            limits: j.limits || [0.15, 1.05], anchor1: j.anchor1 || [0, 0.14, 0],
+            L0,
+          });
+          continue;
+        }
         try {
           let jd = null;
           if (j.type === 'prismatic') {
@@ -249,6 +283,47 @@ export class Runtime {
     const v = tb.body.linvel();
     const vn = v.x * nx + v.y * ny + v.z * nz;
     if (vn > 0) tb.body.setLinvel({ x: v.x - vn * nx, y: v.y - vn * ny, z: v.z - vn * nz }, true);
+  }
+
+  // ============ 转台径向滑槽（spinLock：理想轴承 + 守恒律驱动） ============
+  // Rapier 旋转 prismatic 在转台/滑块质量可比时限位泄漏（两约束求解器内打架），
+  // 故与 n 体自积分/阿特伍德 PBD 同哲学：直接实现教学理想定律——
+  // 对轴无外力矩 → ω = L0/(I_t + m·s²) 驱动转台；滑块位置/速度共转由运动学投影保证；
+  // 径向自由（离心项经旋转框架重提取隐式涌现，一阶精确）；限位=非弹性止挡。
+  // 角动量与能量守恒到机器精度（Lz = (I_t+m·s²)·ω = L0 恒等式）。
+  _constrainSpinSlots() {
+    for (const slot of this._spinSlots) {
+      const T = this.binds.get(slot.tableId), S = this.binds.get(slot.sliderId);
+      if (!T || !S || !T.body || !S.body) continue;
+      const tb = T.body, sb = S.body;
+      const q = tb.rotation();
+      _sq.set(q.x, q.y, q.z, q.w);
+      _sqInv.copy(_sq).invert();
+      const tPos = tb.translation(), sPos = sb.translation();
+      // 滑块转台局部系：x=径向 s（自由域+限位），y/z=槽线固定
+      _sv.set(sPos.x - tPos.x, sPos.y - tPos.y, sPos.z - tPos.z).applyQuaternion(_sqInv);
+      const sRaw = _sv.x;
+      const s = Math.min(Math.max(sRaw, slot.limits[0]), slot.limits[1]);
+      // 守恒律：ω = L0/(I_t + m·s²)（钳位后的 s 参与惯量，静止在止位的滑块照常共转）
+      const ms = sb.mass();
+      const comp = this._reg.getComponent(T.entity.type);
+      const It = comp && comp.inertiaY ? comp.inertiaY(T.entity.params, T.entity.physics.mass) : 0;
+      const omega = slot.L0 / (It + ms * s * s);
+      tb.setAngvel({ x: 0, y: omega, z: 0 }, true);
+      // 位置投影：滑块钳到槽线（限位 + 横向/竖直漂移一并清零）
+      _sw.set(s, slot.anchor1[1], slot.anchor1[2]).applyQuaternion(_sq);
+      sb.setTranslation({ x: tPos.x + _sw.x, y: tPos.y + _sw.y, z: tPos.z + _sw.z }, true);
+      // 速度：v = ω×ρ + vr·axis；vr 对新框架重提取 → 离心漂移隐式涌现
+      _vt.set(omega * _sw.z, 0, -omega * _sw.x);          // ω×ρ，ω=(0,ω,0)，转台平动锁死
+      const sv = sb.linvel();
+      _ax.set(1, 0, 0).applyQuaternion(_sq);
+      let vr = (sv.x - _vt.x) * _ax.x + (sv.y - _vt.y) * _ax.y + (sv.z - _vt.z) * _ax.z;
+      if ((sRaw > slot.limits[1] && vr > 0) || (sRaw < slot.limits[0] && vr < 0)) {
+        vr = 0;                                            // 止位：出界径向速度清零（非弹性）
+      }
+      _vs.set(_vt.x + vr * _ax.x, _vt.y + vr * _ax.y, _vt.z + vr * _ax.z);
+      sb.setLinvel({ x: _vs.x, y: _vs.y, z: _vs.z }, true);
+    }
   }
 
   // ============ 天体 n 体引力（velocity-Verlet，自写积分器） ============
@@ -355,6 +430,7 @@ export class Runtime {
     this.world.step(this.eventQueue);         // 事件队列必须传入 step 才会被填充
     for (const tb of this._trackBalls) this._constrainToPipe(tb);
     this._constrainAtwood();
+    this._constrainSpinSlots();
     this._drainCollisions();
     if (this.collisions.length > nCol0) {
       const post = this.systemTotals();
@@ -401,6 +477,30 @@ export class Runtime {
         m * ((v.y - pv[1]) / FIXED_H - gy * gs),
         m * ((v.z - pv[2]) / FIXED_H - 0),
       ]);
+    }
+    // 接触法向（通用受力分解）：取第一个接触对的世界法向，定向为「对方表面指向本体」
+    this.contactNormals.clear();
+    if (this.wantContactNormals) {
+      for (const [id, b] of this.binds) {
+        if (!b.collider || b.entity.physics.body !== 'dynamic') continue;
+        const found = { n: null };
+        this.world.contactPairsWith(b.collider, (other) => {
+          if (found.n) return;
+          this.world.contactPair(b.collider, other, (mf) => {
+            if (mf.numContacts() <= 0 || found.n) return;
+            const n = mf.normal();
+            const pT = b.body.translation();
+            const ob = other.parent();
+            const pO = ob ? ob.translation() : other.translation();
+            const dx = pT.x - pO.x, dy = pT.y - pO.y, dz = pT.z - pO.z;
+            let nx = n.x, ny = n.y, nz = n.z;
+            if (nx * dx + ny * dy + nz * dz < 0) { nx = -nx; ny = -ny; nz = -nz; }
+            const L = Math.hypot(nx, ny, nz) || 1;
+            found.n = [nx / L, ny / L, nz / L];
+          });
+        });
+        if (found.n) this.contactNormals.set(id, found.n);
+      }
     }
     this._syncMeshes();
     this.simT += FIXED_H;

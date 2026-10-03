@@ -76,6 +76,7 @@ cd tools/ui-test && npm i && node p0.mjs   # P0 工作台内核 19 项
                             node p12.mjs  # 复摆+滚动阻力 9 项
                             node p13.mjs  # 张力箭头+ghost 跟随 3 项
                             node p14.mjs  # 抛体+阿特伍德面板+标尺 9 项
+                            node p15.mjs  # spin 真实解析九步+泛化分解+多实体曲线 16 项
 ```
 
 ## 教学预置场景（P2，走通用场景系统）

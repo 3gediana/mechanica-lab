@@ -127,6 +127,12 @@ export class Viewport {
     if (!this.forcesOn) return;
     const COLORS = [0x7dc87d, 0xc96a5a, 0x5ac8c8, 0x9fd8a8, 0xd88a5a];
     const PER = this.decompose ? 4 : 3;   // 分解: N/f/重力/加速度；合力: 接触/重力/加速度
+    if (this._forcePoolPer !== PER) {
+      // 模式切换重建池：箭头按 %PER 分色，跨模式复用会颜色错位
+      for (const a of this._forceArrows) this.scene.remove(a);
+      this._forceArrows.length = 0;
+      this._forcePoolPer = PER;
+    }
     const need = items.length * PER;
     while (this._forceArrows.length < need) {
       const kind = this._forceArrows.length % PER;

@@ -305,7 +305,7 @@ export const PRESETS = {
         render: { material: 'steelDark' },
         source: 'preset',
       }, seq);
-      // 转台 m=8 R=1.2，ω0=3 rad/s；重力归零=理想轴承（对转轴无外力矩）
+      // 转台 m=8 R=1.2，ω0=3 rad/s；重力归零=理想轴承（对转轴无外力矩）；spinLock=轴承约束只绕 Y 转
       const table = createEntity('cylinder', {
         name: '转台',
         transform: { pos: [0, 0.42, 0], rot: [0, 0, 0] },
@@ -313,7 +313,7 @@ export const PRESETS = {
         physics: {
           body: 'dynamic', mass: 8, friction: 0, restitution: 0.1,
           linvel: [0, 0, 0], angvel: [0, 3, 0],
-          linDamping: 0, angDamping: 0, gravityScale: 0,
+          linDamping: 0, angDamping: 0, gravityScale: 0, spinLock: true,
         },
         render: { material: 'wood' },
         measured: true,
