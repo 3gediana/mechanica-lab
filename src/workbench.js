@@ -176,6 +176,19 @@ function updateOutlineSelection() {
   for (const row of $('outline').querySelectorAll('.ol-row')) {
     row.classList.toggle('sel', selectedIds.includes(row.dataset.id));
   }
+  // 成组入口随多选出现/消失（不重建表，避免打断行内改名）
+  const box = $('outline');
+  let btn = box.querySelector('.ol-group-btn');
+  if (selectedIds.length >= 2) {
+    if (!btn) {
+      btn = document.createElement('div');
+      btn.className = 'ol-group-btn';
+      btn.style.cssText = 'cursor:pointer;font-size:10px;color:var(--accent);padding:4px 6px;border:1px dashed rgba(217,164,65,.4);margin:3px;border-radius:2px';
+      btn.onclick = () => assignGroup([...selectedIds]);
+      box.insertBefore(btn, box.firstChild);
+    }
+    btn.textContent = `⧉ 将 ${selectedIds.length} 个对象成组`;
+  } else if (btn) btn.remove();
 }
 
 // ============ 实体操作（UI 与 Agent 共用） ============
@@ -627,11 +640,48 @@ function renderOutline() {
     box.innerHTML = '<div class="ol-empty">场景为空</div>';
     return;
   }
+  // 对象分组（Goal 第六章）：按实体 group 字段分桶渲染；「成组」入口由 updateOutlineSelection 统一管理
+  const ungrouped = [];
+  const groups = new Map();
   for (const e of doc.entities) {
+    if (e.group) {
+      if (!groups.has(e.group)) groups.set(e.group, []);
+      groups.get(e.group).push(e);
+    } else ungrouped.push(e);
+  }
+  for (const e of ungrouped) renderOutlineRow(box, e);
+  for (const [gname, members] of groups) {
+    const head = document.createElement('div');
+    head.className = 'ol-group';
+    head.dataset.group = gname;
+    head.style.cssText = 'display:flex;align-items:center;gap:6px;padding:3px 6px;margin-top:3px;background:rgba(217,164,65,.08);border-left:2px solid rgba(217,164,65,.55);cursor:pointer;font-size:11px;color:var(--accent)';
+    const nm = document.createElement('span');
+    nm.textContent = `▦ ${gname}`;
+    const cnt = document.createElement('span');
+    cnt.style.cssText = 'font-size:9px;color:var(--faint)';
+    cnt.textContent = `${members.length} 个对象`;
+    const ungroupBtn = document.createElement('span');
+    ungroupBtn.textContent = '解组';
+    ungroupBtn.style.cssText = 'margin-left:auto;font-size:9px;color:var(--faint);cursor:pointer;text-decoration:underline dotted';
+    ungroupBtn.onclick = (ev) => { ev.stopPropagation(); ungroupMembers(members.map((m) => m.id)); };
+    head.append(nm, cnt, ungroupBtn);
+    head.onclick = () => {           // 点组头 = 整组选中
+      selectedIds = members.map((m) => m.id);
+      selectedId = selectedIds[selectedIds.length - 1];
+      renderOutline();
+      renderInspector();
+    };
+    box.appendChild(head);
+    for (const e of members) renderOutlineRow(box, e, true);
+  }
+}
+
+function renderOutlineRow(box, e, inGroup = false) {
     const c = registry.getComponent(e.type);
     const row = document.createElement('div');
     row.dataset.id = e.id;
     row.className = 'ol-row' + (selectedIds.includes(e.id) ? ' sel' : '');
+    if (inGroup) row.style.borderLeft = '2px solid rgba(217,164,65,.25)';
     row.innerHTML = `<span class="nm"></span><span class="ty"></span><span class="lock" title="锁定（防误选/防拖动）"></span><span class="del" title="删除">×</span>`;
     const nm = row.querySelector('.nm');
     nm.textContent = e.name;
@@ -681,8 +731,52 @@ function renderOutline() {
     }
     row.onclick = () => selectEntity(e.id);
     row.querySelector('.del').onclick = (ev) => { ev.stopPropagation(); opRemoveEntity(e.id); };
+    // 选中对象定位：⌖ 把相机 target/距离平滑移向该实体（组内成员与链接实体同样可用）
+    const focusBtn = document.createElement('span');
+    focusBtn.className = 'focus-btn';
+    focusBtn.textContent = '⌖';
+    focusBtn.title = '在视口中定位（相机聚焦）';
+    focusBtn.style.cssText = 'cursor:pointer;font-size:10px;color:var(--faint);margin-right:2px';
+    focusBtn.onclick = (ev) => {
+      ev.stopPropagation();
+      const b = runtime.binds.get(e.id);
+      if (b && b.mesh) { viewport.focusOn(b.mesh); selectEntity(e.id); }
+    };
+    row.insertBefore(focusBtn, row.querySelector('.lock'));
     box.appendChild(row);
   }
+
+// ============ 对象分组（Goal 第六章）：group 字段纯元数据，随场景文档序列化 ============
+function assignGroup(ids) {
+  if (mode === 'run') { toast('运行态不可分组，请先重置'); return; }
+  if (!ids.length) return;
+  const existing = new Set(doc.entities.map((e) => e.group).filter(Boolean));
+  const groupName = `组${existing.size + 1}`;
+  beginHistoryBatch();
+  try {
+    for (const id of ids) {
+      if (getEntity(doc, id)) opUpdateEntity(id, { group: groupName }, '', { rebuild: false });
+    }
+  } finally {
+    endHistoryBatch(`成组「${groupName}」（${ids.length} 个对象）`);
+  }
+  renderOutline();
+  toast(`已成组「${groupName}」`);
+}
+
+function ungroupMembers(ids) {
+  if (mode === 'run') { toast('运行态不可解组，请先重置'); return; }
+  if (!ids.length) return;
+  beginHistoryBatch();
+  try {
+    for (const id of ids) {
+      if (getEntity(doc, id)) opUpdateEntity(id, { group: null }, '', { rebuild: false });
+    }
+  } finally {
+    endHistoryBatch(`解组 ${ids.length} 个对象`);
+  }
+  renderOutline();
+  toast('已解组');
 }
 
 // ============ 检查器 ============
@@ -1487,6 +1581,7 @@ function tick() {
     }
     _seenReports = nRep;
   }
+  viewport.tickFocus();
   viewport.render();
   viewport.tickImpacts(performance.now());
   roTimer += rawDt;
@@ -2587,6 +2682,9 @@ window.MECH = {
     springs: springForceItems.map((s) => ({ k: s.k, len: +s.len.toFixed(4), stretch: +s.stretch.toFixed(4), F: +s.F.toFixed(4), a: s.aName, b: s.bName })),
   }),
   jointVizState: () => ({ lines: viewport.jointVizCount() }),
+  groups: () => doc.entities.map((e) => ({ id: e.id, name: e.name, group: e.group || null })),
+  cameraTarget: () => viewport.controls.target.toArray(),
+  cameraPos: () => viewport.camera.position.toArray(),
   forceDecompose: (id) => {
     // 斜面场景支持力/摩擦力数值（理论对照：N=mg·cosθ, f=μN 或实测差分）
     const b = runtime.binds.get(id || selectedId);

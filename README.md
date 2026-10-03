@@ -81,6 +81,7 @@ cd tools/ui-test && npm i && node p0.mjs   # P0 工作台内核 19 项
                             node p17.mjs  # 弹力箭头分列+约束可视化 14 项
                             node p18.mjs  # 逐条接受/拒绝变更 15 项
                             node p19.mjs  # 文字要求通道混合搭建 9 项（真实调用）
+                            node p20.mjs  # 对象分组+选中定位 11 项
 ```
 
 ## 教学预置场景（P2，走通用场景系统）

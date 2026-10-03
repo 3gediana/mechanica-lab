@@ -40,6 +40,27 @@ export class Viewport {
     this._rubber = document.getElementById('rubber');
   }
 
+  // ============ 选中对象定位：相机 target/距离平滑移向实体（第六章「选中对象定位」） ============
+  focusOn(mesh) {
+    const box = new THREE.Box3().setFromObject(mesh);
+    const size = box.isEmpty() ? 0.6
+      : Math.max(box.getSize(new THREE.Vector3()).x, box.getSize(new THREE.Vector3()).y, box.getSize(new THREE.Vector3()).z, 0.4);
+    this._focusAnim = { target: mesh.position.clone(), dist: Math.max(size * 3, 1.2) };
+  }
+
+  tickFocus() {
+    if (!this._focusAnim) return;
+    const a = this._focusAnim;
+    const t = this.controls.target;
+    t.lerp(a.target, 0.18);
+    const dir = this.camera.position.clone().sub(t);
+    const curLen = dir.length() || 1;
+    const newLen = curLen + (a.dist - curLen) * 0.18;
+    this.camera.position.copy(t).add(dir.setLength(newLen));
+    if (t.distanceTo(a.target) < 0.02 && Math.abs(newLen - a.dist) < 0.05) this._focusAnim = null;
+    this.controls.update();
+  }
+
   // ============ 碰撞时刻标记（关键时刻可视化） ============
   spawnImpact(pos) {
     const ring = new THREE.Mesh(
