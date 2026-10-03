@@ -1506,6 +1506,7 @@ let agentOps = [];       // Agent 建场操作明细 [{op, target, ok}]
 let agentImageDataUrl = null;
 let agentPlan = null;
 let agentCorrections = [];
+let agentChanges = [];   // 逐条接受/拒绝：待执行变更清单 [{type,idx,label,detail,skipped}]
 
 const PEDIT = {
   ramp: [
@@ -1784,6 +1785,89 @@ function adoptParse(raw, statusLine) {
   return n.plan;
 }
 
+// 解析计划的实体匹配（预览与执行共用同一条路径，保证勾选清单与实际一致）
+function matchOverrides(overrides) {
+  const mixed = doc.entities.length > 0;
+  const usedIds = new Set();
+  return overrides.map((o, idx) => {
+    let reuseId = null;
+    if (mixed) {
+      const cand = doc.entities.find((e) => e.type === o.type && !usedIds.has(e.id)
+        && (e.physics.body || 'dynamic') === (o.physics.body || 'dynamic'));
+      if (cand) { reuseId = cand.id; usedIds.add(cand.id); }
+    }
+    return { o, idx, reuseId };
+  });
+}
+
+// 构建逐条接受/拒绝的变更清单（renderParseResult 尾部调用，agentPlan 三处来源统一覆盖）
+function buildChangePreview() {
+  const box = $('changePreview'), list = $('changePreviewList');
+  if (!box || !list) return;
+  agentChanges = [];
+  if (!agentPlan) { box.style.display = 'none'; return; }
+  if (!agentPlan.gravityDefault) {
+    agentChanges.push({ type: 'gravity', idx: null, label: `调整重力 → ${agentPlan.gravity} m/s²`, skipped: false });
+  }
+  if (agentPlan.G != null) {
+    agentChanges.push({ type: 'G', idx: null, label: `设置场景引力常数 G → ${agentPlan.G}`, skipped: false });
+  }
+  const matches = matchOverrides(planToOverrides(agentPlan));
+  for (const { o, idx, reuseId } of matches) {
+    if (reuseId) {
+      const e = getEntity(doc, reuseId);
+      const diffs = [];
+      for (const sect of ['params', 'physics', 'transform']) {
+        const oldS = e[sect] || {}, newS = o[sect] || {};
+        for (const [k, v] of Object.entries(newS)) {
+          if (k === 'linvel' || k === 'angvel') continue;   // 向量太长，摘要略
+          const ov = oldS[k];
+          if (ov !== undefined && ov !== v && typeof v !== 'object') diffs.push(`${k} ${ov}→${v}`);
+        }
+      }
+      agentChanges.push({
+        type: 'entity', idx, reuseId,
+        label: `更新已有 ${o.type}「${e.name || o.type}」`,
+        detail: diffs.length ? diffs.slice(0, 4).join('，') : '位置/参数按题给重设',
+        skipped: false,
+      });
+    } else {
+      agentChanges.push({ type: 'entity', idx, reuseId: null, label: `新建 ${o.type}「${o.name || o.type}」`, skipped: false });
+    }
+  }
+  if (agentPlan.joint && (agentPlan.kind === 'rotation' || agentPlan.kind === 'hinge')) {
+    const jn = agentPlan.joint.type === 'revolute' ? '铰链转轴' : '径向滑槽';
+    agentChanges.push({
+      type: 'joint', idx: null,
+      label: `建立${jn}约束（实体 ${agentPlan.joint.from}→${agentPlan.joint.to}）`,
+      detail: '所依赖实体被拒绝时自动跳过', skipped: false,
+    });
+  }
+  let aSeq = 0;
+  for (const at of (agentPlan.attaches || [])) {
+    agentChanges.push({
+      type: 'attach', idx: aSeq++,
+      label: `连接${at.type === 'rope' ? '绳' : '弹簧'}（实体 ${at.from}→${at.to}，k=${at.stiffness ?? '—'}）`,
+      detail: '所依赖实体被拒绝时自动跳过', skipped: false,
+    });
+  }
+  // 渲染勾选清单
+  list.innerHTML = '';
+  agentChanges.forEach((c, i) => {
+    const row = document.createElement('label');
+    row.style.cssText = 'display:flex;align-items:flex-start;gap:6px;padding:3px 2px;cursor:pointer;font-size:11px;color:var(--dim)';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = !c.skipped;
+    cb.onchange = () => { agentChanges[i].skipped = !cb.checked; };
+    const txt = document.createElement('span');
+    txt.textContent = c.label + (c.detail ? `（${c.detail}）` : '');
+    row.append(cb, txt);
+    list.appendChild(row);
+  });
+  box.style.display = agentChanges.length ? 'block' : 'none';
+}
+
 function renderParseResult(warnings = []) {
   const plan = agentPlan;
   $('parseResultGrp').style.display = 'block';
@@ -1902,6 +1986,7 @@ function renderParseResult(warnings = []) {
   appendList(lists, '要求观察', plan.observations);
   appendList(lists, '未知量', plan.unknowns);
   appendList(lists, '假设', plan.assumptions);
+  buildChangePreview();
 }
 
 function mrow(k) {
@@ -1948,8 +2033,11 @@ function applyAgentPlan() {
 }
 
 function applyAgentPlanInner(M, reportCounts) {
-  if (!agentPlan.gravityDefault) M.setGravity(agentPlan.gravity);
-  if (agentPlan.G != null) M.setG(agentPlan.G);
+  // 逐条接受/拒绝：用户取消勾选的变更跳过（gravity/G/单条实体/约束）
+  const rejected = new Set(agentChanges.filter((c) => c.skipped)
+    .map((c) => c.type + (c.idx != null ? ':' + c.idx : '')));
+  if (!agentPlan.gravityDefault && !rejected.has('gravity')) M.setGravity(agentPlan.gravity);
+  if (agentPlan.G != null && !rejected.has('G')) M.setG(agentPlan.G);
   if (doc.entities.some((e) => e.physics.gravitating) && !trailsOn) setTrails(true);   // 天体场景轨道线是观察必需
   if (agentPlan.kind === 'rotation') doc.kind = 'rotation';
   const overrides = planToOverrides(agentPlan);
@@ -1957,16 +2045,19 @@ function applyAgentPlanInner(M, reportCounts) {
   agentOps.length = 0;
   // 混合搭建：场景非空时优先复用同类型+同刚体类型的已有实体（尊重用户已有对象，
   // 不推翻重建；保留用户命名与材质，仅按题目更新几何/位姿/物理参数）
+  const matches = matchOverrides(overrides);
   const mixed = doc.entities.length > 0;
-  const usedIds = new Set();
   let nReused = 0, nCreated = 0;
-  for (const o of overrides) {
+  for (const { o, idx, reuseId } of matches) {
+    if (rejected.has('entity:' + idx)) {
+      created.push(null);
+      agentOps.push({ op: '跳过 ' + o.type, target: o.name || o.type, ok: true });
+      continue;
+    }
     let id = null;
-    if (mixed) {
-      const cand = doc.entities.find((e) => e.type === o.type && !usedIds.has(e.id)
-        && (e.physics.body || 'dynamic') === (o.physics.body || 'dynamic'));
+    if (reuseId) {
+      const cand = getEntity(doc, reuseId);
       if (cand) {
-        usedIds.add(cand.id);
         const patch = { params: o.params, transform: o.transform, physics: o.physics, source: 'agent' };
         if (M.updateEntity(cand.id, patch, `Agent 按「${agentPlan.questionType}」更新 ${cand.name || o.type}（混合）`)) {
           id = cand.id; nReused++;
@@ -1998,7 +2089,8 @@ function applyAgentPlanInner(M, reportCounts) {
     }
   }
   // rotation 类：plan.joint 的 from/to 为实体索引，建场后映射为真实 id 建滑槽约束
-  if (agentPlan.joint && (agentPlan.kind === 'rotation' || agentPlan.kind === 'hinge')) {
+  if (agentPlan.joint && (agentPlan.kind === 'rotation' || agentPlan.kind === 'hinge')
+    && !rejected.has('joint')) {
     const fromId = created[agentPlan.joint.from], toId = created[agentPlan.joint.to];
     if (fromId && toId) {
       let jd = null;
@@ -2039,7 +2131,14 @@ function applyAgentPlanInner(M, reportCounts) {
     },
   });
   // 连接类（绳/弹簧）：plan.attaches 的 from/to 索引 → 真实 id
+  let attachSeq = 0;
   for (const at of (agentPlan.attaches || [])) {
+    if (rejected.has('attach:' + attachSeq)) {
+      attachSeq++;
+      agentOps.push({ op: '跳过 连接 ' + at.type, target: '#' + at.from + ' ' + '#' + at.to, ok: true });
+      continue;
+    }
+    attachSeq++;
     const fromId = created[at.from], toId = created[at.to];
     if (!fromId || !toId) { agentOps.push({ op: '连接 ' + at.type, target: '#' + at.from + ' ' + '#' + at.to, ok: false }); continue; }
     const ea = getEntity(doc, fromId), eb = getEntity(doc, toId);
@@ -2068,6 +2167,7 @@ function resetAgentPanel() {
   cropMode = false;
   agentPlan = null;
   agentCorrections = [];
+  agentChanges = [];
   agentExplain = null;
   $('dropZone').style.display = 'block';
   $('camWrap').style.display = 'none';
