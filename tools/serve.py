@@ -57,7 +57,7 @@ def call_step(data_url):
     body = json.dumps({
         "model": STEP_MODEL,
         "temperature": 0.2,
-        "max_tokens": 2200,
+        "max_tokens": 4200,
         "messages": [{
             "role": "user",
             "content": [
@@ -74,7 +74,18 @@ def call_step(data_url):
         out = json.loads(resp.read().decode("utf-8"))
     msg = (out.get("choices") or [{}])[0].get("message", {})
     text = msg.get("content") or ""
+    # step-5-preview 思考模型：部分响应把正文放在 reasoning_content，content 为空
+    if not text.strip():
+        text = msg.get("reasoning_content") or ""
     text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip(), flags=re.S)
+    # 思考流中 JSON 后可能有推理尾巴：截到最后一个闭合大括号
+    # 思考流启发式：定位 "questionType" 键，回溯 JSON 起始、顺延到末尾大括号
+    qi = text.find('"questionType"')
+    if qi != -1:
+        start = text.rfind('{', 0, qi)
+        end = text.rfind('}')
+        if start != -1 and end > start:
+            text = text[start:end + 1]
     return json.loads(text)
 
 

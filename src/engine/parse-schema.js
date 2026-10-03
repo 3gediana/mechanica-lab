@@ -96,8 +96,9 @@ function clamp01(v) { const n = Number(v); return Number.isFinite(n) ? Math.min(
 // ---------- 铰链复摆布局：锚点基座 + 刚性杆（近锚端对齐锚点，初始摆角 1.2 rad） ----------
 function hingeLayout(plan) {
   const out = [];
-  const anchor = plan.entities.find((e) => e.type === 'box');
-  const rod = plan.entities.filter((e) => e.type === 'box')[1];
+  const anchor = plan.entities.find((e) => e.type === 'box' || e.type === 'ground');
+  const rod = plan.entities.find((e) => (e.type === 'box' || e.type === 'cylinder') &&
+    (!e.given.length || e.given.length <= 4));
   if (!anchor || !rod) return out;
   const aPos = anchor.given.position ?? [0, 2.5, 0];
   const L = rod.given.length ?? 1.0;
