@@ -247,6 +247,13 @@
   }
   #curvePanel.on { display: block; }
   #curvePanel canvas { display: block; background: rgba(0,0,0,.35); }
+  #curvePanel .ctabs { display: flex; gap: 4px; margin-bottom: 4px; }
+  #curvePanel .ctabs button {
+    appearance: none; background: rgba(255,255,255,.05); border: 1px solid var(--line);
+    color: var(--dim); font-size: 9px; padding: 2px 10px; cursor: pointer; border-radius: 2px;
+    letter-spacing: .08em; font-family: inherit;
+  }
+  #curvePanel .ctabs button.hot { color: var(--accent); border-color: rgba(217,164,65,.5); }
   #curvePanel .clegend { display: flex; gap: 14px; justify-content: center; margin-top: 4px; font-size: 9px; color: var(--dim); letter-spacing: .1em; }
 
   /* 加载幕 / 错误条 */
@@ -484,7 +491,11 @@
   </div>
 </div>
 
-<div id="curvePanel" style="display:none">
+<div id="curvePanel">
+  <div class="ctabs">
+    <button id="curveTabMotion" class="hot">运动</button>
+    <button id="curveTabEnergy">能量</button>
+  </div>
   <canvas id="curveCanvas" width="320" height="96"></canvas>
   <div class="clegend" id="curveLegend">
     <span style="color:#7dc87d">系统KE</span>

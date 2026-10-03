@@ -83,6 +83,7 @@ cd tools/ui-test && npm i && node p0.mjs   # P0 工作台内核 19 项
                             node p19.mjs  # 文字要求通道混合搭建 9 项（真实调用）
                             node p20.mjs  # 对象分组+选中定位 11 项
                             node p21.mjs  # 组件目录缩略图 7 项
+                            node p22.mjs  # 能量堆叠曲线双模式 8 项
 ```
 
 ## 教学预置场景（P2，走通用场景系统）

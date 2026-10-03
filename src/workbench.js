@@ -448,6 +448,8 @@ function bindUI() {
   };
   $('btnTrails').onclick = () => setTrails(!trailsOn);
   $('btnCurves').onclick = () => setCurves(!curvesOn);
+  $('curveTabMotion').onclick = () => setCurveMode('motion');
+  $('curveTabEnergy').onclick = () => setCurveMode('energy');
   $('btnCons').onclick = () => setCons(!consOn);
 
   $('sceneName').onchange = (e) => { doc.name = e.target.value || '未命名场景'; e.target.value = doc.name; autosave(); };
@@ -1012,7 +1014,8 @@ let trailsOn = false;
 let consOn = false;
 let curvesOn = false;
 const CURVE_PALETTE = ['#d9a441', '#7ba7d9', '#c96a5a', '#9fd8a8', '#b08cd9', '#d88a5a'];
-const curveData = { t: [], byId: new Map(), ke: [], epoch: -1, legendN: -1 };
+const curveData = { t: [], byId: new Map(), ke: [], pe: [], epoch: -1, legendN: -1 };
+let curveMode = 'motion';   // 'motion' 速率/高度 | 'energy' KE/PE/E 堆叠对照
 
 function setVectors(on) {
   vectorsOn = on;
@@ -1039,9 +1042,19 @@ function setCurves(on) {
   $('curvePanel').classList.toggle('on', on);
   $('btnCurves').classList.toggle('hot', on);
   if (on) {
-    curveData.t.length = 0; curveData.ke.length = 0;
+    curveData.t.length = 0; curveData.ke.length = 0; curveData.pe.length = 0;
     curveData.byId.clear(); curveData.epoch = -1; curveData.legendN = -1;
   }
+}
+function setCurveMode(m) {
+  if (curveMode === m) return;
+  curveMode = m;
+  $('curveTabMotion').classList.toggle('hot', m === 'motion');
+  $('curveTabEnergy').classList.toggle('hot', m === 'energy');
+  // 切模式清数据重采（两模式量纲不同，不共轴）
+  curveData.t.length = 0; curveData.ke.length = 0; curveData.pe.length = 0;
+  curveData.byId.clear(); curveData.epoch = -1; curveData.legendN = -1;
+  updateCurveLegend();
 }
 function setTrails(on) {
   trailsOn = on;
@@ -1331,11 +1344,13 @@ function updateReadouts() {
 function sampleCurves() {
   if (curveData.epoch !== runtime.epoch) {   // rebuild 后重采
     curveData.epoch = runtime.epoch;
-    curveData.t.length = 0; curveData.ke.length = 0;
+    curveData.t.length = 0; curveData.ke.length = 0; curveData.pe.length = 0;
     curveData.byId.clear(); curveData.legendN = -1;
   }
   curveData.t.push(runtime.simT);
-  curveData.ke.push(runtime.systemTotals().ke);
+  const en = runtime.energyTotals();
+  curveData.ke.push(en.ke);
+  curveData.pe.push(en.pe);
   for (const e of doc.entities) {
     if (e.physics.body !== 'dynamic' || e.visible === false) continue;
     let sr = curveData.byId.get(e.id);
@@ -1345,7 +1360,7 @@ function sampleCurves() {
     sr.height.push(t ? t.height : 0);
   }
   if (curveData.t.length > 300) {
-    curveData.t.shift(); curveData.ke.shift();
+    curveData.t.shift(); curveData.ke.shift(); curveData.pe.shift();
     for (const sr of curveData.byId.values()) { sr.speed.shift(); sr.height.shift(); }
   }
   drawCurves();
@@ -1360,9 +1375,13 @@ function drawCurves() {
   if (n < 2) return;
   let vmax = 1e-9;
   for (const v of curveData.ke) if (Math.abs(v) > vmax) vmax = Math.abs(v);
-  for (const sr of curveData.byId.values()) {
-    for (const v of sr.speed) if (Math.abs(v) > vmax) vmax = Math.abs(v);
-    for (const v of sr.height) if (Math.abs(v) > vmax) vmax = Math.abs(v);
+  if (curveMode === 'energy') {
+    for (const v of curveData.pe) if (Math.abs(v) > vmax) vmax = Math.abs(v);
+  } else {
+    for (const sr of curveData.byId.values()) {
+      for (const v of sr.speed) if (Math.abs(v) > vmax) vmax = Math.abs(v);
+      for (const v of sr.height) if (Math.abs(v) > vmax) vmax = Math.abs(v);
+    }
   }
   const t0 = curveData.t[0], t1 = curveData.t[n - 1];
   const span = Math.max(t1 - t0, 1e-6);
@@ -1379,16 +1398,25 @@ function drawCurves() {
     ctx.stroke();
     ctx.setLineDash([]);
   };
-  let i = 0;
-  for (const sr of curveData.byId.values()) {
-    const c = CURVE_PALETTE[i % CURVE_PALETTE.length];
-    trace(sr.speed, c);              // 速率：实线
-    trace(sr.height, c, [3, 3]);     // 高度：同色虚线
-    i++;
+  if (curveMode === 'energy') {
+    // 能量堆叠对照（Goal 第九章「能量曲线」）：KE 绿 / PE 蓝 / 总 E 金——
+    // 光滑场景 E 平线（守恒可视），摩擦/非弹性碰撞场景 E 阶跃衰减
+    trace(curveData.ke, '#7dc87d');
+    trace(curveData.pe, '#5b8dd9');
+    trace(curveData.ke.map((v, i) => v + curveData.pe[i]), '#d9a441');
+  } else {
+    let i = 0;
+    for (const sr of curveData.byId.values()) {
+      const c = CURVE_PALETTE[i % CURVE_PALETTE.length];
+      trace(sr.speed, c);              // 速率：实线
+      trace(sr.height, c, [3, 3]);     // 高度：同色虚线
+      i++;
+    }
+    trace(curveData.ke, '#7dc87d');    // 系统KE：绿实线
   }
-  trace(curveData.ke, '#7dc87d');    // 系统KE：绿实线
-  if (curveData.legendN !== curveData.byId.size) {
-    curveData.legendN = curveData.byId.size;
+  const legendKey = curveMode + ':' + curveData.byId.size;
+  if (curveData.legendN !== legendKey) {
+    curveData.legendN = legendKey;
     updateCurveLegend();
   }
 }
@@ -1397,6 +1425,16 @@ function updateCurveLegend() {
   const el = $('curveLegend');
   if (!el) return;
   el.innerHTML = '';
+  if (curveMode === 'energy') {
+    // 能量模式图例（量纲 J；重力势能基准 y=0，天体引力势能口径属守恒量条）
+    for (const [txt, c] of [['动能KE', '#7dc87d'], ['势能PE', '#5b8dd9'], ['总能量E', '#d9a441']]) {
+      const sp = document.createElement('span');
+      sp.style.color = c;
+      sp.textContent = txt;
+      el.appendChild(sp);
+    }
+    return;
+  }
   let i = 0;
   for (const sr of curveData.byId.values()) {
     const c = CURVE_PALETTE[i % CURVE_PALETTE.length];
@@ -2710,7 +2748,14 @@ window.MECH = {
       contactMag: +Math.hypot(c[0], c[1], c[2]).toFixed(4),
     };
   },
-  curveState: () => ({ on: curvesOn, samples: curveData.t.length, entities: [...curveData.byId.keys()] }),
+  curveState: () => ({
+    on: curvesOn, mode: curveMode, samples: curveData.t.length, entities: [...curveData.byId.keys()],
+    energy: curveMode === 'energy' && curveData.ke.length
+      ? { ke: +curveData.ke[curveData.ke.length - 1].toFixed(4), pe: +curveData.pe[curveData.pe.length - 1].toFixed(4),
+          e0: +curveData.ke[0].toFixed(4) + +curveData.pe[0].toFixed(4),
+          e1: +(curveData.ke[curveData.ke.length - 1] + curveData.pe[curveData.pe.length - 1]).toFixed(4) }
+      : null,
+  }),
   frameState: () => ({ recording: runtime.recFrames, frames: runtime.frames.length, replaying }),
   trailState: () => ({ on: trailsOn, lines: viewport.trailStats(), points: [...runtime.trails.values()].map((a) => a.length) }),
   trailsDump: () => [...runtime.trails.entries()].map(([id, pts]) => ({ id, pts: pts.map((p) => [...p]) })),

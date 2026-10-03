@@ -415,6 +415,31 @@ export class Runtime {
     return { p: [px, py, pz], ke };
   }
 
+  // 系统能量（能量堆叠曲线用）：KE = Σ½mv²；PE = 重力势 Σm·|g|·gs·y（基准 y=0）
+  // + 弹性势 Σ½k·(|AB|−L0)²（弹簧 link）；引力势能属天体守恒量条口径
+  energyTotals() {
+    const gy = this._bindDocs ? this._bindDocs.gravity : -9.81;
+    let ke = 0, pe = 0;
+    for (const b of this.binds.values()) {
+      if (!b.body || b.entity.physics.body !== 'dynamic') continue;
+      const v = b.body.linvel(), m = b.body.mass();
+      ke += 0.5 * m * (v.x * v.x + v.y * v.y + v.z * v.z);
+      const gs = b.entity.physics.gravityScale != null ? b.entity.physics.gravityScale : 1;
+      pe += m * Math.abs(gy) * gs * b.body.translation().y;
+    }
+    for (const b of this.binds.values()) {
+      const e = b.entity;
+      if (e.type !== 'spring' || !Array.isArray(e.attach) || e.attach.length !== 2) continue;
+      const ba = this.binds.get(e.attach[0]), bb = this.binds.get(e.attach[1]);
+      if (!ba?.mesh || !bb?.mesh) continue;
+      const p1 = ba.mesh.position, p2 = bb.mesh.position;
+      const len = Math.hypot(p2.x - p1.x, p2.y - p1.y, p2.z - p1.z);
+      const dx = len - (e.params.restLength ?? 0.8);
+      pe += 0.5 * (e.params.stiffness ?? 20) * dx * dx;
+    }
+    return { ke, pe, e: ke + pe };
+  }
+
   // ============ 步进 ============
   stepOnce() {
     if (!this.world) return;

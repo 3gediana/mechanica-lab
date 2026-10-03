@@ -170,16 +170,19 @@ function springLayout(plan) {
   const k = (plan.attaches.find((a) => a.type === 'spring') || {}).stiffness ?? 20;
   const rest = (plan.attaches.find((a) => a.type === 'spring') || {}).restLength ?? 0.8;
   const stretch = 0.4;                                       // 初始拉伸（静止释放 → 简谐振动）
+  const wallPos = [-2.0, 0.6, 0];
   out.push({
     type: 'box', name: '立柱墙', source: 'agent',
     params: { sx: 0.3, sy: 1.2, sz: 1.2 },
-    transform: { pos: [-2.0, 0.6, 0], rot: [0, 0, 0] },
+    transform: { pos: wallPos, rot: [0, 0, 0] },
     physics: { body: 'fixed', friction: 0.8 },
     render: { material: 'steelDark' },
   });
   out.push({
     type: 'sphere', name: sphere ? sphere.name || '振子小球' : '振子小球', source: 'agent',
     params: { radius: 0.15 },
+    // 球放到拉伸位（墙 + rest+stretch 沿 +x）：否则 Rapier spring joint 首帧猛拉
+    transform: { pos: [wallPos[0] + rest + stretch, wallPos[1], 0], rot: [0, 0, 0] },
     physics: {
       body: 'dynamic', mass: m, friction: 0, restitution: 0.1,
       linvel: [0, 0, 0], angvel: [0, 0, 0],
