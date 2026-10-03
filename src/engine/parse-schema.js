@@ -132,7 +132,7 @@ function hingeLayout(plan) {
 function atwoodLayout(plan) {
   const out = [];
   const pulley = plan.entities.find((e) => e.type === 'pulley');
-  const balls = plan.entities.filter((e) => e.type === 'sphere');
+  const balls = plan.entities.filter((e) => e.type === 'sphere' || e.type === 'box');
   if (!pulley || balls.length !== 2) return out;
   const plPos = pulley.given.position ?? [0, 3.0, 0];
   out.push({
@@ -194,7 +194,7 @@ function springLayout(plan) {
 // joint 用实体索引引用（from/to），applyAgentPlan 建场后映射为真实 id。
 function rotationLayout(plan) {
   const out = [];
-  const tableE = plan.entities.find((e) => e.type === 'cylinder');
+  const tableE = plan.entities.find((e) => e.type === 'cylinder' || e.type === 'pulley');
   const sliderE = plan.entities.find((e) => e.type === 'box') || plan.entities.find((e) => e.type === 'sphere');
   if (!tableE || !sliderE) return out;
   const R = tableE.given.radius ?? 1.2;
@@ -203,7 +203,14 @@ function rotationLayout(plan) {
   const omega0 = (tableE.given.angvel ?? [0, 3, 0])[1];
   const r0 = 0.7;
   const ms = sliderE.given.mass ?? 1.5;
-  out.push({
+  const isPulley = tableE.type === 'pulley';
+  out.push(isPulley ? {
+    type: 'pulley', name: tableE.name || '定滑轮', source: 'agent',
+    params: { radius: R },
+    transform: { pos: [0, 3.0, 0], rot: [0, 0, 0] },
+    physics: { body: 'fixed' },
+    render: { material: 'brass' },
+  } : {
     type: 'cylinder', name: tableE.name || '转台', source: 'agent',
     params: { radius: R, height: H, spokes: 4 },
     transform: { pos: [0, 0.42, 0], rot: [0, 0, 0] },

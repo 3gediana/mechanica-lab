@@ -203,6 +203,7 @@ function opAddComponent(typeId, overrides = {}) {
     commitChange('添加 ' + c.label);
     selectEntity(e.id);
     noteRecentUse(typeId);
+    if (forcesOn) viewport.setTensionArrows(true);   // 有绳时受力开=张力箭头也开
     return e.id;
   }
   const n = doc.entities.length;
@@ -895,8 +896,18 @@ function setVectors(on) {
 }
 function setForces(on) {
   forcesOn = on;
-  viewport.setForceArrows(on);
+  viewport.setForceArrows(on, viewport.decompose);
+  if (on) viewport.setTensionArrows(true);   // 有绳时张力箭头随受力开
   $('btnForces').classList.toggle('hot', on);
+  $('btnDecompose').disabled = !on;
+  if (!on) viewport.setTensionArrows(false);
+}
+function posBtoArray(id) {
+  const b = runtime.binds.get(id);
+  return b && b.mesh ? b.mesh.position.toArray() : null;
+}
+function setTensions(on) {
+  viewport.setTensionArrows(on);
 }
 function setCurves(on) {
   curvesOn = on;
@@ -1313,6 +1324,20 @@ function tick() {
       items.push(item);
     }
     viewport.updateForceArrows(items);
+    // 绳张力箭头：T = m·|a − g_vec|（轻绳端点物体受力 = 重力 + 张力，加速度差分反推）
+    if (viewport.tensionsOn) {
+      const tItems = [];
+      for (const e of doc.entities) {
+        if (e.type !== 'rope' || !Array.isArray(e.attach) || e.attach.length !== 2) continue;
+        const ba = runtime.binds.get(e.attach[0]), bb = runtime.binds.get(e.attach[1]);
+        if (!ba || !bb || !ba.mesh || !bb.mesh) continue;
+        const tel = runtime.telemetry(e.attach[0]);
+        const acc = runtime.accels.get(e.attach[0]);
+        const T = tel && acc ? tel.mass * Math.hypot(acc[0], acc[1] + 9.81, acc[2]) : 0;
+        tItems.push({ aPos: ba.mesh.position.toArray(), bPos: bb.mesh.position.toArray(), tA: T, tB: T });
+      }
+      viewport.updateTensionArrows(tItems);
+    }
   }
   if (trailsOn) viewport.updateTrails(runtime.trails);
   const nRep = runtime.collisionReports.length;
@@ -2206,6 +2231,7 @@ window.MECH = {
   vectorState: () => ({ on: vectorsOn, ...viewport.arrowStats() }),
   selectionState: () => ({ ids: [...selectedIds], main: selectedId }),
   impactCount: () => viewport.impactCount(),
+  tensionState: () => ({ on: viewport.tensionsOn, ...viewport.tensionStats() }),
   forceState: () => ({ on: forcesOn, decompose: viewport.decompose, ...viewport.forceArrowStats() }),
   forceDecompose: (id) => {
     // 斜面场景支持力/摩擦力数值（理论对照：N=mg·cosθ, f=μN 或实测差分）

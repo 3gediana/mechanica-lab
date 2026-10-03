@@ -94,7 +94,7 @@ try {
   await page.selectOption('#selPreset', 'momentum');
   await page.waitForTimeout(300);
   await page.click('#btnRec');    // 录制（自动开始演化）
-  await page.waitForTimeout(1500);
+  await page.waitForTimeout(2500);
   await page.click('#btnRec');    // 停止录制
   await page.waitForTimeout(200);
   const fr = await page.evaluate(() => window.MECH.frameState());

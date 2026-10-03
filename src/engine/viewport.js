@@ -30,6 +30,8 @@ export class Viewport {
     this.forcesOn = false;
     this.decompose = false;      // 受力分解模式（N/f 分列替代接触合力）
     this._forceArrows = [];      // 受力箭头池：3/实体 = 接触合力(绿)+重力(红)+加速度(青)
+    this.tensionsOn = false;     // 绳张力箭头随受力开关
+    this._tensionArrows = [];    // 张力箭池：2/绳 = 两端琥珀箭（颜色独立，不与摩擦冲突）
     this._orthoCam = null;
     this.projection = 'persp';
     this._rubber = document.getElementById('rubber');
@@ -69,6 +71,27 @@ export class Viewport {
 
   // ============ ghost preview（目录 hover：视口中央半透明预览） ============
   setGhostFactory(fn) { this._ghostFactory = fn; }
+
+  // ghost 跟随鼠标：指针在网格平面（y=ghostY）上的投射位置
+  setGhostFollow(on) {
+    this._ghostFollow = on;
+  }
+
+  _updateGhostFollow(clientX, clientY) {
+    if (!this._ghostFollow || !this._ghost) return;
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(
+      ((clientX - r.left) / r.width) * 2 - 1,
+      -((clientY - r.top) / r.height) * 2 + 1
+    );
+    this.raycaster.setFromCamera(ndc, this.camera);
+    const denom = this.raycaster.ray.direction.y;
+    const t = denom !== 0 ? -this.raycaster.ray.origin.y / denom : -1;
+    if (t > 0) {
+      const pt = this.raycaster.ray.origin.clone().addScaledVector(this.raycaster.ray.direction, t);
+      this._ghost.position.set(pt.x, this._ghost.position.y, pt.z);
+    }
+  }
   showGhost(component) {
     this.hideGhost();
     if (!this._ghostFactory) return;
@@ -143,6 +166,42 @@ export class Viewport {
 
   forceArrowStats() {
     return { total: this._forceArrows.length, visible: this._forceArrows.filter((a) => a.visible).length };
+  }
+
+  // ============ 绳张力箭头（专门箭池：琥珀，避免与摩擦力颜色语义冲突） ============
+  setTensionArrows(on) {
+    this.tensionsOn = on;
+    for (const a of this._tensionArrows) a.visible = false;
+  }
+
+  // items: [{aPos, bPos, tA, tB}] tA/tB 为两端张力大小（N）
+  updateTensionArrows(items) {
+    if (!this.tensionsOn) return;
+    const need = items.length * 2;
+    while (this._tensionArrows.length < need) {
+      const a = new THREE.ArrowHelper(new THREE.Vector3(0, -1, 0), new THREE.Vector3(), 0.4, 0xe0b050, 0.08, 0.05);
+      this.scene.add(a);
+      this._tensionArrows.push(a);
+    }
+    let ai = 0;
+    for (const it of items) {
+      const dir = new THREE.Vector3().subVectors(
+        new THREE.Vector3(...it.bPos), new THREE.Vector3(...it.aPos)
+      ).normalize();
+      for (const [pos, mag, outward] of [[it.aPos, it.tA, -1], [it.bPos, it.tB, 1]]) {
+        const a = this._tensionArrows[ai++];
+        const len = Math.min(0.15 + mag * 0.05, 1.4);
+        a.visible = mag > 0.2;
+        a.position.set(pos[0], pos[1], pos[2]);
+        a.setDirection(dir.clone().multiplyScalar(outward));
+        a.setLength(len, 0.08, 0.05);
+      }
+    }
+    for (; ai < this._tensionArrows.length; ai++) this._tensionArrows[ai].visible = false;
+  }
+
+  tensionStats() {
+    return { total: this._tensionArrows.length, visible: this._tensionArrows.filter((a) => a.visible).length };
   }
 
   // ============ 透视 / 正交相机切换 ============
@@ -411,6 +470,7 @@ export class Viewport {
       }
     });
     window.addEventListener('pointermove', (e) => {
+      if (this._ghostFollow && this._ghost) this._updateGhostFollow(e.clientX, e.clientY);
       if (this.boxSelectMode && this._boxSel) {
         this._boxSel.x1 = e.clientX;
         this._boxSel.y1 = e.clientY;

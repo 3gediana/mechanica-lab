@@ -16,7 +16,7 @@ CALL_TIMEOUT = 90                    # 单次解析超时 s
 PARSE_PROMPT = """你是大学物理题解析器。看图中的物理题，输出严格 JSON（不要 markdown 代码块，不要解释文字），schema：
 {
  "questionType": "题型短语",
- "kind": "题型类别：斜面/抛体类留空，两球碰撞留空，天体引力填 astro，转台/角动量/转动惯量类填 rotation",
+ "kind": "题型类别：斜面/抛体类留空，两球碰撞留空，天体引力填 astro，转台/角动量/转动惯量类填 rotation，定滑轮/阿特伍德/两侧悬挂类填 atwood，弹簧振子/胡克定律类填 spring，铰链/复摆/刚性杆摆类填 hinge",
  "goal": "实验或求解目标",
  "gravity": 数值m/s2 或 null,
  "entities": [
@@ -35,7 +35,8 @@ PARSE_PROMPT = """你是大学物理题解析器。看图中的物理题，输�
 - kind 填 "rotation" 时给 joint（转台体索引 from、滑块体索引 to、径向滑槽参数）。
 - 转台初始角速度写在其 given.angvel = [0, ω, 0]。
 规则：
-- type 必须从五个值中选：斜面/楔子=ramp，球=sphere，方块=box，圆柱=cylinder，地面=ground。无关实体不要列。
+- type 必须从六个值中选：斜面/楔子=ramp，球=sphere，方块/物块=box，圆柱=cylinder，地面=ground，定滑轮/滑轮=pulley。无关实体不要列。
+- 定滑轮/阿特伍德题：kind 填 atwood，滑轮 type=pulley（given 带 radius 和 position），两物体 type 用 sphere 或 box（given 带各自的 mass；若题目给初速度写 velocity）。
 - given 只写题目文字或图中明确给出的数值；没给的键不要写。
 - 题目说"不计摩擦"时 friction 写 0 并在 assumptions 说明；"由静止释放"时 velocity 不写（默认零）。
 - 缺失的重要条件写进 unknowns；你补充的工程默认值写进 assumptions。
