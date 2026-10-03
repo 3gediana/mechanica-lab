@@ -54,17 +54,25 @@ try {
   // ==== B. ghost 跟随鼠标
   await page.evaluate(() => window.MECH.loadPreset('empty'));
   await page.waitForTimeout(300);
-  await page.hover('.comp-item', { hasText: '球' }).catch(() => {});
-  const firstItem = page.locator('.comp-item').first();
-  await firstItem.hover();
+  // hover 「球」行（最近使用区可能置顶绳/弹簧等 isLink 项——它们无单体 ghost 是正确语义）
+  const ballItem = page.locator('.comp-item', { hasText: '球' }).first();
+  await ballItem.hover();
   await page.waitForTimeout(200);
   // hover 后 ghost 出现在视口中央偏上；移动鼠标 ghost 应跟随
   await page.mouse.move(700, 300);
   await page.waitForTimeout(300);
   await page.mouse.move(900, 500);
   await page.waitForTimeout(300);
-  // ghost 位置无直接 DOM 断言 → 用截图目检 + 不抛错
-  check('ghost 跟随鼠标(不抛错)', consoleErrors.length === 0);
+  await ballItem.hover();          // 再入球行确保 ghost 存在（sticky 下不必须，防状态漂移）
+  await page.waitForTimeout(150);
+  // Round 27 起 ghost 真实显示（修复死代码）+ sticky 跟随：断言状态与位置变化
+  const g1 = await page.evaluate(() => window.MECH.ghostState());
+  await page.mouse.move(600, 400);
+  await page.waitForTimeout(250);
+  const g2 = await page.evaluate(() => window.MECH.ghostState());
+  check('ghost 显示且跟随(sticky)', g1.visible && g2.visible, JSON.stringify({ g1: g1.visible, g2: g2.visible }));
+  check('ghost 位置随鼠标变化', JSON.stringify(g1.pos) !== JSON.stringify(g2.pos),
+    `${JSON.stringify(g1.pos)} → ${JSON.stringify(g2.pos)}`);
   await page.screenshot({ path: 'shots/121-ghost-follow.png' });
 
   await page.close();

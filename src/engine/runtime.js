@@ -475,17 +475,30 @@ export class Runtime {
       this.collisionReports.push({ t: this.simT, pBefore: pre.p, keBefore: pre.ke, pAfter: post.p, keAfter: post.ke, postVels, pos });
       if (this.collisionReports.length > 50) this.collisionReports.shift();
     }
-    // 滚动阻力（教学开关）：μr·g 线性减速，沿速度反方向（纯滚动近似）
+    // 滚动阻力（教学模型）：滚阻矩 τ = μr·N·r 与转动惯量耦合（α = τ/I），
+    // N = m·|g|·gs（贴地法向近似，斜面上 cosθ 自动减小）、纯滚动 v=ωr → 线减速 dv = α·r·h。
+    // 实心球 I=0.4mr² → a_dec = μr·g/0.4（与 m、r 无关，形状因子决定）；仅对可滚几何生效
     for (const [id, b] of this.binds) {
       if (!b.body || b.entity.physics.body !== 'dynamic') continue;
       const mu = b.entity.params.rollResist;
       if (!mu) continue;
+      const c = this._reg.getComponent(b.entity.type);
+      if (!c || !c.inertiaY) continue;
+      const r = b.entity.params.radius;
+      if (!r || r <= 0) continue;
       const v = b.body.linvel();
       const sp = Math.hypot(v.x, v.y, v.z);
       if (sp < 1e-3) continue;
-      const dv = mu * 9.81 * FIXED_H;
+      const m = b.body.mass();
+      const gs = b.entity.physics.gravityScale != null ? b.entity.physics.gravityScale : 1;
+      const gy = this._bindDocs ? this._bindDocs.gravity : -9.81;
+      const I = c.inertiaY(b.entity.params, m);
+      if (I <= 0) continue;
+      const alpha = (mu * m * Math.abs(gy) * gs * r) / I;   // 角减速 α = μr·N·r / I
+      const dv = alpha * r * FIXED_H;                        // 纯滚动线减速
       const k = Math.max(1 - dv / sp, 0);
       b.body.setLinvel({ x: v.x * k, y: v.y * k, z: v.z * k }, true);
+      this._rollLast = { mu, m, gy, gs, r, I, alpha, dv, sp, ts: this.world.timestep, steps: this._stepN || 0, simT: this.simT };
     }
     // 接触合力 = m·(a − g·gravityScale)（速度差分反推；阻尼小量忽略，教学近似）
     const gy = this._bindDocs ? this._bindDocs.gravity : -9.81;

@@ -85,6 +85,7 @@ const AUTOSAVE_KEY = 'mechanica.autosave.v1';
     viewport.setGhostFactory((c) => {
       try { return c.buildGeometry(c.defaults.params); } catch (e) { return null; }
     });
+    viewport.setGhostSnapMode(snapMode);   // ghost 吸附档位与大纲吸附循环同源
 
     const saved = loadAutosave();
     doc = saved || getPreset('incline');
@@ -487,6 +488,7 @@ const SNAP_LABEL = { off: '吸附:关', grid: '吸附:网格', endpoint: '吸附
 function cycleSnap() {
   snapMode = SNAP_SEQ[(SNAP_SEQ.indexOf(snapMode) + 1) % SNAP_SEQ.length];
   viewport.setSnap(snapMode === 'grid');
+  viewport.setGhostSnapMode(snapMode);   // ghost 跟随联动同一吸附档位
   const btn = $('btnSnap');
   btn.classList.toggle('hot', snapMode !== 'off');
   btn.textContent = SNAP_LABEL[snapMode];
@@ -581,7 +583,16 @@ function addCatalogRow(box, c, faved = false) {
   fav.onclick = (ev) => { ev.stopPropagation(); toggleFavorite(c.id); };
   row.querySelector('.nm').textContent = c.label;
   row.title = c.desc;
-  row.onclick = () => opAddComponent(c.id);
+  row.onclick = () => { viewport.hideGhost(); opAddComponent(c.id); };
+  // ghost preview（Round 27 修复：此前 showGhost 从未被调用=死代码）。
+  // sticky 语义：hover 选中组件后 ghost 持续跟随鼠标（吸附档位联动），
+  // 直到点击放置（hideGhost）或 hover 其他组件替换——移出目录行不消失
+  row.onmouseenter = () => {
+    const comp = registry.getComponent(c.id);
+    if (!comp || comp.isLink) return;   // 连接类两实体语义无单体预览；保持现有 ghost 不动
+    viewport.showGhost(comp);
+    viewport.setGhostFollow(true);
+  };
   box.appendChild(row);
 }
 
@@ -2739,6 +2750,8 @@ window.MECH = {
   cameraTarget: () => viewport.controls.target.toArray(),
   scaleState: () => ({ step: gridStep, ...viewport.gridInfo(),
     text: document.getElementById('scaleReadout') ? document.getElementById('scaleReadout').textContent : '' }),
+  ghostState: () => viewport.ghostState(),
+  __rollDbg: () => runtime._rollLast || null,
   get __vp() { return viewport; },   // 诊断通道（非 Agent 白名单，实时引用）
   cameraPos: () => viewport.camera.position.toArray(),
   forceDecompose: (id) => {

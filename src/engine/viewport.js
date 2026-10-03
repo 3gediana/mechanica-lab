@@ -96,9 +96,61 @@ export class Viewport {
   // ============ ghost preview（目录 hover：视口中央半透明预览） ============
   setGhostFactory(fn) { this._ghostFactory = fn; }
 
-  // ghost 跟随鼠标：指针在网格平面（y=ghostY）上的投射位置
+  // ghost 跟随鼠标：地面投射 + 吸附档位联动（endpoint/surface/center 吸附 + 琥珀标记）
   setGhostFollow(on) {
     this._ghostFollow = on;
+    if (!on && this._snapMarker) this._snapMarker.visible = false;
+  }
+
+  setGhostSnapMode(mode) {
+    this._ghostSnapMode = mode;
+    if (!this._snapMarker) {
+      const m = new THREE.Mesh(
+        new THREE.RingGeometry(0.055, 0.085, 24),
+        new THREE.MeshBasicMaterial({ color: 0xd9a441, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false })
+      );
+      m.rotation.x = -Math.PI / 2;
+      m.visible = false;
+      this.scene.add(m);
+      this._snapMarker = m;
+    }
+  }
+
+  _ghostHalfHeight() {
+    if (!this._ghost) return 0.1;
+    const box = new THREE.Box3().setFromObject(this._ghost);
+    return box.isEmpty() ? 0.1 : Math.max(box.getSize(new THREE.Vector3()).y / 2, 0.02);
+  }
+
+  // 在场景实体中找吸附目标（端点=包围盒角点 / 表面=顶面 / 中心=xz 中心）
+  _snapCandidate(px, pz, halfH) {
+    const mode = this._ghostSnapMode;
+    if (!mode || mode === 'off' || mode === 'grid') return null;
+    let best = null;
+    const consider = (d, x, y, z, kind, cap) => { if (d < cap && (best === null || d < best.d)) best = { d, x, y, z, kind }; };
+    for (const o of this.scene.children) {
+      if (!o.isMesh && !o.isGroup) continue;
+      if (o === this._ghost || o === this._snapMarker) continue;
+      if (!o.visible) continue;
+      if (o.userData && (o.userData.ghost || o.userData.isHelper)) continue;
+      const box = new THREE.Box3().setFromObject(o);
+      if (box.isEmpty()) continue;
+      const sy = box.max.y - box.min.y;
+      if (sy > 12 || sy < 0.01) continue;   // 跳过地面级大平面与异常体
+      if (mode === 'endpoint') {
+        for (const cx of [box.min.x, box.max.x]) for (const cy of [box.min.y, box.max.y]) for (const cz of [box.min.z, box.max.z]) {
+          consider((px - cx) ** 2 + (pz - cz) ** 2, cx, cy + halfH, cz, 'endpoint', 0.09);
+        }
+      } else if (mode === 'surface') {
+        if (px >= box.min.x - 0.05 && px <= box.max.x + 0.05 && pz >= box.min.z - 0.05 && pz <= box.max.z + 0.05) {
+          consider(0.02, px, box.max.y + halfH, pz, 'surface', Infinity);
+        }
+      } else if (mode === 'center') {
+        const cx = (box.min.x + box.max.x) / 2, cz = (box.min.z + box.max.z) / 2;
+        consider((px - cx) ** 2 + (pz - cz) ** 2, cx, box.max.y + halfH, cz, 'center', 0.09);
+      }
+    }
+    return best;
   }
 
   _updateGhostFollow(clientX, clientY) {
@@ -111,10 +163,34 @@ export class Viewport {
     this.raycaster.setFromCamera(ndc, this.camera);
     const denom = this.raycaster.ray.direction.y;
     const t = denom !== 0 ? -this.raycaster.ray.origin.y / denom : -1;
-    if (t > 0) {
-      const pt = this.raycaster.ray.origin.clone().addScaledVector(this.raycaster.ray.direction, t);
-      this._ghost.position.set(pt.x, this._ghost.position.y, pt.z);
+    if (t <= 0) return;
+    const pt = this.raycaster.ray.origin.clone().addScaledVector(this.raycaster.ray.direction, t);
+    const halfH = this._ghostHalfHeight();
+    const hit = this._snapCandidate(pt.x, pt.z, halfH);
+    if (hit) {
+      this._ghost.position.set(hit.x, hit.y + 0.01, hit.z);
+      if (this._snapMarker) {
+        this._snapMarker.visible = true;
+        this._snapMarker.position.set(hit.x, hit.y - halfH + 0.012, hit.z);
+      }
+      this._ghostSnapHit = true;
+    } else {
+      let gx = pt.x, gz = pt.z;
+      if (this._ghostSnapMode === 'grid') { gx = Math.round(gx * 2) / 2; gz = Math.round(gz * 2) / 2; }   // 0.5m 网格吸附
+      this._ghost.position.set(gx, this._ghost.position.y, gz);
+      if (this._snapMarker) this._snapMarker.visible = false;
+      this._ghostSnapHit = false;
     }
+  }
+
+  ghostState() {
+    return {
+      visible: !!this._ghost && this._ghostFollow,
+      snapMode: this._ghostSnapMode || 'grid',
+      snapped: !!this._ghostSnapHit,
+      marker: this._snapMarker ? this._snapMarker.visible : false,
+      pos: this._ghost ? this._ghost.position.toArray().map((v) => +v.toFixed(3)) : null,
+    };
   }
   showGhost(component) {
     this.hideGhost();
