@@ -613,7 +613,7 @@ function onKey(e) {
 function addCatalogRow(box, c, faved = false) {
   const row = document.createElement('div');
   row.className = 'comp-item';
-  row.innerHTML = `<img class="thumb" alt=""><span class="fav" title="收藏/取消收藏"></span><span class="nm"></span><span class="plus">+</span>`;
+  row.innerHTML = `<div class="thumbbox"><img class="thumb" alt=""><span class="fav" title="收藏/取消收藏"></span><span class="plus">+</span></div><span class="nm"></span>`;
   // 缩略图：按组件真实几何离屏渲染（失败时隐藏 img，卡片退化为纯文字）
   const url = renderThumb(registry.getComponent(c.id), M);
   const img = row.querySelector('.thumb');
@@ -623,14 +623,13 @@ function addCatalogRow(box, c, faved = false) {
   fav.style.color = faved ? 'var(--accent)' : 'var(--faint)';
   fav.onclick = (ev) => { ev.stopPropagation(); toggleFavorite(c.id); };
   row.querySelector('.nm').textContent = c.label;
-  // 兼容性提示（Goal 第六章目录条文）：物理行为/放置要求进 tooltip + 两实体类徽标
+  // 兼容性提示（Goal 第六章目录条文）：物理行为/放置要求进 tooltip + 两实体类徽标（压缩略图右下角）
   row.title = c.desc + (c.compat ? '\n【兼容性】' + c.compat : '');
   if (c.isLink || c.isMeasure || c.isSensor) {
     const badge = document.createElement('span');
     badge.className = 'need2';
     badge.textContent = c.isSensor ? '绑 1 实体' : '需两实体';
-    badge.style.cssText = 'font-size:8px;color:var(--accent);border:1px solid rgba(217,164,65,.4);padding:0 3px;border-radius:2px;margin-right:2px;white-space:nowrap';
-    row.querySelector('.nm').before(badge);
+    row.querySelector('.thumbbox').appendChild(badge);
   }
   row.onclick = () => { viewport.hideGhost(); opAddComponent(c.id); };
   // ghost preview（Round 27 修复：此前 showGhost 从未被调用=死代码）。
@@ -650,17 +649,25 @@ function renderCatalog() {
   box.innerHTML = '';
   const q = catalogFilter.trim().toLowerCase();
   const favs = favoriteComponents();
+  // 每个区块（搜索/收藏/最近/分类）的卡片集合包进同一网格容器
+  const grid = () => {
+    const g = document.createElement('div');
+    g.className = 'cat-grid';
+    box.appendChild(g);
+    return g;
+  };
   if (q) {
     // 搜索：跨分类平铺匹配项（带收藏切换）
     const h = document.createElement('div');
     h.className = 'cat-head';
     h.textContent = '搜索结果';
     box.appendChild(h);
+    const g = grid();
     let hit = 0;
     for (const cat of registry.catalog()) {
       for (const c of cat.items) {
         if (c.label.toLowerCase().includes(q) || c.desc.toLowerCase().includes(q)) {
-          addCatalogRow(box, c, favs.includes(c.id));
+          addCatalogRow(g, c, favs.includes(c.id));
           hit++;
         }
       }
@@ -678,7 +685,8 @@ function renderCatalog() {
     h.className = 'cat-head';
     h.textContent = '收藏';
     box.appendChild(h);
-    for (const typeId of favs) addCatalogRow(box, registry.getComponent(typeId), true);
+    const g = grid();
+    for (const typeId of favs) addCatalogRow(g, registry.getComponent(typeId), true);
   }
   const recent = recentComponents();
   if (recent.length) {
@@ -686,14 +694,16 @@ function renderCatalog() {
     h.className = 'cat-head';
     h.textContent = '最近使用';
     box.appendChild(h);
-    for (const typeId of recent) addCatalogRow(box, registry.getComponent(typeId), favs.includes(typeId));
+    const g = grid();
+    for (const typeId of recent) addCatalogRow(g, registry.getComponent(typeId), favs.includes(typeId));
   }
   for (const cat of registry.catalog()) {
     const h = document.createElement('div');
     h.className = 'cat-head';
     h.textContent = cat.label;
     box.appendChild(h);
-    for (const c of cat.items) addCatalogRow(box, c, favs.includes(c.id));
+    const g = grid();
+    for (const c of cat.items) addCatalogRow(g, c, favs.includes(c.id));
   }
 }
 

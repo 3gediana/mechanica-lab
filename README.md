@@ -90,6 +90,7 @@ cd tools/ui-test && npm i && node p0.mjs   # P0 工作台内核 19 项
                             node p26.mjs  # 二维斜碰 9 项
                             node p27.mjs  # 速度传感器+计时器 11 项
                             node p28.mjs  # 力传感器 12 项
+                            node p29.mjs  # 审计弱项补齐（三视图/倍率/正交/存档）11 项
 ```
 
 ## 教学预置场景（P2，走通用场景系统）
