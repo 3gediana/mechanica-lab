@@ -4,12 +4,16 @@
   "questionType": "斜面下滑（光滑固定斜面）",
   "goal": "求小球滑到斜面底端时速度的大小，观察下滑过程",
   "gravity": 10,
+  "environment": "斜面光滑，不计空气阻力",
+  "anchorPoints": ["斜面底端与地面相接处（固定支撑）"],
+  "keyPoints": ["小球初始位于斜面顶端（由静止释放）", "斜面底端为速度测量点"],
   "entities": [
     { "type": "ramp", "name": "固定斜面", "given": { "angleDeg": 30, "length": 2.0 }, "confidence": 0.98 },
     { "type": "sphere", "name": "小球", "given": { "mass": 1.0, "friction": 0 }, "confidence": 0.95 }
   ],
   "observations": ["小球滑到斜面底端时的速度大小"],
   "unknowns": ["小球半径（题述可忽略，需取默认值）"],
+  "uncertain": ["释放方式（题图未明示，按由静止释放处理）"],
   "assumptions": [
     "斜面固定于地面",
     "不计空气阻力",

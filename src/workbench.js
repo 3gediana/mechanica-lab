@@ -2373,6 +2373,17 @@ function renderParseResult(warnings = []) {
   grow.querySelector('.badge').textContent = plan.gravityDefault ? '默认' : '题给';
   grow.querySelector('.badge').className = 'badge' + (plan.gravityDefault ? '' : ' given');
   meta.appendChild(grow);
+  // 环境条件（Goal 七：环境条件字段，非空才显示）
+  if (plan.environment) {
+    const erow = document.createElement('div');
+    erow.className = 'k';
+    erow.style.cssText = 'font-size:10px;color:var(--faint)';
+    erow.textContent = '环境条件';
+    const ev = document.createElement('div');
+    ev.style.cssText = 'font-size:11px;color:var(--dim);margin:2px 0 8px';
+    ev.textContent = plan.environment;
+    meta.append(erow, ev);
+  }
   if (warnings.length) {
     const w = document.createElement('div');
     w.className = 'hint';
@@ -2440,11 +2451,14 @@ function renderParseResult(warnings = []) {
     box.appendChild(row);
   });
 
-  // 观察 / 未知 / 假设
+  // 观察 / 固定点 / 关键点 / 未知 / 无法确定 / 假设（Goal 七字段清单逐项落点）
   const lists = $('parseLists');
   lists.innerHTML = '';
   appendList(lists, '要求观察', plan.observations);
+  appendList(lists, '固定点', plan.anchorPoints);
+  appendList(lists, '关键点', plan.keyPoints);
   appendList(lists, '未知量', plan.unknowns);
+  appendList(lists, '无法确定（需确认）', plan.uncertain);
   appendList(lists, '假设', plan.assumptions);
   buildChangePreview();
 }
@@ -3021,6 +3035,19 @@ window.MECH = {
     gravity: agentPlan ? agentPlan.gravity : null,
     correctionCount: agentCorrections.length,
     entities: agentPlan ? agentPlan.entities.map((e) => ({ type: e.type, given: { ...e.given } })) : [],
+    // Goal 七结构化解析字段清单（逐项可断言）
+    questionType: agentPlan ? agentPlan.questionType : null,
+    goal: agentPlan ? agentPlan.goal : null,
+    environment: agentPlan ? agentPlan.environment : null,
+    anchorPoints: agentPlan ? [...agentPlan.anchorPoints] : [],
+    keyPoints: agentPlan ? [...agentPlan.keyPoints] : [],
+    observations: agentPlan ? [...agentPlan.observations] : [],
+    unknowns: agentPlan ? [...agentPlan.unknowns] : [],
+    uncertain: agentPlan ? [...agentPlan.uncertain] : [],
+    assumptions: agentPlan ? [...agentPlan.assumptions] : [],
+    confidence: agentPlan ? agentPlan.confidence : null,
+    joint: agentPlan && agentPlan.joint ? { type: agentPlan.joint.type, from: agentPlan.joint.from, to: agentPlan.joint.to } : null,
+    attaches: agentPlan ? agentPlan.attaches.map((a) => ({ ...a })) : [],
   }),
   agentOpsState: () => ({ ops: agentOps.map((o) => ({ ...o })) }),
   explainState: () => agentExplain ? JSON.parse(JSON.stringify(agentExplain)) : null,

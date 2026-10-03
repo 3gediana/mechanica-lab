@@ -26,7 +26,11 @@ PARSE_PROMPT = """你是大学物理题解析器。看图中的物理题，输�
     "confidence": 0到1}
  ],
  "observations": ["要求观察或求解的量"],
+ "anchorPoints": ["固定点/支撑点/悬挂点描述，没有则空数组"],
+ "keyPoints": ["题目关键点（关键位置/时刻/事件），没有则空数组"],
+ "environment": "环境条件短语（如：光滑水平面、不计空气阻力），没有则空字符串",
  "unknowns": ["图中未给出的量（不要编造数值）"],
+ "uncertain": ["题图未明示、你按惯例处理但需用户确认的内容，没有则空数组"],
  "joint": {"from": 实体索引, "to": 实体索引, "axis": [1,0,0], "limits": [0.15, 1.05], "anchor1": [0,0.14,0], "anchor2": [0,0,0]},
  "assumptions": ["你做的假设"],
  "confidence": 0到1
@@ -39,7 +43,7 @@ PARSE_PROMPT = """你是大学物理题解析器。看图中的物理题，输�
 - 定滑轮/阿特伍德题：kind 填 atwood，滑轮 type=pulley（given 带 radius 和 position），两物体 type 用 sphere 或 box（given 带各自的 mass；若题目给初速度写 velocity）。
 - given 只写题目文字或图中明确给出的数值；没给的键不要写。
 - 题目说"不计摩擦"时 friction 写 0 并在 assumptions 说明；"由静止释放"时 velocity 不写（默认零）。
-- 缺失的重要条件写进 unknowns；你补充的工程默认值写进 assumptions。
+- 缺失的重要条件写进 unknowns；你补充的工程默认值写进 assumptions；按惯例处理但无题图依据的写进 uncertain。
 - 只输出 JSON 本体，且必须紧凑：单行、无缩进、无多余空格与换行。"""
 
 

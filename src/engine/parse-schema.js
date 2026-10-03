@@ -82,7 +82,11 @@ export function normalizeParse(raw) {
     } : null,
     entities,                                        // 保留 given 供 UI 标来源
     observations: strs(raw.observations),
+    anchorPoints: strs(raw.anchorPoints),            // 固定点（支撑/悬挂/铰接点描述；Goal 七）
+    environment: str(raw.environment, ''),           // 环境条件（光滑水平面/不计空气阻力…）
+    keyPoints: strs(raw.keyPoints),                  // 题目关键点（关键位置/时刻/事件）
     unknowns: strs(raw.unknowns),
+    uncertain: strs(raw.uncertain),                  // 无法确定的内容（需用户确认；与未知量并列）
     assumptions: strs(raw.assumptions),
     confidence: clamp01(raw.confidence) ?? 0.5,
   };
