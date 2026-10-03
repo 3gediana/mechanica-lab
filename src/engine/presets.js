@@ -174,6 +174,49 @@ export const PRESETS = {
     },
   },
 
+  hingePend: {
+    id: 'hingePend', label: '复摆（铰链杆）',
+    build() {
+      const doc = createEmptyDoc('复摆：铰链刚性杆摆动');
+      const seq = {};
+      // 锚点基座（固定）
+      const anchor = createEntity('box', {
+        name: '铰链基座',
+        transform: { pos: [0, 2.5, 0], rot: [0, 0, 0] },
+        params: { sx: 0.2, sy: 0.2, sz: 0.2 },
+        physics: { body: 'fixed', friction: 0.8 },
+        render: { material: 'steelDark' },
+        source: 'preset',
+      }, seq);
+      // 刚性杆：绕 z 轴摆动，初始拉开 1.2 rad
+      const rod = createEntity('box', {
+        name: '摆杆',
+        transform: { pos: [(0.5) * Math.sin(0.4), 2.5 - (0.5) * Math.cos(0.4), 0], rot: [0, 0, -Math.PI / 2 + 0.4] },   // 近锚端恰在锚点
+        params: { sx: 1.0, sy: 0.06, sz: 0.06, noCollide: true },   // 铰链连接体互碰禁用（纯摆）
+        physics: {
+          body: 'dynamic', mass: 1, friction: 0.5, restitution: 0.1,
+          linvel: [0, 0, 0], angvel: [0, 0, 0],
+          linDamping: 0, angDamping: 0, gravityScale: 1,
+        },
+        render: { material: 'wood' },
+        measured: true,
+        source: 'preset',
+      }, seq);
+      // 铰链：锚点基座 ↔ 摆杆，绕 z 轴，锚点=基座中心（杆端）
+      anchor.joints = [{
+        type: 'revolute', target: rod.id,
+        axis: [0, 0, 1],
+        anchor1: [0, 0, 0], anchor2: [-0.5, 0, 0],   // 杆局部近端（绕近端摆）
+      }];
+      doc.entities.push(anchor, rod);
+      doc.meta.assumptions = [
+        '复摆（细杆绕端点）：周期理论 T = 2π√(2L/(3g))，L=1m 时 ≈ 1.638 s',
+        '铰链绕 z 轴无摩擦；摆动平面为 x-y',
+      ];
+      return doc;
+    },
+  },
+
   atwood: {
     id: 'atwood', label: '阿特伍德机（定滑轮）',
     build() {

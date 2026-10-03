@@ -94,9 +94,19 @@ export class Runtime {
         let jd = null;
         if (e.type === 'rope') jd = RAPIER.JointData.rope(e.params.length, v([0, 0, 0]), v([0, 0, 0]));
         else if (e.type === 'spring') jd = RAPIER.JointData.spring(e.params.restLength, e.params.stiffness, e.params.damping || 0, v([0, 0, 0]), v([0, 0, 0]));
+        else if (e.type === 'hinge') {
+          // 锚点 = 铰链实体自身位置（世界）→ 各 body 局部（忽略基座/臂的旋转，教学简化）
+          const w = e.transform.pos;
+          const pa = bodyA.body.translation(), pb = bodyB.body.translation();
+          const a1 = v([w.x - pa.x, w.y - pa.y, w.z - pa.z]);
+          const a2 = v([w.x - pb.x, w.y - pb.y, w.z - pb.z]);
+          const ax = e.jointAxis || [0, 0, 1];
+          jd = RAPIER.JointData.revolute(a1, a2, v(ax));
+        }
         if (jd) this.world.createImpulseJoint(jd, bodyA.body, bodyB.body, true);
       }
       bind.isLink = true;
+      bind.linkStatic = c.linkStatic === true;
       this.binds.set(e.id, bind);
       return;
     }
@@ -122,6 +132,10 @@ export class Runtime {
         if (e.physics.body === 'dynamic' && e.physics.mass > 0) colDesc.setMass(e.physics.mass);
         bind.collider = this.world.createCollider(colDesc, body);
       }
+      if (e.params.noCollide && bind.collider) {
+        // noCollide：保留质量/惯性（joint 求解需要），但不与任何东西碰撞
+        bind.collider.setCollisionGroups((0x0002 << 16) | 0);
+      }
       bind.body = body;
     }
     this.binds.set(e.id, bind);
@@ -142,6 +156,8 @@ export class Runtime {
               jd.limitsEnabled = true;
               jd.limits = j.limits;
             }
+          } else if (j.type === 'revolute') {
+            jd = this.RAPIER.JointData.revolute(vec(j.anchor1 || [0, 0, 0]), vec(j.anchor2 || [0, 0, 0]), vec(j.axis || [0, 0, 1]));
           }
           if (jd) this.world.createImpulseJoint(jd, bindA.body, bindB.body, true);
         } catch (err) {
@@ -358,6 +374,18 @@ export class Runtime {
       this.collisionReports.push({ t: this.simT, pBefore: pre.p, keBefore: pre.ke, pAfter: post.p, keAfter: post.ke, postVels, pos });
       if (this.collisionReports.length > 50) this.collisionReports.shift();
     }
+    // 滚动阻力（教学开关）：μr·g 线性减速，沿速度反方向（纯滚动近似）
+    for (const [id, b] of this.binds) {
+      if (!b.body || b.entity.physics.body !== 'dynamic') continue;
+      const mu = b.entity.params.rollResist;
+      if (!mu) continue;
+      const v = b.body.linvel();
+      const sp = Math.hypot(v.x, v.y, v.z);
+      if (sp < 1e-3) continue;
+      const dv = mu * 9.81 * FIXED_H;
+      const k = Math.max(1 - dv / sp, 0);
+      b.body.setLinvel({ x: v.x * k, y: v.y * k, z: v.z * k }, true);
+    }
     // 接触合力 = m·(a − g·gravityScale)（速度差分反推；阻尼小量忽略，教学近似）
     const gy = this._bindDocs ? this._bindDocs.gravity : -9.81;
     for (const [id, b] of this.binds) {
@@ -392,7 +420,15 @@ export class Runtime {
       const r = this.recording;
       if (r.n++ % r.every === 0 && r.points.length < r.cap) {
         const t = this.telemetry(r.id);
-        if (t) r.points.push({ t: this.simT, pos: t.pos, speed: t.speed, vel: t.vel });
+        if (t) {
+          const bb = this.binds.get(r.id);
+          let rotz = 0;
+          if (bb && bb.body) {
+            const q = bb.body.rotation();
+            rotz = Math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z));   // 欧拉 z
+          }
+          r.points.push({ t: this.simT, pos: t.pos, speed: t.speed, vel: t.vel, rotz });
+        }
       }
     }
     if (this.recFrames && this._stepN % 3 === 0) {
@@ -456,7 +492,12 @@ export class Runtime {
 
   _syncLinks() {
     for (const b of this.binds.values()) {
-      if (!b.isLink || !Array.isArray(b.entity.attach) || b.entity.attach.length !== 2) continue;
+      if (!b.isLink) continue;
+      if (b.linkStatic) {                            // 铰链轴柱：固定在自身位置
+        b.mesh.position.fromArray(b.entity.transform.pos);
+        continue;
+      }
+      if (!Array.isArray(b.entity.attach) || b.entity.attach.length !== 2) continue;
       const a = this.binds.get(b.entity.attach[0]), c = this.binds.get(b.entity.attach[1]);
       if (!a || !c) continue;
       const pa = a.mesh.position, pc = c.mesh.position;

@@ -39,7 +39,7 @@ for tool in ["tools/serve.py", "tools/ui-test/p0.mjs", "tools/ui-test/p1.mjs", "
     need(ROOT / tool, (ROOT / tool).exists(), f"缺失: {tool}")
 for fx in ["tools/fixtures/question-incline.png", "tools/fixtures/parse-incline.json",
            "tools/fixtures/question-momentum.png", "tools/fixtures/parse-momentum.json",
-           "tools/fixtures/parse-celestial.json", "tools/fixtures/parse-spin.json", "tools/fixtures/parse-spring.json"]:
+           "tools/fixtures/parse-celestial.json", "tools/fixtures/parse-spin.json", "tools/fixtures/parse-spring.json", "tools/fixtures/parse-hinge.json"]:
     need(ROOT / fx, (ROOT / fx).exists(), f"缺失: {fx}")
 
 # 1c. 密钥纪律：key / 上游端点 / 鉴权头只允许出现在服务端 tools/serve.py，前端零出现

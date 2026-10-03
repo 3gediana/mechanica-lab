@@ -101,6 +101,7 @@ export const COMPONENTS = {
     defaults: { params: { radius: 0.15 }, physics: defaultPhysics('dynamic', 1), render: { material: 'chrome' } },
     schema: [
       { key: 'radius', label: '半径', unit: 'm', min: 0.01, max: 2, step: 0.01 },
+      { key: 'rollResist', label: '滚动阻力', unit: '', min: 0, max: 0.2, step: 0.005 },
     ],
     buildGeometry: (p) => new THREE.SphereGeometry(p.radius, 40, 28),
     buildCollider: (RAPIER, p) => RAPIER.ColliderDesc.ball(p.radius),
@@ -192,6 +193,18 @@ export const COMPONENTS = {
     buildCollider: (RAPIER, p) => RAPIER.ColliderDesc.cuboid(p.sx / 2, p.sy / 2, p.sz / 2),
     spawnY: (p) => p.sy / 2,
     inertiaY: (p, m) => m * (p.sx * p.sx + p.sz * p.sz) / 12,
+  },
+
+  hinge: {
+    id: 'hinge', label: '铰链', category: '绳和约束',
+    desc: '连接两实体的转轴关节（绕轴相对转动）；选中基座与摆臂后添加，铰链位置吸附到臂端',
+    defaults: { params: { }, physics: defaultPhysics('fixed', 0), render: { material: 'brass' } },
+    schema: [],
+    buildGeometry: () => new THREE.CylinderGeometry(0.035, 0.035, 0.16, 16),   // 轴柱视觉，置于锚点
+    buildCollider: () => null,
+    isLink: true,
+    linkStatic: true,                              // 轴柱固定在锚点位置（不随两端拉伸）
+    spawnY: () => 2.0,
   },
 
   pulley: {

@@ -1,0 +1,58 @@
+{
+  "_fixture": true,
+  "_note": "本地示例解析数据（铰链复摆），用于无 API Key 时验证铰链链路；不是真实模型输出",
+  "kind": "hinge",
+  "questionType": "复摆（铰链杆摆动）",
+  "goal": "观察刚性杆绕端点铰链的摆动周期，验证复摆公式 T=2π√(2L/(3g))",
+  "gravity": 10,
+  "entities": [
+    {
+      "type": "box",
+      "name": "铰链基座",
+      "given": {
+        "position": [
+          0,
+          2.5,
+          0
+        ]
+      },
+      "confidence": 0.93
+    },
+    {
+      "type": "box",
+      "name": "摆杆",
+      "given": {
+        "position": [
+          -0.18,
+          2.03,
+          0
+        ],
+        "length": 1.0
+      },
+      "confidence": 0.92
+    }
+  ],
+  "joint": {
+    "type": "revolute",
+    "from": 0,
+    "to": 1,
+    "axis": [
+      0,
+      0,
+      1
+    ]
+  },
+  "observations": [
+    "摆动周期",
+    "摆角幅度"
+  ],
+  "unknowns": [
+    "铰链摩擦（按无摩擦理想化）"
+  ],
+  "assumptions": [
+    "细杆绕端点转动惯量 I = ML²/3",
+    "铰链绕 z 轴无摩擦",
+    "摆动平面为 x-y，初始摆角 1.2 rad"
+  ],
+  "confidence": 0.9
+}

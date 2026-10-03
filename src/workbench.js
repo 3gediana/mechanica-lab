@@ -1792,16 +1792,22 @@ function applyAgentPlan() {
     }
   }
   // rotation 类：plan.joint 的 from/to 为实体索引，建场后映射为真实 id 建滑槽约束
-  if (agentPlan.kind === 'rotation' && agentPlan.joint) {
+  if (agentPlan.joint && (agentPlan.kind === 'rotation' || agentPlan.kind === 'hinge')) {
     const fromId = created[agentPlan.joint.from], toId = created[agentPlan.joint.to];
     if (fromId && toId) {
-      M.updateEntity(fromId, {
-        joints: [{
-          type: 'prismatic', target: toId,
-          axis: agentPlan.joint.axis, limits: agentPlan.joint.limits,
-          anchor1: agentPlan.joint.anchor1, anchor2: agentPlan.joint.anchor2,
-        }],
-      }, '建立径向滑槽约束');
+      let jd = null;
+      if (agentPlan.joint.type === 'revolute') {
+        // 铰链锚点 = 杆近端：anchor2 沿杆局部 -x 半长（杆绕近端摆）
+        const rodE = getEntity(doc, toId);
+        const halfLen = rodE ? (rodE.params.sx || 0.5) / 2 : 0.5;
+        jd = { type: 'revolute', target: toId, axis: agentPlan.joint.axis || [0, 0, 1],
+          anchor1: agentPlan.joint.anchor1 || [0, 0, 0], anchor2: [-halfLen, 0, 0] };
+      } else {
+        jd = { type: 'prismatic', target: toId, axis: agentPlan.joint.axis, limits: agentPlan.joint.limits,
+          anchor1: agentPlan.joint.anchor1, anchor2: agentPlan.joint.anchor2 };
+      }
+      M.updateEntity(fromId, { joints: [jd] },
+        agentPlan.joint.type === 'revolute' ? '建立铰链转轴' : '建立径向滑槽约束');
     }
   }
   M.setAgentMeta({
@@ -1872,6 +1878,7 @@ async function runAndExplain() {
   const isRotation = doc.kind === 'rotation';
   const isSpring = doc.entities.some((e) => e.type === 'spring');
   const isAtwood = doc.entities.some((e) => e.type === 'pulley');
+  const isHinge = doc.entities.some((e) => e.joints && e.joints.some((j) => j.type === 'revolute'));
   if (mode !== 'edit') resetSim();
 
   setAgentStage('explaining', '运行并记录数据中…');
@@ -1879,8 +1886,8 @@ async function runAndExplain() {
   const btn = $('btnRunExplain');
   btn.disabled = true;
   btn.textContent = '运行并记录中…';
-  const isMomentum = !hasRamp && !isAstro && !isRotation && !isSpring && !isAtwood;
-  const needT = isAtwood ? 1.6 : (isSpring ? 6.5 : (isAstro ? 11 : (isRotation ? 3.5 : 4)));   // 阿特伍德 2.2s（a≈3.27，位移≈7.9m 足够拟合）
+  const isMomentum = !hasRamp && !isAstro && !isRotation && !isSpring && !isAtwood && !isHinge;
+  const needT = isHinge ? 5.5 : (isAtwood ? 1.6 : (isSpring ? 6.5 : (isAstro ? 11 : (isRotation ? 3.5 : 4))));   // 阿特伍德 2.2s（a≈3.27，位移≈7.9m 足够拟合）
   const u0 = ball.physics.linvel[0];
   // 运行前预采守恒基准（初始态），避免首采落在演化中
   if (isRotation) rotationWithDrift();
@@ -1943,6 +1950,30 @@ function renderAstroExplain(r, box) {
 }
 function a_of(r) {
   return (r.measured.rmin + r.measured.rmax) / 2;
+}
+
+function renderHingeExplain(r, box) {
+  const grid = document.createElement('div');
+  grid.className = 'ro-grid';
+  const rows = [
+    ['杆长 L', r.theoretical.L + ' m'],
+    ['周期（理论 2π√(2L/(3g))）', r.theoretical.period.toFixed(3) + ' s'],
+    ['周期（实测·角位置峰间隔）', r.measured.period != null ? r.measured.period.toFixed(3) + ' s' : '采样中'],
+    ['周期偏差', r.errPct != null ? r.errPct.toFixed(2) + '%' : '--'],
+    ['摆角幅度', r.measured.swing.toFixed(3) + ' rad'],
+    ['判定', r.pass ? '通过（复摆公式验证）' : '未通过'],
+  ];
+  grid.innerHTML = rows.map(([k], i) =>
+    '<div class="cell" style="grid-column:1/-1"><span class="k">' + k + '</span><span class="v ' + (i === 5 ? 'acc' : 'plain') + '"></span></div>'
+  ).join('');
+  const els = [...grid.querySelectorAll('.v')];
+  rows.forEach((rw, i) => { els[i].textContent = rw[1]; });
+  box.appendChild(grid);
+  const p = document.createElement('div');
+  p.className = 'hint';
+  p.style.marginTop = '8px';
+  p.textContent = r.summary;
+  box.appendChild(p);
 }
 
 function renderAtwoodExplain(r, box) {
@@ -2063,6 +2094,7 @@ function renderExplanation() {
   if (r.kind === 'rotation') { renderRotationExplain(r, box); return; }
   if (r.kind === 'spring') { renderSpringExplain(r, box); return; }
   if (r.kind === 'atwood') { renderAtwoodExplain(r, box); return; }
+  if (r.kind === 'hinge') { renderHingeExplain(r, box); return; }
   // 观察项对比表（斜面）
   const grid = document.createElement('div');
   grid.className = 'ro-grid';
@@ -2209,6 +2241,7 @@ window.MECH = {
   astroState: () => astroWithDrift(),
   rotationState: () => rotationWithDrift(),
   atwoodState: () => atwoodInfo(),
+  dbg: () => ({ joints: runtime.world ? runtime.world.impulseJoints.len() : -1, epoch: runtime.epoch }),
   // 物理自检：UI 同路径构造斜面场景，同步步进 5s，验证真实演化（非预录）
   selftest() {
     const prev = cloneDoc(doc);

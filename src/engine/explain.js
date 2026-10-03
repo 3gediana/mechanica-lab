@@ -9,7 +9,9 @@ export function explainRun(plan, doc, series, reports = [], astro = null, rotati
   const hasRamp = doc.entities.some((e) => e.type === 'ramp');
   const hasGrav = doc.entities.some((e) => e.physics.gravitating);
   const hasSpring = doc.entities.some((e) => e.type === 'spring');
+  const hasHinge = doc.entities.some((e) => e.joints && e.joints.some((j) => j.type === 'revolute'));
   const spheres = doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
+  if (hasHinge && series.length > 10 && series[0].rotz !== undefined) return explainHinge(plan, doc, series);
   if (hasSpring && series.length > 10) return explainSpring(plan, doc, series);
   if (doc.kind === 'rotation' && rotation) return explainRotation(plan, doc, rotation);
   if (atwood) return explainAtwood(plan, atwood);
@@ -20,6 +22,70 @@ export function explainRun(plan, doc, series, reports = [], astro = null, rotati
     supported: false,
     reason: hasRamp ? '运行轨迹过短' : '该解析场景不含斜面、两球对撞、引力系统或转台，暂无专用解释器',
     summary: telemetrySummary(series),
+  };
+}
+
+// ---------- 铰链复摆：细杆绕端点 T = 2π√(2L/(3g)) ----------
+function explainHinge(plan, doc, series) {
+  const jdef = doc.entities.find((e) => e.joints && e.joints.some((j) => j.type === 'revolute'));
+  const rod = jdef ? doc.entities.find((e) => e.id === jdef.joints[0].target) : null;   // 摆杆 = joint 的从动体
+  if (!rod) return { supported: false, reason: '铰链解释需要摆杆实体', summary: telemetrySummary(series) };
+  const L = Math.max(rod.params.sx, rod.params.sy, rod.params.sz);   // 杆长（最长维）
+  const g = 9.81;
+  const Ttheory = 2 * Math.PI * Math.sqrt(2 * L / (3 * g));  // 细杆绕端点
+
+  // 实测周期：rotz 序列解 wrap（连续化）+ 3 点滑动平均后，相对摆动中点
+  // 上穿间隔（鲁棒于求解器毛刺与大角 wrap）
+  const TWO_PI = Math.PI * 2;
+  const rawUn = [];
+  let acc = series[0].rotz;
+  rawUn.push(acc);
+  for (let i = 1; i < series.length; i++) {
+    let v = series[i].rotz;
+    while (v - acc > Math.PI) v -= TWO_PI;
+    while (v - acc < -Math.PI) v += TWO_PI;
+    acc = v;
+    rawUn.push(v);
+  }
+  const rs = rawUn.map((_, i) => {
+    const a = rawUn[Math.max(0, i - 1)], b = rawUn[i], c = rawUn[Math.min(rawUn.length - 1, i + 1)];
+    return (a + b + c) / 3;
+  });
+  const mid = (Math.max.apply(null, rs) + Math.min.apply(null, rs)) / 2;   // 摆动中点（不受初始暂态拉偏）
+  const ups = [];
+  for (let i = 1; i < rs.length; i++) {
+    if (rs[i - 1] < mid && rs[i] >= mid) ups.push(i);
+  }
+  console.log('[hinge-dbg] rs=' + rs.map((v) => v.toFixed(2)).join(','));
+  let Tmeasured = null;
+  if (ups.length >= 2) {
+    const dt = (series[series.length - 1].t - series[0].t) / (series.length - 1);
+    Tmeasured = (ups[ups.length - 1] - ups[0]) * dt / (ups.length - 1);
+    console.log('[hinge-dbg] ups n=' + ups.length + ' T=' + Tmeasured.toFixed(3));
+  }
+  const errPct = Tmeasured != null ? Math.abs(Tmeasured - Ttheory) / Ttheory * 100 : null;
+  const pass = errPct != null && errPct < 8;
+  const swing = Math.max(...rs) - Math.min(...rs);
+  const peaks = ups;
+
+  const summary = [
+    `复摆（细杆 L=${L} m 绕端点铰链）：周期理论 T = 2π√(2L/(3g)) = ${Ttheory.toFixed(3)} s。`,
+    Tmeasured != null
+      ? `实测振动周期 ${Tmeasured.toFixed(3)} s（${peaks.length} 个角位置峰），偏差 ${errPct.toFixed(2)}%。`
+      : '运行时长不足两个完整摆动，周期未测出。',
+    `初始摆角摆幅 ${swing.toFixed(3)} rad。`,
+    pass ? '实测周期与复摆公式一致（刚性杆转动惯量 I=ML²/3 的动力学得到验证）。' : '偏差偏大，建议检查铰链轴与初始摆角。',
+  ].join('');
+
+  return {
+    supported: true,
+    kind: 'hinge',
+    simT: series[series.length - 1].t,
+    observation: plan.observations[0] || '复摆振动周期',
+    theoretical: { period: Ttheory, formula: 'T = 2π√(2L/(3g))', L },
+    measured: { period: Tmeasured, peaks: peaks.length, swing },
+    errPct, pass,
+    summary,
   };
 }
 

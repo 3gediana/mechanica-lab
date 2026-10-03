@@ -71,12 +71,12 @@ export function normalizeParse(raw) {
       damping: num(a.damping, [0, 50]),
     })).filter((a) => a.from !== a.to).slice(0, 4) : [],
     joint: raw.joint && typeof raw.joint === 'object' ? {
-      type: 'prismatic',
+      type: raw.joint.type === 'revolute' ? 'revolute' : 'prismatic',
       from: Math.max(0, Number(raw.joint.from) | 0),
       to: Math.max(0, Number(raw.joint.to) | 0),
       axis: Array.isArray(raw.joint.axis) ? raw.joint.axis.map((x) => Number(x)) : [1, 0, 0],
       limits: Array.isArray(raw.joint.limits) ? raw.joint.limits.map((x) => Number(x)) : [0.15, 1.05],
-      anchor1: Array.isArray(raw.joint.anchor1) ? raw.joint.anchor1.map((x) => Number(x)) : [0, 0.14, 0],
+      anchor1: Array.isArray(raw.joint.anchor1) ? raw.joint.anchor1.map((x) => Number(x)) : [0, 0, 0],
       anchor2: Array.isArray(raw.joint.anchor2) ? raw.joint.anchor2.map((x) => Number(x)) : [0, 0, 0],
     } : null,
     entities,                                        // 保留 given 供 UI 标来源
@@ -92,6 +92,40 @@ export function normalizeParse(raw) {
 function str(v, d) { return typeof v === 'string' && v.trim() ? v.trim().slice(0, 80) : d; }
 function strs(v) { return Array.isArray(v) ? v.filter((x) => typeof x === 'string').map((s) => s.slice(0, 120)).slice(0, 8) : []; }
 function clamp01(v) { const n = Number(v); return Number.isFinite(n) ? Math.min(Math.max(n, 0), 1) : null; }
+
+// ---------- 铰链复摆布局：锚点基座 + 刚性杆（近锚端对齐锚点，初始摆角 1.2 rad） ----------
+function hingeLayout(plan) {
+  const out = [];
+  const anchor = plan.entities.find((e) => e.type === 'box');
+  const rod = plan.entities.filter((e) => e.type === 'box')[1];
+  if (!anchor || !rod) return out;
+  const aPos = anchor.given.position ?? [0, 2.5, 0];
+  const L = rod.given.length ?? 1.0;
+  const swing = 0.4;   // 离竖直垂下的初始偏角（小角度，T=2π√(2L/3g) 适用）
+  out.push({
+    type: 'box', name: anchor.name || '铰链基座', source: 'agent',
+    params: { sx: 0.2, sy: 0.2, sz: 0.2 },
+    transform: { pos: [...aPos], rot: [0, 0, 0] },
+    physics: { body: 'fixed', friction: 0.8 },
+    render: { material: 'steelDark' },
+  });
+  out.push({
+    type: 'box', name: rod.name || '摆杆', source: 'agent',
+    params: { sx: L, sy: 0.06, sz: 0.06, noCollide: true },   // 铰链连接体互碰禁用（纯摆）
+    transform: {
+      pos: [aPos[0] + (L / 2) * Math.sin(swing), aPos[1] - (L / 2) * Math.cos(swing), aPos[2] ?? 0],
+      rot: [0, 0, -Math.PI / 2 + swing],
+    },
+    physics: {
+      body: 'dynamic', mass: 1, friction: 0.5, restitution: 0.1,
+      linvel: [0, 0, 0], angvel: [0, 0, 0],
+      linDamping: 0, angDamping: 0, gravityScale: 1,
+    },
+    render: { material: 'wood' },
+    measured: true,
+  });
+  return out;
+}
 
 // ---------- 弹簧振子布局：立柱墙 + 水平理想化小球（拉开 rest+0.4 静止释放，简谐振动） ----------
 // ---------- 阿特伍德布局：滑轮 + 双球（onPulley 指向滑轮 id，应用层已建滑轮后回填） ----------
@@ -200,6 +234,7 @@ function rotationLayout(plan) {
 // 故给 angleDeg 时做换算 base = L·cosθ, height = L·sinθ（球心实际可滑全程 ≠ 全长，解释层处理）。
 export function planToOverrides(plan) {
   if (plan.kind === 'rotation') return rotationLayout(plan);
+  if (plan.kind === 'hinge') return hingeLayout(plan);
   const hasSpringAttach = (plan.attaches || []).some((a) => a.type === 'spring');
   if (plan.kind === 'atwood' || plan.entities.some((e) => e.type === 'pulley')) return atwoodLayout(plan);
   if (hasSpringAttach || plan.kind === 'spring') return springLayout(plan);
