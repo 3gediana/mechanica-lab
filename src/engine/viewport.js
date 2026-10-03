@@ -32,6 +32,9 @@ export class Viewport {
     this._forceArrows = [];      // 受力箭头池：3/实体 = 接触合力(绿)+重力(红)+加速度(青)
     this.tensionsOn = false;     // 绳张力箭头随受力开关
     this._tensionArrows = [];    // 张力箭池：2/绳 = 两端琥珀箭（颜色独立，不与摩擦冲突）
+    this.springsOn = false;      // 弹簧胡克力箭头随受力开关
+    this._springArrows = [];     // 弹力箭池：2/弹簧 = 两端品红箭（第九章「弹力」独立分列）
+    this._jointVizLines = [];    // 约束关系可视化：选中实体的 joint 连线（虚线到 target）
     this._orthoCam = null;
     this.projection = 'persp';
     this._rubber = document.getElementById('rubber');
@@ -173,6 +176,71 @@ export class Viewport {
   forceArrowStats() {
     return { total: this._forceArrows.length, visible: this._forceArrows.filter((a) => a.visible).length };
   }
+
+  // ============ 弹簧胡克力箭头（专属品红箭池，与张力琥珀区分） ============
+  setSpringArrows(on) {
+    this.springsOn = on;
+    for (const a of this._springArrows) a.visible = false;
+  }
+
+  // items: [{aPos, bPos, fA}] fA = A 端弹力向量（拉伸>0 指向 B；B 端取反；F=k·|Δx|，阻尼力不画）
+  updateSpringArrows(items) {
+    if (!this.springsOn) return;
+    const need = items.length * 2;
+    while (this._springArrows.length < need) {
+      const a = new THREE.ArrowHelper(new THREE.Vector3(0, -1, 0), new THREE.Vector3(), 0.4, 0xc7559a, 0.08, 0.05);
+      this.scene.add(a);
+      this._springArrows.push(a);
+    }
+    let ai = 0;
+    for (const it of items) {
+      const mag = Math.hypot(it.fA[0], it.fA[1], it.fA[2]);
+      const ends = [[it.aPos, it.fA], [it.bPos, [-it.fA[0], -it.fA[1], -it.fA[2]]]];
+      for (const [pos, f] of ends) {
+        const a = this._springArrows[ai++];
+        if (mag > 0.05) {
+          a.visible = true;
+          a.position.set(...pos);
+          a.setDirection(new THREE.Vector3(f[0], f[1], f[2]).normalize());
+          a.setLength(Math.min(0.12 + mag * 0.05, 1.4), 0.08, 0.05);
+        } else {
+          a.visible = false;
+        }
+      }
+    }
+    for (; ai < this._springArrows.length; ai++) this._springArrows[ai].visible = false;
+  }
+
+  springArrowStats() {
+    return { total: this._springArrows.length, visible: this._springArrows.filter((a) => a.visible).length };
+  }
+
+  // ============ 约束关系可视化：选中实体的 joint 连线（编辑/运行态都画） ============
+  // items: [{from:[x,y,z], to:[x,y,z], ok:true}] —— ok=false 表示 target 缺失（画到自身上方示警）
+  updateJointViz(items) {
+    const want = items.length;
+    while (this._jointVizLines.length < want) {
+      const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+      const mat = new THREE.LineDashedMaterial({ color: 0x7ba7d9, dashSize: 0.06, gapSize: 0.04, transparent: true, opacity: 0.85 });
+      const line = new THREE.Line(geo, mat);
+      line.renderOrder = 5;
+      this.scene.add(line);
+      this._jointVizLines.push(line);
+    }
+    this._jointVizLines.forEach((line, i) => {
+      if (i >= want) { line.visible = false; return; }
+      const it = items[i];
+      const pts = it.ok
+        ? [new THREE.Vector3(...it.from), new THREE.Vector3(...it.to)]
+        : [new THREE.Vector3(...it.from), new THREE.Vector3(it.from[0], it.from[1] + 0.5, it.from[2])];
+      line.geometry.setFromPoints(pts);
+      line.computeLineDistances();
+      line.material.color.setHex(it.ok ? 0x7ba7d9 : 0xc96a5a);
+      line.visible = true;
+    });
+  }
+
+  jointVizCount() { return this._jointVizLines.filter((l) => l.visible).length; }
 
   // ============ 绳张力箭头（专门箭池：琥珀，避免与摩擦力颜色语义冲突） ============
   setTensionArrows(on) {

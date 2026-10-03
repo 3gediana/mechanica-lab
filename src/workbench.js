@@ -665,6 +665,20 @@ function renderOutline() {
       if (mesh) mesh.mesh.userData.locked = e.locked;   // opUpdate 后 e.locked 即新值
     };
     row.querySelector('.ty').textContent = c.label;
+    // 约束关系徽标：joint（prismatic/revolute 滑槽/转轴）与连接（rope/spring）计数
+    const nJ = (e.joints || []).length;
+    const nL = Array.isArray(e.attach) && e.attach.length === 2 ? 1 : 0;
+    const nT = doc.entities.filter((x) => (x.joints || []).some((j) => j.target === e.id)
+      || (Array.isArray(x.attach) && x.attach.includes(e.id))).length;
+    const nCons = nJ + nL + nT;
+    if (nCons > 0) {
+      const cb = document.createElement('span');
+      cb.className = 'cons-badge';
+      cb.title = `约束关系 ${nCons} 条（含被连接）`;
+      cb.textContent = '⌁' + nCons;
+      cb.style.cssText = 'font-size:9px;color:var(--accent);margin-left:2px';
+      row.querySelector('.ty').after(cb);
+    }
     row.onclick = () => selectEntity(e.id);
     row.querySelector('.del').onclick = (ev) => { ev.stopPropagation(); opRemoveEntity(e.id); };
     box.appendChild(row);
@@ -894,6 +908,7 @@ function triRow(parent, label, unit, values, step, onCommit) {
 // ============ 教学叠加层：速度向量 + 轨迹线 + 守恒量条 ============
 let vectorsOn = false;
 let forcesOn = false;
+let springForceItems = [];   // 最近一次弹簧胡克力采样（springForceState 数值对照用）
 let trailsOn = false;
 let consOn = false;
 let curvesOn = false;
@@ -908,10 +923,10 @@ function setVectors(on) {
 function setForces(on) {
   forcesOn = on;
   viewport.setForceArrows(on, viewport.decompose);
-  if (on) viewport.setTensionArrows(true);   // 有绳时张力箭头随受力开
+  if (on) { viewport.setTensionArrows(true); viewport.setSpringArrows(true); }   // 有绳/弹簧时张力/弹力箭头随受力开
   $('btnForces').classList.toggle('hot', on);
   $('btnDecompose').disabled = !on;
-  if (!on) viewport.setTensionArrows(false);
+  if (!on) { viewport.setTensionArrows(false); viewport.setSpringArrows(false); springForceItems = []; }
 }
 function posBtoArray(id) {
   const b = runtime.binds.get(id);
@@ -1417,6 +1432,50 @@ function tick() {
       }
       viewport.updateTensionArrows(tItems);
     }
+    // 弹簧胡克力箭头（第九章「弹力」独立分列）：F = k·|Δx| 沿轴，拉=指向对方、压=推离；
+    // 阻尼力不画（弹力语义=胡克项）；数据同时供 springForceState 数值对照
+    if (viewport.springsOn) {
+      const sItems = [];
+      for (const e of doc.entities) {
+        if (e.type !== 'spring' || !Array.isArray(e.attach) || e.attach.length !== 2) continue;
+        const ba = runtime.binds.get(e.attach[0]), bb = runtime.binds.get(e.attach[1]);
+        if (!ba || !bb || !ba.mesh || !bb.mesh) continue;
+        const pa = ba.mesh.position, pb = bb.mesh.position;
+        const dx = pb.x - pa.x, dy = pb.y - pa.y, dz = pb.z - pa.z;
+        const len = Math.hypot(dx, dy, dz) || 1e-9;
+        const rest = e.params.restLength ?? 0.8;
+        const k = e.params.stiffness ?? 20;
+        const stretch = len - rest;
+        const F = k * stretch;
+        const ux = dx / len, uy = dy / len, uz = dz / len;
+        sItems.push({
+          aPos: pa.toArray(), bPos: pb.toArray(),
+          fA: [F * ux, F * uy, F * uz],
+          k, len, stretch, F,
+          aName: ba.entity.name, bName: bb.entity.name,
+        });
+      }
+      viewport.updateSpringArrows(sItems);
+      springForceItems = sItems;
+    }
+  }
+  // 约束关系可视化：选中实体的 joints 连线（编辑/运行态均显示；多选也画）
+  {
+    const jItems = [];
+    for (const id of selectedIds.length ? selectedIds : (selectedId ? [selectedId] : [])) {
+      const e = getEntity(doc, id);
+      const b = runtime.binds.get(id);
+      if (!e || !b || !b.mesh) continue;
+      for (const j of (e.joints || [])) {
+        const tb = runtime.binds.get(j.target);
+        jItems.push({
+          from: b.mesh.position.toArray(),
+          to: tb && tb.mesh ? tb.mesh.position.toArray() : b.mesh.position.toArray(),
+          ok: !!tb,
+        });
+      }
+    }
+    viewport.updateJointViz(jItems);
   }
   if (trailsOn) viewport.updateTrails(runtime.trails);
   const nRep = runtime.collisionReports.length;
@@ -2372,6 +2431,7 @@ window.MECH = {
   },
   state: () => ({ mode, paused, simT: runtime.simT, timeScale, count: doc.entities.length, fixedH: FIXED_H }),
   telemetry: (id) => runtime.telemetry(id || selectedId),
+  accel: (id) => runtime.accels.get(id || selectedId) || null,
   collisions: () => [...runtime.collisions],
   agentState: () => ({
     hasPlan: !!agentPlan,    fixture: agentPlan ? agentPlan.fixture : null,
@@ -2392,6 +2452,11 @@ window.MECH = {
   impactCount: () => viewport.impactCount(),
   tensionState: () => ({ on: viewport.tensionsOn, ...viewport.tensionStats() }),
   forceState: () => ({ on: forcesOn, decompose: viewport.decompose, normals: runtime.contactNormals.size, ...viewport.forceArrowStats() }),
+  springForceState: () => ({
+    on: viewport.springsOn, ...viewport.springArrowStats(),
+    springs: springForceItems.map((s) => ({ k: s.k, len: +s.len.toFixed(4), stretch: +s.stretch.toFixed(4), F: +s.F.toFixed(4), a: s.aName, b: s.bName })),
+  }),
+  jointVizState: () => ({ lines: viewport.jointVizCount() }),
   forceDecompose: (id) => {
     // 斜面场景支持力/摩擦力数值（理论对照：N=mg·cosθ, f=μN 或实测差分）
     const b = runtime.binds.get(id || selectedId);
