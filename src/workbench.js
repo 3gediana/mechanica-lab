@@ -861,13 +861,19 @@ function renderInspector() {
   const c = registry.getComponent(e.type);
   const dis = mode === 'run';
 
-  // 传感器读数（速度传感器/计时器）：运行态实时显示
-  if ((e.type === 'speedSensor' || e.type === 'timer') && Array.isArray(e.attach) && e.attach.length === 1) {
+  // 传感器读数（速度/计时/力）：运行态实时显示
+  if ((e.type === 'speedSensor' || e.type === 'timer' || e.type === 'forceSensor') && Array.isArray(e.attach) && e.attach.length === 1) {
     const rec = runtime.sensorReadings.get(e.id) || {};
     const rows = [];
     if (e.type === 'speedSensor') {
       rows.push(['目标速度', rec.speed != null ? rec.speed.toFixed(3) + ' m/s' : '等待运行']);
       if (rec.speed != null) rows.push(['分量 vx/vy/vz', [rec.vx, rec.vy, rec.vz].map((v) => v.toFixed(2)).join(' / ') + ' m/s']);
+    } else if (e.type === 'forceSensor') {
+      rows.push(['目标接触合力', rec.fmag != null ? rec.fmag.toFixed(3) + ' N' : '等待运行']);
+      if (rec.f != null) {
+        rows.push(['竖直分量 Fy', rec.fy.toFixed(3) + ' N']);
+        rows.push(['分量 Fx/Fy/Fz', rec.f.map((v) => v.toFixed(2)).join(' / ') + ' N']);
+      }
     } else {
       rows.push(['光门状态', rec.crossedT != null ? `已通过 t=${rec.crossedT.toFixed(3)} s` : '等待穿过…']);
     }

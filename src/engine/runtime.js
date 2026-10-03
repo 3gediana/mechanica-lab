@@ -630,11 +630,11 @@ export class Runtime {
     return null;
   }
 
-  // ============ 传感器读数（速度传感器/计时器）：读数存 runtime 不进文档 ============
+  // ============ 传感器读数（速度/计时/力）：读数存 runtime 不进文档 ============
   _syncSensors() {
     for (const b of this.binds.values()) {
       const e = b.entity;
-      if (e.type !== 'speedSensor' && e.type !== 'timer') continue;
+      if (e.type !== 'speedSensor' && e.type !== 'timer' && e.type !== 'forceSensor') continue;
       if (!Array.isArray(e.attach) || e.attach.length !== 1) continue;
       const t = this.binds.get(e.attach[0]);
       if (!t || !t.body) continue;
@@ -646,6 +646,18 @@ export class Runtime {
         rec.speed = Math.hypot(v.x, v.y, v.z);
         rec.vx = v.x; rec.vy = v.y; rec.vz = v.z;
         rec.targetPos = [p.x, p.y, p.z];
+        rec.simT = this.simT;
+      } else if (e.type === 'forceSensor') {
+        // 接触合力取本步受力差分结果（step 内 contactForces 先于 _syncMeshes 更新），
+        // 补回被差分误计入的线阻尼力 F_d = −m·d·v（阻尼非接触力）：
+        // 静止 v=0 读数不变；自由飞行修正后精确归 0（失重演示）
+        const f0 = this.contactForces.get(e.attach[0]);
+        if (f0) {
+          const m = t.body.mass();
+          const d = t.entity.physics.linDamping || 0;
+          const f = [f0[0] + m * d * v.x, f0[1] + m * d * v.y, f0[2] + m * d * v.z];
+          rec.f = f; rec.fmag = Math.hypot(f[0], f[1], f[2]); rec.fy = f[1];
+        }
         rec.simT = this.simT;
       } else {
         // 计时器光门：运行开始后，目标体首次穿过光门所在 x 平面（±0.15 容差）的时刻

@@ -332,6 +332,18 @@ export const COMPONENTS = {
     isSensor: true,
   },
 
+  forceSensor: {
+    id: 'forceSensor', label: '力传感器', category: '测量和教学',
+    desc: '绑定一个动态体，实时读其所受接触合力（支持力+摩擦力，固定、无碰撞）',
+    compat: '需先选一个动态实体：静止称重读 mg，自由飞行读 0（失重演示）',
+    defaults: { params: { }, physics: { body: 'fixed', mass: 0, friction: 0.4, restitution: 0.2, linvel: [0, 0, 0], angvel: [0, 0, 0], linDamping: 0.05, angDamping: 0.05, gravityScale: 1 }, render: { material: 'brass' } },
+    schema: [],
+    buildGeometry: () => new THREE.CylinderGeometry(0.14, 0.14, 0.05, 24),
+    buildCollider: () => null,
+    spawnY: () => 0.03,
+    isSensor: true,                      // 放置语义：选 1 个动态体绑定
+  },
+
   ruler: {
     id: 'ruler', label: '测量尺', category: '测量和教学',
     desc: '带刻度横尺（固定、无碰撞）：量两实体间距，检查器实时读长度',
