@@ -196,6 +196,29 @@ function updateOutlineSelection() {
 // ============ 实体操作（UI 与 Agent 共用） ============
 function opAddComponent(typeId, overrides = {}) {
   const c = registry.getComponent(typeId);
+  // 测量类（测量尺）：两实体语义（同 isLink），产静态测量标注（无 joint）
+  if (c.isMeasure) {
+    let attach = overrides.attach || null;
+    if (!attach) {
+      if (selectedIds.length !== 2) { toast('先选中两个实体，再添加' + c.label); return null; }
+      attach = [...selectedIds];
+    }
+    const ea = getEntity(doc, attach[0]), eb = getEntity(doc, attach[1]);
+    if (!ea || !eb) { toast('测量目标不存在'); return null; }
+    const pa = ea.transform.pos, pb = eb.transform.pos;
+    const len = Math.hypot(pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]);
+    const e = registry.createEntity(typeId, {
+      name: `${c.label} ${len.toFixed(2)}m`,
+      attach, source: overrides.source || 'user',
+      transform: { pos: [(pa[0] + pb[0]) / 2, (pa[1] + pb[1]) / 2 + 0.15, (pa[2] + pb[2]) / 2] },
+    });
+    addEntity(doc, e);
+    rebuildAll();
+    commitChange('添加 ' + c.label);
+    selectEntity(e.id);
+    noteRecentUse(typeId);
+    return e.id;
+  }
   // 连接类（绳/弹簧）：需选中两个实体，自动按当前距离定长
   if (c.isLink) {
     let attach = overrides.attach || null;
@@ -582,7 +605,15 @@ function addCatalogRow(box, c, faved = false) {
   fav.style.color = faved ? 'var(--accent)' : 'var(--faint)';
   fav.onclick = (ev) => { ev.stopPropagation(); toggleFavorite(c.id); };
   row.querySelector('.nm').textContent = c.label;
-  row.title = c.desc;
+  // 兼容性提示（Goal 第六章目录条文）：物理行为/放置要求进 tooltip + 两实体类徽标
+  row.title = c.desc + (c.compat ? '\n【兼容性】' + c.compat : '');
+  if (c.isLink || c.isMeasure) {
+    const badge = document.createElement('span');
+    badge.className = 'need2';
+    badge.textContent = '需两实体';
+    badge.style.cssText = 'font-size:8px;color:var(--accent);border:1px solid rgba(217,164,65,.4);padding:0 3px;border-radius:2px;margin-right:2px;white-space:nowrap';
+    row.querySelector('.nm').before(badge);
+  }
   row.onclick = () => { viewport.hideGhost(); opAddComponent(c.id); };
   // ghost preview（Round 27 修复：此前 showGhost 从未被调用=死代码）。
   // sticky 语义：hover 选中组件后 ghost 持续跟随鼠标（吸附档位联动），
@@ -811,6 +842,21 @@ function renderInspector() {
   box.innerHTML = '';
   const c = registry.getComponent(e.type);
   const dis = mode === 'run';
+
+  // 测量尺：实时两端点距离（运行/编辑态均可读）
+  if (e.type === 'ruler' && Array.isArray(e.attach) && e.attach.length === 2) {
+    const ba = runtime.binds.get(e.attach[0]), bb = runtime.binds.get(e.attach[1]);
+    if (ba?.mesh && bb?.mesh) {
+      const d = ba.mesh.position.distanceTo(bb.mesh.position);
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--line);font-size:12px';
+      const k = document.createElement('span'); k.textContent = '两端点距离'; k.style.color = 'var(--dim)';
+      const v = document.createElement('span'); v.textContent = d.toFixed(3) + ' m';
+      v.style.cssText = 'font-family:var(--mono);color:var(--accent)';
+      row.append(k, v);
+      box.appendChild(row);
+    }
+  }
 
   // 头部：名称 + 可见 + 类型/来源
   const head = document.createElement('div');

@@ -98,6 +98,7 @@ export const COMPONENTS = {
   sphere: {
     id: 'sphere', label: '球', category: '基础物体',
     desc: '均质球体，可滚动、碰撞、弹跳',
+    compat: '自由刚体，可设初速度/角速度；支持滚阻(rollResist)；可被绳/弹簧连接',
     defaults: { params: { radius: 0.15 }, physics: defaultPhysics('dynamic', 1), render: { material: 'chrome' } },
     schema: [
       { key: 'radius', label: '半径', unit: 'm', min: 0.01, max: 2, step: 0.01 },
@@ -112,6 +113,7 @@ export const COMPONENTS = {
   box: {
     id: 'box', label: '方块', category: '基础物体',
     desc: '长方体，可滑动、倾翻、堆叠',
+    compat: '固定或动态块体；可作斜面台座；可被绳/弹簧连接',
     defaults: { params: { sx: 0.3, sy: 0.3, sz: 0.3 }, physics: defaultPhysics('dynamic', 2), render: { material: 'wood' } },
     schema: [
       { key: 'sx', label: '长', unit: 'm', min: 0.02, max: 10, step: 0.01 },
@@ -127,6 +129,7 @@ export const COMPONENTS = {
   cylinder: {
     id: 'cylinder', label: '圆柱', category: '基础物体',
     desc: '直立圆柱，可滚动（放倒时）、碰撞；spokes>0 时带辐条（转台演示，转动可见）',
+    compat: '可滚动/绕轴转（转台用 spokes 可视化）；支持 spinLock 理想轴承',
     defaults: { params: { radius: 0.12, height: 0.3, spokes: 0 }, physics: defaultPhysics('dynamic', 1.5), render: { material: 'brass' } },
     schema: [
       { key: 'radius', label: '半径', unit: 'm', min: 0.01, max: 2, step: 0.01 },
@@ -159,6 +162,7 @@ export const COMPONENTS = {
   ramp: {
     id: 'ramp', label: '斜坡', category: '表面与结构',
     desc: '三角棱柱斜面，固定后供物体下滑（默认固定）',
+    compat: '默认固定斜面；与球/块摩擦成对生效（取 min）',
     defaults: { params: { length: 1.6, height: 0.8, width: 0.5 }, physics: defaultPhysics('fixed', 0), render: { material: 'marble' } },
     schema: [
       { key: 'length', label: '坡长', unit: 'm', min: 0.1, max: 12, step: 0.05 },
@@ -183,6 +187,7 @@ export const COMPONENTS = {
   ground: {
     id: 'ground', label: '地面板', category: '表面与结构',
     desc: '大平面承接板（默认固定），供物体落上反弹滑动',
+    compat: '大承接板（固定）；与所有动态体碰撞',
     defaults: { params: { sx: 12, sy: 0.1, sz: 12 }, physics: { ...defaultPhysics('fixed', 0), friction: 0.6, restitution: 0.3 }, render: { material: 'steelDark' } },
     schema: [
       { key: 'sx', label: '长', unit: 'm', min: 0.5, max: 60, step: 0.5 },
@@ -198,6 +203,7 @@ export const COMPONENTS = {
   hinge: {
     id: 'hinge', label: '铰链', category: '绳和约束',
     desc: '连接两实体的转轴关节（绕轴相对转动）；选中基座与摆臂后添加，铰链位置吸附到臂端',
+    compat: '需选两个实体：固定锚点+摆杆（revolute 转轴）',
     defaults: { params: { }, physics: defaultPhysics('fixed', 0), render: { material: 'brass' } },
     schema: [],
     buildGeometry: () => new THREE.CylinderGeometry(0.035, 0.035, 0.16, 16),   // 轴柱视觉，置于锚点
@@ -210,6 +216,7 @@ export const COMPONENTS = {
   pulley: {
     id: 'pulley', label: '定滑轮', category: '绳和约束',
     desc: '定滑轮（固定轴承）：跨绳两侧挂 onPulley 小球可演示阿特伍德机张力与加速度',
+    compat: '定滑轮（固定、无碰撞体）；配合 onPulley 两球做阿特伍德',
     defaults: { params: { radius: 0.3 }, physics: defaultPhysics('fixed', 0), render: { material: 'brass' } },
     schema: [
       { key: 'radius', label: '半径', unit: 'm', min: 0.1, max: 1.5, step: 0.05 },
@@ -222,6 +229,7 @@ export const COMPONENTS = {
   rope: {
     id: 'rope', label: '绳', category: '绳和约束',
     desc: '连接两个实体的轻绳（仅拉不推）；先选中两个实体再点目录添加，或由解析自动连接',
+    compat: '需先选两个实体：按当前距离定长（超长张紧）',
     defaults: { params: { length: 0 }, physics: defaultPhysics('fixed', 0), render: { material: 'steelDark' } },
     schema: [
       { key: 'length', label: '绳长', unit: 'm', min: 0.05, max: 20, step: 0.05 },
@@ -235,6 +243,7 @@ export const COMPONENTS = {
   spring: {
     id: 'spring', label: '弹簧', category: '绳和约束',
     desc: '连接两个实体的线性弹簧（胡克定律 F=-k·Δx）；可演示简谐振动',
+    compat: '需先选两个实体：胡克定律 F=-k·Δx，可设原长/阻尼',
     defaults: { params: { stiffness: 20, restLength: 0.8, damping: 0.5 }, physics: defaultPhysics('fixed', 0), render: { material: 'brass' } },
     schema: [
       { key: 'stiffness', label: '劲度系数', unit: 'N/m', min: 0.5, max: 5000, step: 0.5 },
@@ -250,6 +259,7 @@ export const COMPONENTS = {
   track: {
     id: 'track', label: '管道轨道', category: '轨道和曲面',
     desc: '半管滑道+竖直环轨（中心线解析约束，光滑无摩擦；球体设 onTrack 沿轨滑行）',
+    compat: '固定滑道；球设 onTrack 沿中心线滑行（光滑）',
     defaults: { params: { arcFraction: 0.61 }, physics: defaultPhysics('fixed', 0), render: { material: 'marble' } },
     schema: [
       { key: 'arcFraction', label: '开口比', unit: '', min: 0.3, max: 0.9, step: 0.01 },
@@ -262,6 +272,7 @@ export const COMPONENTS = {
   celestial: {
     id: 'celestial', label: '天体', category: '天体',
     desc: '参与成对引力作用的球状天体（不受世界重力，physics.gravitating）',
+    compat: '参与成对引力（场景 G）；不与世界重力作用',
     // 渲染半径与引力质量分离：radius 只是视觉/碰撞尺寸，mass 才是引力质量（物理实体与视觉实体分离）
     defaults: {
       params: { radius: 0.5 },
@@ -280,7 +291,51 @@ export const COMPONENTS = {
     spawnY: (p) => p.radius,
     inertiaY: (p, m) => 0.4 * m * p.radius * p.radius,
   },
+
+  marker: {
+    id: 'marker', label: '关键点标记', category: '测量和教学',
+    desc: '竖直小旗标注（固定、无碰撞）：标出题目关键点/初始位置等教学标注',
+    compat: '纯视觉教学标注（固定、无碰撞、不参与物理与测量计算）',
+    defaults: { params: { height: 0.42 }, physics: { body: 'fixed', mass: 0, friction: 0.4, restitution: 0.2, linvel: [0, 0, 0], angvel: [0, 0, 0], linDamping: 0.05, angDamping: 0.05, gravityScale: 1 }, render: { material: 'brass' } },
+    schema: [
+      { key: 'height', label: '旗杆高', unit: 'm', min: 0.1, max: 2, step: 0.02 },
+    ],
+    buildGeometry: (p) => new THREE.CylinderGeometry(0.012, 0.012, p.height, 8),
+    makeMesh: (p, material) => markerGroup(p.height, material),
+    buildCollider: () => null,           // 纯标注：无碰撞体
+    spawnY: (p) => p.height / 2,
+  },
+
+  ruler: {
+    id: 'ruler', label: '测量尺', category: '测量和教学',
+    desc: '带刻度横尺（固定、无碰撞）：量两实体间距，检查器实时读长度',
+    compat: '需先选两个实体：尺自动放两端点之间，检查器实时显示间距',
+    defaults: { params: { }, physics: { body: 'fixed', mass: 0, friction: 0.4, restitution: 0.2, linvel: [0, 0, 0], angvel: [0, 0, 0], linDamping: 0.05, angDamping: 0.05, gravityScale: 1 }, render: { material: 'wood' } },
+    schema: [],
+    buildGeometry: () => rulerGeometry(),
+    buildCollider: () => null,
+    spawnY: () => 0.02,
+    isMeasure: true,                     // 放置语义同 isLink（选两实体），但产的是测量标注
+  },
 };
+
+function markerGroup(height, material) {
+  // 旗：细杆 + 三角旗面（Group：杆用组件材质，旗面固定警示色）
+  const g = new THREE.Group();
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, height, 8), material);
+  pole.position.y = height / 2;
+  const flag = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.18, 3),
+    new THREE.MeshStandardMaterial({ color: 0xc96a5a, roughness: 0.5 }));
+  flag.position.y = height - 0.06;
+  flag.rotation.z = -Math.PI / 2;
+  g.add(pole, flag);
+  return g;
+}
+
+function rulerGeometry() {
+  // 单位尺：1m 长横杆（放置时按两端点拉伸，runtime _syncLinks 同语义）
+  return new THREE.BoxGeometry(1, 0.03, 0.06);
+}
 
 // 绕 y 轴自转动惯量（rotation 模式守恒量；未定义的组件返回 0）
 export function inertiaYOf(typeId, params, mass) {

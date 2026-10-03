@@ -117,7 +117,12 @@
 ## 结论
 
 Goal 十五的**基础工作台、Agent 闭环、教学场景（三大预置+classic）、教学可视化主干、UI 主干**均已完成并有真实验收证据。
-剩余：无 P3 体验项与物理深化项挂账（GAP-MATRIX 全清）。后续为打磨/扩展方向（组件兼容性提示、测量器类组件、二维碰撞等 Goal 建议项）。
+剩余：无挂账。剩余建议扩展项：二维碰撞（第八章「条件允许时再扩展」）、更多测量器（计时器/力传感器等）、组件缩略图网格化布局。
+
+**Round 28 收口**：~~组件和约束兼容性提示~~ ✅（Goal 第六章目录条文最后一项：registry 全组件 compat 字段——物理行为/放置要求，目录 tooltip 加【兼容性】段，isLink/isMeasure 卡片带「需两实体」徽标，单实体误点 toast 拒绝）；
+~~测量和教学类组件~~ ✅（第五章实体类型补代表：marker 关键点标记（旗标，固定无碰撞纯标注）+ ruler 测量尺（两实体放置、runtime 每帧跟随两端点摆放、检查器实时读两端点距离、名称带初距）；「测量和教学」分类落地）。
+**Round 28 过程修复**：python patch 把 '
+' 转义写成真实换行致 workbench 字符串断行（浏览器 Invalid token 但 node --check 过——转义要用 chr(92) 显式构造）；marker 首版 buildGeometry 返回 Group 走错 Mesh 分支（改 makeMesh，同 cylinder 先例）。
 
 **Round 27 收口**：~~ghost 吸附细化~~ ✅（ghost 与吸附档位同源联动：endpoint/surface/center 实体吸附+琥珀标记环、grid 0.5m 网格吸附；sticky 语义=hover 选中后持续跟随直到点击放置/换选；MECH.ghostState）；
 ~~滚动摩擦模型细化~~ ✅（线性减速近似 → 滚阻矩 τ=μr·N·r 与转动惯量耦合 α=τ/I（N=m|g|gs 法向、registry inertiaY 形状因子），解析对照 Δv=0.7358 vs 理论 0.7358 四位吻合；p24 9/9）。

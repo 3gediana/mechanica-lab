@@ -630,6 +630,19 @@ export class Runtime {
 
   _syncLinks() {
     for (const b of this.binds.values()) {
+      // 测量尺：两端点间摆放（x 轴向拉伸 + 对齐），纯测量标注不建 joint
+      if (b.entity.type === 'ruler' && Array.isArray(b.entity.attach) && b.entity.attach.length === 2 && b.mesh) {
+        const a = this.binds.get(b.entity.attach[0]), c = this.binds.get(b.entity.attach[1]);
+        if (a && c && a.mesh && c.mesh) {
+          const pa = a.mesh.position, pc = c.mesh.position;
+          const dir = new THREE.Vector3().subVectors(pc, pa);
+          const len = Math.max(dir.length(), 1e-3);
+          b.mesh.position.copy(pa).addScaledVector(dir, 0.5);
+          b.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), dir.normalize());
+          b.mesh.scale.set(len, 1, 1);
+        }
+        continue;
+      }
       if (!b.isLink) continue;
       if (b.linkStatic) {                            // 铰链轴柱：固定在自身位置
         b.mesh.position.fromArray(b.entity.transform.pos);
