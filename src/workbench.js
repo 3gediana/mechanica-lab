@@ -13,6 +13,7 @@ import { getPreset } from './engine/presets.js';
 import { createMaterials } from './materials.js';
 import { normalizeParse, planToOverrides } from './engine/parse-schema.js';
 import { explainRun } from './engine/explain.js';
+import { renderThumb } from './engine/thumbs.js';
 
 const $ = (id) => document.getElementById(id);
 const veil = $('veil'), veilStatus = $('veilStatus'), errbar = $('errbar');
@@ -567,7 +568,11 @@ function onKey(e) {
 function addCatalogRow(box, c, faved = false) {
   const row = document.createElement('div');
   row.className = 'comp-item';
-  row.innerHTML = `<span class="fav" title="收藏/取消收藏"></span><span class="nm"></span><span class="plus">+</span>`;
+  row.innerHTML = `<img class="thumb" alt=""><span class="fav" title="收藏/取消收藏"></span><span class="nm"></span><span class="plus">+</span>`;
+  // 缩略图：按组件真实几何离屏渲染（失败时隐藏 img，卡片退化为纯文字）
+  const url = renderThumb(registry.getComponent(c.id), M);
+  const img = row.querySelector('.thumb');
+  if (url) img.src = url; else img.style.display = 'none';
   const fav = row.querySelector('.fav');
   fav.textContent = faved ? '已藏' : '收';
   fav.style.color = faved ? 'var(--accent)' : 'var(--faint)';
