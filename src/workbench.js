@@ -1555,6 +1555,7 @@ function bindAgentPanel() {
     fileInput.value = '';
   };
   $('btnParse').onclick = () => parseQuestion();
+  $('btnParseText').onclick = () => parseTextQuestion();
   $('btnFixtureParse').onclick = () => loadFixtureParse();
   $('btnApplyParse').onclick = () => applyAgentPlan();
   $('btnClearParse').onclick = () => { resetAgentPanel(); };
@@ -1733,6 +1734,18 @@ function setParseStatus(msg, isErr = false, busy = false) {
   $('btnParse').disabled = busy;
 }
 
+// 服务端解析结果采纳（图片/文字通道共用）：normalize → 渲染 → 变更预览
+function adoptServerParse(out) {
+  const n = normalizeParse(out.parse);
+  if (!n.ok) { setParseStatus('解析结果无效：' + n.errors.join('; '), true); return false; }
+  agentPlan = n.plan;
+  agentCorrections = [];
+  renderParseResult(n.errors);
+  setAgentStage('parsed', '解析完成，检查/修正后创建实体');
+  setParseStatus('解析完成。请检查/修正下方各项后再创建实体');
+  return true;
+}
+
 async function parseQuestion() {
   if (!agentImageDataUrl) { setParseStatus('请先上传或拍照题目图片', true); return; }
   const send = croppedCanvas();
@@ -1748,15 +1761,32 @@ async function parseQuestion() {
     });
     const out = await resp.json();
     if (!out.ok) { setAgentStage('error', '解析失败'); setParseStatus('解析失败：' + out.error + '（可重试，或用下方示例数据）', true); return; }
-    const n = normalizeParse(out.parse);
-    if (!n.ok) { setParseStatus('解析结果无效：' + n.errors.join('; '), true); return; }
-    agentPlan = n.plan;
-    agentCorrections = [];
-    renderParseResult(n.errors);
-    setAgentStage('parsed', '解析完成，检查/修正后创建实体');
-    setParseStatus('解析完成。请检查/修正下方各项后再创建实体');
+    adoptServerParse(out);
   } catch (e) {
     setParseStatus('解析请求失败（网络或服务不可用）。可重试，或用下方示例数据', true);
+  }
+}
+
+// 文字要求通道（混合搭建）：文字 → 真实模型解析 → 与图片通道同一条评审/预览/建场链路
+async function parseTextQuestion() {
+  const text = $('agentTextReq').value.trim();
+  if (!text) { setParseStatus('请先输入题目或搭建要求的文字', true); return; }
+  setAgentStage('parsing', '正在解析文字要求…');
+  setParseStatus('正在解析文字要求（step-5-preview）…', false, true);
+  try {
+    const resp = await fetch('/api/parse-text', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    const out = await resp.json();
+    if (!out.ok) { setAgentStage('error', '解析失败'); setParseStatus('解析失败：' + out.error + '（可重试）', true); return; }
+    if (adoptServerParse(out)) {
+      $('parseSrcBadge').textContent = 'step-5-preview·文字';
+      setParseStatus('文字要求解析完成（真实模型）。请检查/修正/勾选变更后再创建实体');
+    }
+  } catch (e) {
+    setParseStatus('解析请求失败（网络或服务不可用）。可重试', true);
   }
 }
 

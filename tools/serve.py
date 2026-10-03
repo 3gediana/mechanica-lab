@@ -94,18 +94,13 @@ def _extract_json(text):
     raise json.JSONDecodeError("no extractable JSON", text[:60], 0)
 
 
-def call_step(data_url):
+def call_step_messages(messages):
+    """共用请求+提取链：图片通道与文字通道唯一差异是 messages。"""
     body = json.dumps({
         "model": STEP_MODEL,
         "temperature": 0.2,
         "max_tokens": 8192,
-        "messages": [{
-            "role": "user",
-            "content": [
-                {"type": "image_url", "image_url": {"url": data_url}},
-                {"type": "text", "text": PARSE_PROMPT},
-            ],
-        }],
+        "messages": messages,
     }).encode("utf-8")
     req = urllib.request.Request(STEP_URL, data=body, method="POST", headers={
         "Content-Type": "application/json",
@@ -140,6 +135,24 @@ def call_step(data_url):
     raise json.JSONDecodeError("empty content and reasoning", "", 0)
 
 
+def call_step(data_url):
+    return call_step_messages([{
+        "role": "user",
+        "content": [
+            {"type": "image_url", "image_url": {"url": data_url}},
+            {"type": "text", "text": PARSE_PROMPT},
+        ],
+    }])
+
+
+def call_step_text(text):
+    """文字要求通道（混合搭建）：题目文字或搭建要求，同一 schema 输出。"""
+    return call_step_messages([{
+        "role": "user",
+        "content": PARSE_PROMPT + "\n\n题目/搭建要求（文字输入）：\n" + text,
+    }])
+
+
 class H(http.server.SimpleHTTPRequestHandler):
     extensions_map = {**http.server.SimpleHTTPRequestHandler.extensions_map,
                       ".mjs": "text/javascript", ".wasm": "application/wasm"}
@@ -157,7 +170,7 @@ class H(http.server.SimpleHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_POST(self):
-        if self.path != "/api/parse-question":
+        if self.path not in ("/api/parse-question", "/api/parse-text"):
             self._json(404, {"ok": False, "error": "未知接口"})
             return
         if not load_key():
@@ -166,22 +179,32 @@ class H(http.server.SimpleHTTPRequestHandler):
         try:
             n = int(self.headers.get("Content-Length", "0"))
             if n <= 0 or n > MAX_BODY:
-                self._json(413, {"ok": False, "error": "图片过大（上限 8MB）"})
+                self._json(413, {"ok": False, "error": "请求体过大（上限 8MB）"})
                 return
             req = json.loads(self.rfile.read(n).decode("utf-8"))
-            data_url = req.get("image", "")
-            if not data_url.startswith("data:image/") or "," not in data_url:
-                self._json(400, {"ok": False, "error": "图片格式无效"})
-                return
-            b64 = data_url.split(",", 1)[1]
-            if len(b64) * 3 / 4 > MAX_BODY:
-                self._json(413, {"ok": False, "error": "图片过大（上限 8MB）"})
-                return
         except Exception:
             self._json(400, {"ok": False, "error": "请求体无效"})
             return
         try:
-            parse = call_step(data_url)
+            if self.path == "/api/parse-text":
+                text = str(req.get("text", "")).strip()
+                if not text:
+                    self._json(400, {"ok": False, "error": "文字要求为空"})
+                    return
+                if len(text) > 4000:
+                    self._json(413, {"ok": False, "error": "文字过长（上限 4000 字符）"})
+                    return
+                parse = call_step_text(text)
+            else:
+                data_url = req.get("image", "")
+                if not data_url.startswith("data:image/") or "," not in data_url:
+                    self._json(400, {"ok": False, "error": "图片格式无效"})
+                    return
+                b64 = data_url.split(",", 1)[1]
+                if len(b64) * 3 / 4 > MAX_BODY:
+                    self._json(413, {"ok": False, "error": "图片过大（上限 8MB）"})
+                    return
+                parse = call_step(data_url)
             self._json(200, {"ok": True, "parse": parse})
         except urllib.error.HTTPError as e:
             # 不透传上游响应体（可能含 key 相关信息），只给状态码归类
