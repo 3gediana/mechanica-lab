@@ -927,6 +927,29 @@ function setCons(on) {
   $('btnCons').classList.toggle('hot', on);
 }
 
+// ---------- 阿特伍德面板（张力 T 与两侧加速度） ----------
+function updateAtwoodCons() {
+  const a = atwoodInfo();
+  if (!a) return;
+  const g = 9.81;
+  // 位移二次拟合在初始暂态期不稳定（t<1.2s），显示采样中
+  if (a.simT < 1.2) {
+    ['cwM', 'cwT', 'cwAT', 'cwAM'].forEach((id) => { const el = $(id); if (el) el.textContent = '采样中'; });
+    ['cwErr', 'cwTime'].forEach((id) => { const el = $(id); if (el) el.textContent = '--'; });
+    return;
+  }
+  const aT = (a.m1 - a.m2) * g / (a.m1 + a.m2);
+  const T = 2 * a.m1 * a.m2 * g / (a.m1 + a.m2);
+  const err = Math.abs(a.aMeasured - aT) / Math.max(Math.abs(aT), 1e-9) * 100;
+  $('cwM').textContent = a.m1 + ' / ' + a.m2 + ' kg';
+  $('cwT').textContent = T.toFixed(3) + ' N';
+  $('cwAT').textContent = aT.toFixed(3) + ' m/s²';
+  $('cwAM').textContent = a.aMeasured.toFixed(3) + ' m/s²';
+  $('cwErr').textContent = err.toFixed(2) + '%';
+  $('cwErr').style.color = err < 8 ? 'var(--accent)' : 'var(--danger)';
+  $('cwTime').textContent = 't=' + a.simT.toFixed(1) + 's';
+}
+
 // ---------- 天体守恒量（系统 E/Lz + 相对轨道几何） ----------
 let astroBase = null;   // 基准 {epoch, E, L}（rebuild 换代即重取）
 
@@ -1057,12 +1080,15 @@ function updateEnergyBar(rate, keFrac = 1) {
 function updateConsbar() {
   if (!consOn) return;
   const astro = doc.entities.some((e) => e.physics.gravitating);
-  const rotation = !astro && doc.kind === 'rotation';
-  $('consMomentum').style.display = astro || rotation ? 'none' : 'grid';
+  const atwood = !astro && doc.entities.some((e) => e.type === 'pulley');
+  const rotation = !astro && !atwood && doc.kind === 'rotation';
+  $('consMomentum').style.display = astro || rotation || atwood ? 'none' : 'grid';
   $('consAstro').style.display = astro ? 'grid' : 'none';
   $('consRotation').style.display = rotation ? 'grid' : 'none';
+  $('consAtwood').style.display = atwood ? 'grid' : 'none';
   if (astro) { updateAstroCons(); return; }
   if (rotation) { updateRotationCons(); return; }
+  if (atwood) { updateAtwoodCons(); return; }
   const live = runtime.systemTotals();
   if (!momentumBase || momentumBase.epoch !== runtime.epoch) momentumBase = { epoch: runtime.epoch, KE: live.ke };
   if (momentumBase.KE < 0.05) {
@@ -1222,7 +1248,9 @@ function updateScaleReadout() {
   const el = $('scaleReadout');
   if (!el) return;
   const d = viewport.camera.position.distanceTo(viewport.controls.target);
-  el.textContent = `网格 1 格 = 1 m　|　视野宽约 ${(2 * d * Math.tan((viewport.camera.fov || 42) * Math.PI / 360)).toFixed(1)} m`;
+  const viewW = 2 * d * Math.tan((viewport.camera.fov || 42) * Math.PI / 360);
+  const cells = viewW;   // 网格 1 格 = 1 m
+  el.textContent = `网格 1 格 = 1 m　|　视野宽约 ${viewW.toFixed(1)} m ≈ ${cells.toFixed(1)} 格`;
 }
 
 // ============ 录制 / 回放 ============
@@ -1904,6 +1932,9 @@ async function runAndExplain() {
   const isSpring = doc.entities.some((e) => e.type === 'spring');
   const isAtwood = doc.entities.some((e) => e.type === 'pulley');
   const isHinge = doc.entities.some((e) => e.joints && e.joints.some((j) => j.type === 'revolute'));
+  const hasGround = doc.entities.some((e) => e.type === 'ground');
+  const isProjectile = !hasRamp && !isSpring && !isAtwood && !isHinge && !isAstro
+    && hasGround && doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic').length === 1;
   if (mode !== 'edit') resetSim();
 
   setAgentStage('explaining', '运行并记录数据中…');
@@ -1911,8 +1942,8 @@ async function runAndExplain() {
   const btn = $('btnRunExplain');
   btn.disabled = true;
   btn.textContent = '运行并记录中…';
-  const isMomentum = !hasRamp && !isAstro && !isRotation && !isSpring && !isAtwood && !isHinge;
-  const needT = isHinge ? 5.5 : (isAtwood ? 1.6 : (isSpring ? 6.5 : (isAstro ? 11 : (isRotation ? 3.5 : 4))));   // 阿特伍德 2.2s（a≈3.27，位移≈7.9m 足够拟合）
+  const isMomentum = !hasRamp && !isAstro && !isRotation && !isSpring && !isAtwood && !isHinge && !isProjectile;
+  const needT = isProjectile ? 2.5 : (isHinge ? 5.5 : (isAtwood ? 1.6 : (isSpring ? 6.5 : (isAstro ? 11 : (isRotation ? 3.5 : 4)))));
   const u0 = ball.physics.linvel[0];
   // 运行前预采守恒基准（初始态），避免首采落在演化中
   if (isRotation) rotationWithDrift();
@@ -1926,7 +1957,7 @@ async function runAndExplain() {
     // 终止条件：斜面=球越过底边；对撞=出现使球速改变的碰撞报告（跳过出生触地）；天体=跑满时长；通用=超时
     const iv = setInterval(() => {
       const tel = runtime.telemetry(ball.id);
-      const done = isAstro || isRotation
+      const done = isAstro || isRotation || isHinge || isProjectile
         ? runtime.simT > needT
         : isMomentum
           ? runtime.collisionReports.some((r) => r.postVels && r.postVels[ball.id]
@@ -1975,6 +2006,30 @@ function renderAstroExplain(r, box) {
 }
 function a_of(r) {
   return (r.measured.rmin + r.measured.rmax) / 2;
+}
+
+function renderProjectileExplain(r, box) {
+  const grid = document.createElement('div');
+  grid.className = 'ro-grid';
+  const rows = [
+    ['理论最大高度', r.theoretical.maxHeight.toFixed(3) + ' m'],
+    ['实测最大高度', r.measured.maxHeight.toFixed(3) + ' m'],
+    ['理论射程', r.theoretical.range.toFixed(3) + ' m'],
+    ['实测射程（落点 x）', r.measured.range.toFixed(3) + ' m'],
+    ['射程偏差', r.errPct != null ? r.errPct.toFixed(2) + '%' : '--'],
+    ['判定', r.pass ? '通过（抛体运动学验证）' : '未通过'],
+  ];
+  grid.innerHTML = rows.map(function (kv, i) {
+    return '<div class="cell" style="grid-column:1/-1"><span class="k">' + kv[0] + '</span><span class="v ' + (i === 5 ? 'acc' : 'plain') + '"></span></div>';
+  }).join('');
+  const els = Array.from(grid.querySelectorAll('.v'));
+  rows.forEach(function (rw, i) { els[i].textContent = rw[1]; });
+  box.appendChild(grid);
+  const p = document.createElement('div');
+  p.className = 'hint';
+  p.style.marginTop = '8px';
+  p.textContent = r.summary;
+  box.appendChild(p);
 }
 
 function renderHingeExplain(r, box) {
@@ -2120,6 +2175,7 @@ function renderExplanation() {
   if (r.kind === 'spring') { renderSpringExplain(r, box); return; }
   if (r.kind === 'atwood') { renderAtwoodExplain(r, box); return; }
   if (r.kind === 'hinge') { renderHingeExplain(r, box); return; }
+  if (r.kind === 'projectile') { renderProjectileExplain(r, box); return; }
   // 观察项对比表（斜面）
   const grid = document.createElement('div');
   grid.className = 'ro-grid';

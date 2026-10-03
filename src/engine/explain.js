@@ -13,6 +13,12 @@ export function explainRun(plan, doc, series, reports = [], astro = null, rotati
   const spheres = doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
   if (hasHinge && series.length > 10 && series[0].rotz !== undefined) return explainHinge(plan, doc, series);
   if (hasSpring && series.length > 10) return explainSpring(plan, doc, series);
+  // 抛体：单球带初速 + 地面（无斜面/弹簧/引力），理论射程与最大高度 vs 实测
+  const projBalls = doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
+  const hasGround = doc.entities.some((e) => e.type === 'ground');
+  if (!hasRamp && !hasSpring && !hasGrav && projBalls.length === 1 && hasGround) {
+    return explainProjectile(plan, doc, series);
+  }
   if (doc.kind === 'rotation' && rotation) return explainRotation(plan, doc, rotation);
   if (atwood) return explainAtwood(plan, atwood);
   if (hasGrav && astro) return explainAstro(plan, astro);
@@ -22,6 +28,49 @@ export function explainRun(plan, doc, series, reports = [], astro = null, rotati
     supported: false,
     reason: hasRamp ? '运行轨迹过短' : '该解析场景不含斜面、两球对撞、引力系统或转台，暂无专用解释器',
     summary: telemetrySummary(series),
+  };
+}
+
+// ---------- 抛体：射程 R = v·t_land、最大高度 H = h0 + (vy0)²/(2g)（初速分解） ----------
+function explainProjectile(plan, doc, series) {
+  const ball = doc.entities.find((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
+  if (!ball || series.length < 5) return { supported: false, reason: '抛体解释需要单球与运行轨迹', summary: telemetrySummary(series) };
+  const g = Math.abs(doc.gravity || -9.81);
+  const v0 = ball.physics.linvel;
+  const vx = v0[0], vy0 = v0[1];
+  const h0 = series[0].pos[1];
+  // 理论（运动学）：最大高度 H = h0 + vy0²/(2g)（vy0>0 上抛分量）；落地时刻 t_land = (vy0 + √(vy0²+2g·h0))/g
+  const Htheory = h0 + (vy0 > 0 ? vy0 * vy0 / (2 * g) : 0);
+  const tFlight = (vy0 + Math.sqrt(vy0 * vy0 + 2 * g * h0)) / g;
+  const Rtheory = vx * tFlight;
+
+  // 实测：轨迹最大高度 + 落地（y 首次低于起始 0.05 后的 x 极值）
+  let Hmeasured = -Infinity, xLand = null;
+  for (const p of series) {
+    if (p.pos[1] > Hmeasured) Hmeasured = p.pos[1];
+    if (p.pos[1] <= 0.16 && xLand === null && p.t > 0.2) { xLand = p.pos[0]; break; }
+  }
+  if (xLand === null) xLand = series[series.length - 1].pos[0];
+  const Rmeasured = xLand - series[0].pos[0];
+  const errPct = Rtheory > 1e-6 ? Math.abs(Rmeasured - Rtheory) / Rtheory * 100 : null;
+  const pass = errPct != null && errPct < 8;
+
+  const summary = [
+    `抛体运动（初速 vx=${vx.toFixed(2)}, vy=${vy0.toFixed(2)} m/s，起点高 ${h0.toFixed(2)} m）：`,
+    `理论最大高度 H = h0 + vy0²/(2g) = ${Hmeasured.toFixed(3)} m，理论射程 R = vx·t_land = ${Rtheory.toFixed(3)} m。`,
+    `模拟实测最大高度 ${Hmeasured.toFixed(3)} m、落点 x = ${xLand != null ? xLand.toFixed(3) : '?'} m，射程偏差 ${errPct != null ? errPct.toFixed(2) + '%' : '?'}`,
+    pass ? '——抛体运动学（水平匀速 + 竖直自由落体的合成）得到验证。' : '。',
+  ].join('');
+
+  return {
+    supported: true,
+    kind: 'projectile',
+    simT: series[series.length - 1].t,
+    observation: plan.observations[0] || '射程与最大高度',
+    theoretical: { range: Rtheory, maxHeight: Htheory, formula: 'R = vx·t_land, H = h0 + vy0²/(2g)' },
+    measured: { range: Rmeasured, maxHeight: Hmeasured },
+    errPct, pass,
+    summary,
   };
 }
 

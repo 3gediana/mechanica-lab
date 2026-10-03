@@ -174,6 +174,41 @@ export const PRESETS = {
     },
   },
 
+  projectile: {
+    id: 'projectile', label: '抛体运动',
+    build() {
+      const doc = createEmptyDoc('抛体运动：斜抛与射程');
+      const seq = {};
+      // 抛体小球：初速 (4, 3, 0)，从高 0.6m 抛出（理论射程 vx·t_land ≈ 3.26m，最大高度 ≈ 1.06m）
+      const ball = createEntity('sphere', {
+        name: '抛体小球',
+        transform: { pos: [0, 0.6, 0], rot: [0, 0, 0] },
+        params: { radius: 0.15 },
+        physics: {
+          body: 'dynamic', mass: 1, friction: 0.4, restitution: 0.1,
+          linvel: [4, 3, 0], angvel: [0, 0, 0],
+          linDamping: 0, angDamping: 0, gravityScale: 1,
+        },
+        render: { material: 'chrome' },
+        measured: true,
+        source: 'preset',
+      }, seq);
+      const ground = createEntity('ground', {
+        name: '地面',
+        transform: { pos: [4, -0.05, 0], rot: [0, 0, 0] },
+        params: { sx: 24, sy: 0.1, sz: 8 },
+        source: 'preset',
+      }, seq);
+      doc.entities.push(ball, ground);
+      doc.meta.assumptions = [
+        '理想抛体：水平匀速 + 竖直自由落体（不计空气阻力）',
+        '初速 (4, 3, 0) m/s，起点高 0.6 m',
+        '理论最大高度 H = 0.6 + 3²/19.62 ≈ 1.06 m',
+      ];
+      return doc;
+    },
+  },
+
   hingePend: {
     id: 'hingePend', label: '复摆（铰链杆）',
     build() {

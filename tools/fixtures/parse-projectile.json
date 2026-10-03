@@ -1,0 +1,39 @@
+{
+  "_fixture": true,
+  "_note": "本地示例解析数据（抛体运动），用于无 API Key 时验证抛体链路；不是真实模型输出",
+  "questionType": "抛体运动（斜抛）",
+  "goal": "求抛体的射程与最大高度，验证抛体运动学",
+  "gravity": 10,
+  "entities": [
+    {
+      "type": "sphere",
+      "name": "抛体小球",
+      "given": {
+        "mass": 1,
+        "velocity": [
+          4,
+          3,
+          0
+        ],
+        "position": [
+          0,
+          0.6,
+          0
+        ]
+      },
+      "confidence": 0.95
+    }
+  ],
+  "observations": [
+    "射程",
+    "最大高度"
+  ],
+  "unknowns": [
+    "空气阻力（按不计处理）"
+  ],
+  "assumptions": [
+    "理想抛体：水平匀速 + 竖直自由落体",
+    "初速 (4, 3, 0) m/s，起点高 0.6 m"
+  ],
+  "confidence": 0.92
+}

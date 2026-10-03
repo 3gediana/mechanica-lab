@@ -296,6 +296,7 @@
       <option value="classic">管道轨道（经典演示）</option>
       <option value="atwood">阿特伍德机（定滑轮）</option>
       <option value="hingePend">复摆（铰链杆）</option>
+      <option value="projectile">抛体运动（斜抛）</option>
     </select>
     <button id="btnSave" title="下载场景 JSON">保存</button>
     <button id="btnOpen" title="打开场景 JSON">打开</button>
@@ -447,6 +448,14 @@
     <div class="cell"><span class="k">偏心率 e</span><span class="v" id="caEcc">--</span></div>
     <div class="cell"><span class="k">轨道 rmin/rmax</span><span class="v" id="caR">--</span></div>
     <div class="cell"><span class="k">运行时长</span><span class="v" id="caTime">--</span></div>
+  </div>
+  <div class="cgrid" id="consAtwood" style="display:none">
+    <div class="cell"><span class="k">质量 m1 / m2</span><span class="v" id="cwM">--</span></div>
+    <div class="cell"><span class="k">张力 T</span><span class="v acc" id="cwT">--</span></div>
+    <div class="cell"><span class="k">加速度（理论）</span><span class="v" id="cwAT">--</span></div>
+    <div class="cell"><span class="k">加速度（实测）</span><span class="v" id="cwAM">--</span></div>
+    <div class="cell"><span class="k">加速度偏差</span><span class="v acc" id="cwErr">--</span></div>
+    <div class="cell"><span class="k">运行时长</span><span class="v" id="cwTime">--</span></div>
   </div>
   <div class="cgrid" id="consRotation" style="display:none">
     <div class="cell"><span class="k">角速度 ω</span><span class="v" id="crOmega">--</span></div>

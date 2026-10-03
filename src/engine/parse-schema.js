@@ -244,8 +244,35 @@ export function planToOverrides(plan) {
   if (plan.kind === 'hinge') return hingeLayout(plan);
   const hasSpringAttach = (plan.attaches || []).some((a) => a.type === 'spring');
   if (plan.kind === 'atwood' || plan.entities.some((e) => e.type === 'pulley')) return atwoodLayout(plan);
-  if (hasSpringAttach || plan.kind === 'spring') return springLayout(plan);
+  // 抛体布局：单球带斜向初速（无斜面）→ 球 + 地面板（抛物线落到地面）
   const ramp = plan.entities.find((e) => e.type === 'ramp');
+  // 抛体布局：单球带斜向初速（无斜面）→ 球 + 地面板（抛物线落到地面）
+  const projBalls = plan.entities.filter((e) => (e.type === 'sphere') && (e.given.velocity || []).some((v) => Math.abs(v) > 1e-9));
+  if (!ramp && !plan.attaches.length && projBalls.length === 1 && plan.entities.length === 1) {
+    const e = projBalls[0];
+    const r = e.given.radius ?? 0.15;
+    const v = e.given.velocity;
+    const pout = [];
+    pout.push({
+      type: 'sphere', name: e.name || '抛体', source: 'agent',
+      params: { radius: r },
+      transform: { pos: e.given.position ?? [0, 0.6, 0], rot: [0, 0, 0] },
+      physics: {
+        body: 'dynamic', mass: e.given.mass ?? 1, friction: 0, restitution: 0.1,
+        linvel: [...v], angvel: [0, 0, 0],
+        linDamping: 0, angDamping: 0, gravityScale: 1,
+      },
+      render: { material: 'chrome' },
+      measured: true,
+    });
+    pout.push({
+      type: 'ground', name: '地面', source: 'agent',
+      params: { sx: 30, sy: 0.1, sz: 12 },
+      transform: { pos: [8, -0.05, 0], rot: [0, 0, 0] },
+      physics: { body: 'fixed', friction: 0.6, restitution: 0.2 },
+    });
+    return pout;
+  }
   let rampGeom = null;
   if (ramp) {
     const g = ramp.given;
@@ -264,6 +291,10 @@ export function planToOverrides(plan) {
   }
 
   const out = [];
+  // 弹簧振子布局（attaches 有 spring 或 kind=spring）
+  if ((plan.attaches || []).some((a) => a.type === 'spring') || plan.kind === 'spring') {
+    return springLayout(plan);
+  }
   // 摩擦是成对属性，模型可能把"不计摩擦"标在球上或斜面上（都是正确物理位置）：
   // 取两侧显式给定摩擦的最小值应用到整对（Rapier 默认取平均，min 注入两侧即得意图配对值）。
   const ballEnt = plan.entities.find((e) => e.type === 'sphere');
