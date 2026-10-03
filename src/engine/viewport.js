@@ -490,7 +490,7 @@ export class Viewport {
     controls.enableDamping = true;
     controls.dampingFactor = 0.07;
     controls.minDistance = 0.4;
-    controls.maxDistance = 40;
+    controls.maxDistance = 100;   // 大场景（天体系）与 5m 刻度档可达
     controls.maxPolarAngle = 1.54;
     this.controls = controls;
 
@@ -530,11 +530,13 @@ export class Viewport {
     shadowFloor.receiveShadow = true;
     scene.add(shadowFloor);
 
-    // 工作台网格：1m 主格 + 坐标轴
+    // 工作台网格：1m 主格 + 坐标轴（刻度间距随相机距离动态重建，见 setGridScale）
     const grid = new THREE.GridHelper(20, 20, 0x3c4046, 0x1f2226);
     grid.material.transparent = true;
     grid.material.opacity = 0.85;
     scene.add(grid);
+    this._grid = grid;
+    this._gridStep = 1;
     const axisMat = (c) => new THREE.LineBasicMaterial({ color: c, transparent: true, opacity: 0.6 });
     const xAxis = new THREE.Line(new THREE.BufferGeometry().setFromPoints(
       [new THREE.Vector3(-10, 0.002, 0), new THREE.Vector3(10, 0.002, 0)]), axisMat(0x8a4a42));
@@ -710,6 +712,27 @@ export class Viewport {
     this.snap = on;
     this.gizmo.setTranslationSnap(on ? 0.1 : null);
     this.gizmo.setRotationSnap(on ? THREE.MathUtils.degToRad(15) : null);
+  }
+
+  // ============ 单位标尺动态刻度：按档位重建网格（1 格 = step 米，总覆盖 20m 不变） ============
+  setGridScale(step) {
+    if (this._gridStep === step) return;
+    this._gridStep = step;
+    if (this._grid) {
+      this.scene.remove(this._grid);
+      this._grid.geometry.dispose();
+      this._grid.material.dispose();
+    }
+    const divisions = Math.max(4, Math.round(20 / step));
+    const grid = new THREE.GridHelper(20, divisions, 0x3c4046, 0x1f2226);
+    grid.material.transparent = true;
+    grid.material.opacity = 0.85;
+    this.scene.add(grid);
+    this._grid = grid;
+  }
+
+  gridInfo() {
+    return { step: this._gridStep || 1, divisions: Math.round(20 / (this._gridStep || 1)) };
   }
 
   // gizmo 拖动后把 mesh 变换写回（由 workbench 调用，负责文档与历史）

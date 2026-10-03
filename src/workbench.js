@@ -1453,14 +1453,24 @@ function updateCurveLegend() {
   el.appendChild(ke);
 }
 
-// ============ 单位标尺读数（网格 1 格 = 1 m，视野宽随相机距离） ============
+// ============ 单位标尺动态刻度（档位 0.1/0.5/1/5 m 随视野自适应，网格视觉密度联动） ============
+const GRID_STEPS = [0.1, 0.5, 1, 5];
+let gridStep = 1;
 function updateScaleReadout() {
   const el = $('scaleReadout');
   if (!el) return;
-  const d = viewport.camera.position.distanceTo(viewport.controls.target);
-  const viewW = 2 * d * Math.tan((viewport.camera.fov || 42) * Math.PI / 360);
-  const cells = viewW;   // 网格 1 格 = 1 m
-  el.textContent = `网格 1 格 = 1 m　|　视野宽约 ${viewW.toFixed(1)} m ≈ ${cells.toFixed(1)} 格`;
+  const cam = viewport.camera;
+  const viewW = cam.isOrthographicCamera
+    ? (cam.right - cam.left) / (cam.zoom || 1)
+    : 2 * cam.position.distanceTo(viewport.controls.target) * Math.tan((cam.fov || 42) * Math.PI / 360);
+  // 档位自适应（逐档收敛；阈值比 42/8=5.25 > 相邻档位比 5 → 无震荡区间）
+  const idx = GRID_STEPS.indexOf(gridStep);
+  const cells0 = viewW / gridStep;
+  if (cells0 > 42 && idx < GRID_STEPS.length - 1) gridStep = GRID_STEPS[idx + 1];
+  else if (cells0 < 8 && idx > 0) gridStep = GRID_STEPS[idx - 1];
+  viewport.setGridScale(gridStep);
+  const cells = viewW / gridStep;
+  el.textContent = `网格 1 格 = ${gridStep} m　|　视野宽约 ${viewW.toFixed(1)} m ≈ ${cells.toFixed(1)} 格`;
 }
 
 // ============ 录制 / 回放 ============
@@ -2727,6 +2737,9 @@ window.MECH = {
   jointVizState: () => ({ lines: viewport.jointVizCount() }),
   groups: () => doc.entities.map((e) => ({ id: e.id, name: e.name, group: e.group || null })),
   cameraTarget: () => viewport.controls.target.toArray(),
+  scaleState: () => ({ step: gridStep, ...viewport.gridInfo(),
+    text: document.getElementById('scaleReadout') ? document.getElementById('scaleReadout').textContent : '' }),
+  get __vp() { return viewport; },   // 诊断通道（非 Agent 白名单，实时引用）
   cameraPos: () => viewport.camera.position.toArray(),
   forceDecompose: (id) => {
     // 斜面场景支持力/摩擦力数值（理论对照：N=mg·cosθ, f=μN 或实测差分）

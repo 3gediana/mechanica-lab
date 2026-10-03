@@ -72,7 +72,8 @@ try {
 
   // ==== C. 单位标尺读数
   const sr = await page.textContent('#scaleReadout');
-  check('单位标尺读数', sr.includes('1 格 = 1 m') && sr.includes('视野宽'), sr.trim());
+  const st0 = await page.evaluate(() => window.MECH.scaleState());
+  check('单位标尺读数(动态档位)', sr.includes(`1 格 = ${st0.step} m`) && sr.includes('视野宽'), sr.trim());
   await page.evaluate(() => {
     const r = window.MECH.entities().find((e) => e.type === 'ramp');
     window.MECH.select(r.id);
