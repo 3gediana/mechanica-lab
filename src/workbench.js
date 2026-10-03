@@ -114,10 +114,21 @@ function autosave() {
 }
 
 // ============ 文档变更主通道 ============
+let historyBatchDepth = 0;   // Agent 建场批次：中间 commit 跳过入栈，结束时合并压一个终态快照（单 undo 单元）
+
 function commitChange(label) {
+  if (historyBatchDepth > 0) { autosave(); return; }
   history.commit(() => serializeDoc(doc), label);
   autosave();
   refreshHistoryButtons();
+}
+function beginHistoryBatch() { historyBatchDepth++; }
+function endHistoryBatch(label) {
+  historyBatchDepth = Math.max(0, historyBatchDepth - 1);
+  if (historyBatchDepth === 0) {
+    history.commit(() => serializeDoc(doc), label);
+    refreshHistoryButtons();
+  }
 }
 
 function rebuildAll(rerenderInspector = true) {
@@ -1867,6 +1878,17 @@ function applyAgentPlan() {
   if (!agentPlan) { toast('没有可用的解析结果'); return; }
   if (mode !== 'edit') { toast('运行态不可建场，请先重置'); return; }
   const M = window.MECH;
+  const wasEmpty = doc.entities.length === 0;
+  let batchReused = 0, batchCreated = 0;
+  beginHistoryBatch();
+  try {
+    applyAgentPlanInner(M, (r, c) => { batchReused = r; batchCreated = c; });
+  } finally {
+    endHistoryBatch(wasEmpty ? 'Agent 按解析建场' : `Agent 混合建场（更新 ${batchReused}+新增 ${batchCreated}）`);
+  }
+}
+
+function applyAgentPlanInner(M, reportCounts) {
   if (!agentPlan.gravityDefault) M.setGravity(agentPlan.gravity);
   if (agentPlan.G != null) M.setG(agentPlan.G);
   if (doc.entities.some((e) => e.physics.gravitating) && !trailsOn) setTrails(true);   // 天体场景轨道线是观察必需
@@ -1874,12 +1896,39 @@ function applyAgentPlan() {
   const overrides = planToOverrides(agentPlan);
   const created = [];
   agentOps.length = 0;
+  // 混合搭建：场景非空时优先复用同类型+同刚体类型的已有实体（尊重用户已有对象，
+  // 不推翻重建；保留用户命名与材质，仅按题目更新几何/位姿/物理参数）
+  const mixed = doc.entities.length > 0;
+  const usedIds = new Set();
+  let nReused = 0, nCreated = 0;
   for (const o of overrides) {
-    const id = M.addComponent(o.type, o);
-    if (id) { created.push(id); agentOps.push({ op: '创建 ' + o.type, target: o.name || o.type, ok: true }); }
-    else agentOps.push({ op: '创建 ' + o.type, target: o.name || o.type, ok: false });
+    let id = null;
+    if (mixed) {
+      const cand = doc.entities.find((e) => e.type === o.type && !usedIds.has(e.id)
+        && (e.physics.body || 'dynamic') === (o.physics.body || 'dynamic'));
+      if (cand) {
+        usedIds.add(cand.id);
+        const patch = { params: o.params, transform: o.transform, physics: o.physics, source: 'agent' };
+        if (M.updateEntity(cand.id, patch, `Agent 按「${agentPlan.questionType}」更新 ${cand.name || o.type}（混合）`)) {
+          id = cand.id; nReused++;
+          agentOps.push({ op: '更新 ' + o.type, target: cand.name || o.type, ok: true });
+        } else {
+          agentOps.push({ op: '更新 ' + o.type, target: cand.name || o.type, ok: false });
+        }
+      }
+    }
+    if (!id) {
+      id = M.addComponent(o.type, o);
+      if (id) { nCreated++; agentOps.push({ op: '创建 ' + o.type, target: o.name || o.type, ok: true }); }
+      else agentOps.push({ op: '创建 ' + o.type, target: o.name || o.type, ok: false });
+    }
+    created.push(id);
   }
-  setAgentStage('building', '按解析计划创建实体…');
+  reportCounts(nReused, nCreated);
+  setAgentStage('building', mixed
+    ? `混合模式：更新 ${nReused} 个已有实体，新增 ${nCreated} 个，其余对象不动`
+    : '按解析计划创建实体…');
+  if (mixed) setParseStatus(`混合建场：复用已有同类型实体（保留命名/材质，参数按题给更新）+ 新增 ${nCreated} 个${agentPlan.gravityDefault ? '' : '；重力已按题给调整'}`);
   // atwood 类：onPulley 占位符回填真实滑轮 id，并重建使约束收集生效
   if (agentPlan.entities.some((e) => e.type === 'pulley')) {
     const pi = agentPlan.entities.findIndex((e) => e.type === 'pulley');
@@ -1924,6 +1973,9 @@ function applyAgentPlan() {
       observations: [...agentPlan.observations],
       unknowns: [...agentPlan.unknowns],
       confidence: agentPlan.confidence,
+      mixed,
+      reused: nReused,
+      created: nCreated,
       at: new Date().toISOString(),
     },
   });
@@ -2322,12 +2374,12 @@ window.MECH = {
   telemetry: (id) => runtime.telemetry(id || selectedId),
   collisions: () => [...runtime.collisions],
   agentState: () => ({
-    hasPlan: !!agentPlan,
-    fixture: agentPlan ? agentPlan.fixture : null,
+    hasPlan: !!agentPlan,    fixture: agentPlan ? agentPlan.fixture : null,
     gravity: agentPlan ? agentPlan.gravity : null,
     correctionCount: agentCorrections.length,
     entities: agentPlan ? agentPlan.entities.map((e) => ({ type: e.type, given: { ...e.given } })) : [],
   }),
+  agentOpsState: () => ({ ops: agentOps.map((o) => ({ ...o })) }),
   explainState: () => agentExplain ? JSON.parse(JSON.stringify(agentExplain)) : null,
   consState: () => ({
     live: runtime.systemTotals(),
