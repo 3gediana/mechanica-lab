@@ -2666,7 +2666,30 @@ function renderExplanation() {
     box.appendChild(s);
     return;
   }
+// 二维斜碰解释渲染：动量矢量 x/z 分量对照 + 散开速度 + 动能账
+function renderMomentum2DExplain(r, box) {
+  const grid = document.createElement('div');
+  grid.className = 'ro-grid';
+  grid.innerHTML = [
+    '<div class="cell"><span class="k">动量 x 分量</span><span class="v" data-ev="px"></span></div>',
+    '<div class="cell"><span class="k">动量 z 分量</span><span class="v" data-ev="pz"></span></div>',
+    '<div class="cell"><span class="k">散开速度</span><span class="v" data-ev="v"></span></div>',
+    '<div class="cell"><span class="k">动能变化</span><span class="v" data-ev="ke"></span></div>',
+  ].join('');
+  box.appendChild(grid);
+  const set = (k, txt) => { box.querySelector(`[data-ev="${k}"]`).textContent = txt; };
+  set('px', `${r.momentum2d.p0x.toFixed(3)} → ${r.momentum2d.p1x.toFixed(3)} N·s（偏差 ${r.momentum2d.errX.toFixed(2)}%）`);
+  set('pz', `${r.momentum2d.p0z.toFixed(3)} → ${r.momentum2d.p1z.toFixed(3)} N·s（偏差 ${r.momentum2d.errZ.toFixed(2)}%）`);
+  set('v', r.pairs.map((p) => `${p.name} ${p.vMeasured.toFixed(2)} m/s`).join('，'));
+  set('ke', `${r.ke.before.toFixed(3)} → ${r.ke.measuredAfter.toFixed(3)} J（损失 ${r.ke.lossPct.toFixed(1)}%——切向分量保持）`);
+  const pass = document.createElement('div');
+  pass.className = 'hint';
+  pass.textContent = r.summary;
+  box.appendChild(pass);
+}
+
   if (r.kind === 'momentum-1d') { renderMomentumExplain(r, box); return; }
+  if (r.kind === 'momentum-2d') { renderMomentum2DExplain(r, box); return; }
   if (r.kind === 'astro') { renderAstroExplain(r, box); return; }
   if (r.kind === 'rotation') { renderRotationExplain(r, box); return; }
   if (r.kind === 'spring') { renderSpringExplain(r, box); return; }

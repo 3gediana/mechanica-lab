@@ -87,6 +87,7 @@ cd tools/ui-test && npm i && node p0.mjs   # P0 工作台内核 19 项
                             node p23.mjs  # 单位标尺动态刻度 14 项
                             node p24.mjs  # ghost 吸附细化+滚阻模型 9 项
                             node p25.mjs  # 兼容性提示+测量教学组件 11 项
+                            node p26.mjs  # 二维斜碰 9 项
 ```
 
 ## 教学预置场景（P2，走通用场景系统）

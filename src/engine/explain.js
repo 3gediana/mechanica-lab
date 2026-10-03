@@ -372,6 +372,10 @@ function explainMomentum(plan, doc, reports) {
   if (balls.length < 2) return { supported: false, reason: '对撞解释需要两个动态球', summary: telemetrySummary([]) };
   const b1 = balls[0], b2 = balls[1];
   const u1 = b1.physics.linvel[0], u2 = b2.physics.linvel[0];
+  // 二维斜碰检测：初速带 z 分量或两球初始 z 错开 → 动量矢量守恒门控（无闭式一维公式）
+  const is2D = Math.abs(b1.physics.linvel[2]) > 1e-6 || Math.abs(b2.physics.linvel[2]) > 1e-6
+    || Math.abs(b1.transform.pos[2] - b2.transform.pos[2]) > 1e-6;
+  if (is2D) return explainMomentum2D(plan, doc, reports, b1, b2);
   // 取第一份"球 A 速度相对初速发生显著变化"的碰撞报告（跳过出生触地等初始接触）
   const rep = reports.find((r) => r.postVels && r.postVels[b1.id]
     && Math.abs(r.postVels[b1.id][0] - u1) > 0.05);
@@ -424,6 +428,60 @@ function explainMomentum(plan, doc, reports) {
     pairs,
     momentum: { before: pMeasuredBefore, after: pMeasuredAfter, errPct: pErrPct },
     ke: { before: keBefore, theoryAfter: keAfterTheory, measuredAfter: rep.keAfter },
+    pass,
+    summary,
+  };
+}
+
+// 二维斜碰解释（第八章「条件允许时再扩展二维碰撞」）：
+// 无外力 → 动量矢量守恒（x/z 分量分别校验）；e=0.8 法向动能损失但二维切向分量保持，
+// 整体 KE 损失小于一维同 e 值——门控动量矢量误差。
+function explainMomentum2D(plan, doc, reports, b1, b2) {
+  const u1v = b1.physics.linvel, u2v = b2.physics.linvel;
+  const m1 = b1.physics.mass, m2 = b2.physics.mass;
+  const e = (b1.physics.restitution + b2.physics.restitution) / 2;
+  // 取第一份球 A 速度显著变化的碰撞报告
+  const rep = reports.find((r) => r.postVels && r.postVels[b1.id]
+    && Math.hypot(r.postVels[b1.id][0] - u1v[0], r.postVels[b1.id][2] - u1v[2]) > 0.05);
+  if (!rep) return { supported: false, reason: '碰撞报告中未捕捉到二维斜碰', summary: telemetrySummary([]) };
+  const pv1 = rep.postVels[b1.id], pv2 = rep.postVels[b2.id];
+  if (!pv1 || !pv2) return { supported: false, reason: '碰撞报告缺少碰后速度', summary: telemetrySummary([]) };
+
+  // 动量矢量守恒（x/z 分量）
+  const p0x = m1 * u1v[0] + m2 * u2v[0], p0z = m1 * u1v[2] + m2 * u2v[2];
+  const p1x = rep.pAfter[0], p1z = rep.pAfter[2];
+  const errX = Math.abs(p1x - p0x) / Math.max(Math.abs(p0x), 1e-9) * 100;
+  const errZ = Math.abs(p1z - p0z) / Math.max(Math.abs(p0z), 1e-9) * 100;
+  const errPct = Math.max(errX, errZ);
+
+  const w1 = Math.hypot(pv1[0], pv1[2]), w2 = Math.hypot(pv2[0], pv2[2]);
+  const u1mag = Math.hypot(u1v[0], u1v[2]);
+  const keBefore = 0.5 * m1 * u1mag * u1mag;
+  const keAfter = 0.5 * m1 * w1 * w1 + 0.5 * m2 * w2 * w2;
+  const keLossPct = (1 - keAfter / Math.max(keBefore, 1e-9)) * 100;
+
+  const pass = errPct < 2;
+  const summary = [
+    `二维斜碰（恢复系数 e=${e.toFixed(2)}，非对心）：水平面内无外力，动量矢量守恒——`,
+    `x 分量 ${p0x.toFixed(3)} → ${p1x.toFixed(3)} N·s（误差 ${errX.toFixed(2)}%）、`,
+    `z 分量 ${p0z.toFixed(3)} → ${p1z.toFixed(3)} N·s（误差 ${errZ.toFixed(2)}%）。`,
+    `碰后速度：球 A ${w1.toFixed(3)} m/s（入射 ${u1mag.toFixed(3)}）、球 B ${w2.toFixed(3)} m/s——`,
+    `两球沿碰撞法向与切向分解散开，方向由碰撞几何决定（无闭式一维公式）。`,
+    `动能账：碰前 ${keBefore.toFixed(3)} J → 碰后 ${keAfter.toFixed(3)} J`,
+    e < 0.999 ? `（法向非弹性损失 ${keLossPct.toFixed(1)}%，小于一维同 e 值的 ${(1 - e * e).toFixed(1) * 1}%——切向分量保持）。` : '（完全弹性应守恒）。',
+  ].join('');
+  return {
+    supported: true,
+    kind: 'momentum-2d',
+    simT: rep.t,
+    observation: plan.observations[0] || '斜碰后两球散开与动量矢量守恒',
+    e,
+    momentum2d: { p0x, p1x, errX, p0z, p1z, errZ, errPct },
+    pairs: [
+      { name: b1.name, vMeasured: w1 },
+      { name: b2.name, vMeasured: w2 },
+    ],
+    ke: { before: keBefore, measuredAfter: keAfter, lossPct: keLossPct },
     pass,
     summary,
   };

@@ -340,7 +340,8 @@ export function planToOverrides(plan) {
         const order = plan.entities.filter((x) => x.type === 'sphere').indexOf(e);
         const n = plan.entities.filter((x) => x.type === 'sphere').length;
         const r = e.given.radius ?? 0.15;
-        o.transform = { pos: [(order - (n - 1) / 2) * 1.6, r + 0.005, 0], rot: [0, 0, 0] };
+        // given.position 自由落位（二维斜碰 z 错开需要）；缺省一维沿 x 排开
+        o.transform = { pos: e.given.position ?? [(order - (n - 1) / 2) * 1.6, r + 0.005, 0], rot: [0, 0, 0] };
         o.physics.friction = 0;
         o.physics.gravityScale = 0;
       } else {

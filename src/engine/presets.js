@@ -47,6 +47,58 @@ export const PRESETS = {
     },
   },
 
+  momentum2d: {
+    id: 'momentum2d', label: '动量守恒（二维斜碰）',
+    build() {
+      const doc = createEmptyDoc('动量守恒：二维斜碰');
+      const seq = {};
+      const ground = createEntity('ground', {
+        name: '光滑地面',
+        transform: { pos: [0, -0.05, 0], rot: [0, 0, 0] },
+        params: { sx: 14, sy: 0.1, sz: 6 },
+        physics: { body: 'fixed', friction: 0, restitution: 0.1 },
+        render: { material: 'steelDark' },
+        source: 'preset',
+      }, seq);
+      // 二维斜碰：两球 z 错开 0.12m（非对心），入射速度带 z 分量 → 碰后两球在 xz 平面散开
+      // 瞄准线计算：A 从 (-1.2, 0.22) 以 (1.2, -0.15) 出发，过 B 的 x 时 z≈-0.11
+      // → 瞄准参数 b=0.11 < 半径和 0.3，必碰且碰撞法向含明显 z 分量（二维效应显著）
+      const ballA = createEntity('sphere', {
+        name: '球 A（入射）',
+        transform: { pos: [-1.2, 0.15, 0.22], rot: [0, 0, 0] },
+        params: { radius: 0.15 },
+        physics: {
+          body: 'dynamic', mass: 2, friction: 0, restitution: 0.8,
+          linvel: [1.2, 0, -0.15], angvel: [0, 0, 0],
+          linDamping: 0, angDamping: 0, gravityScale: 1,
+        },
+        render: { material: 'chrome' },
+        measured: true,
+        source: 'preset',
+      }, seq);
+      const ballB = createEntity('sphere', {
+        name: '球 B（静止）',
+        transform: { pos: [1.6, 0.15, 0], rot: [0, 0, 0] },
+        params: { radius: 0.15 },
+        physics: {
+          body: 'dynamic', mass: 1, friction: 0, restitution: 0.8,
+          linvel: [0, 0, 0], angvel: [0, 0, 0],
+          linDamping: 0, angDamping: 0, gravityScale: 1,
+        },
+        render: { material: 'brass' },
+        measured: true,
+        source: 'preset',
+      }, seq);
+      doc.entities.push(ground, ballA, ballB);
+      doc.meta.assumptions = [
+        '水平面（xz）内无外力（光滑地面），总动量矢量守恒——x 与 z 分量分别守恒',
+        '二维斜碰（非对心）：碰后速度方向由碰撞几何决定，无闭式一维公式；解释器门控动量矢量守恒',
+        '恢复系数 e=0.8：法向动能有损失（斜碰整体 KE 损失小于一维同 e 值）',
+      ];
+      return doc;
+    },
+  },
+
   momentum: {
     id: 'momentum', label: '动量守恒（一维对撞）',
     build() {
