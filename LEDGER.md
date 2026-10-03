@@ -288,13 +288,27 @@ fixture parse-spin.json + serve.py 解析 prompt 补 kind/joint 规则。
 **遗留（如实）**：受力分解仅斜面语义；spin 题 I-ω 反比滑移瞬态 ~11% 偏差（L 守恒 0.28% 硬结论）；曲线面板仅单实体；
 约束关系可视化、对象分组、ghost 跟随鼠标、正交 gizmo 手感、滚动摩擦模型未做（GAP-MATRIX 已记）。
 
-### 下一轮（Round 14 候选）
+### Round 14（10-03）铰链组件与复摆九步 + 滚动阻力 + GAP 刷新 —— **PASS（p12 9/9，回归 p0-p11 全绿）**
 
-1. P3 收尾盘点更新：GAP-MATRIX 刷新（本轮消化的勾选）。
-2. 滚动摩擦/纯滚动模型教学开关。
-3. 绳松弛视觉（压缩段弯折）与张力箭头（绳类实体）。
+- **铰链（revolute）约束组件与九步**（Goal 五"铰链"）：`hinge` 组件（isLink+linkStatic 轴柱）+
+  runtime revolute joint 通道（isLink hinge 分支世界锚转局部 anchor；_createJoints revolute 分支）+
+  解析 joint.type revolute 透传 + hingeLayout（近端对齐锚点）+ applyAgentPlan joint 通用化（hinge/rotation）+
+  explainHinge（**复摆周期实测 1.633 vs 理论 1.638，err 0.28%**；检测=解 wrap+滑动平均+中点上穿，鲁棒）+
+  fixture parse-hinge.json + renderHingeExplain。
+- **滚动阻力教学开关**：sphere `rollResist` 参数（μr·g 线性减速，检查器可编辑）——p12 对照断言阻力球位移更短。
+- **修**：无 collider 的 dynamic body 质量=0 被 joint 钉死（重力不掉+绕轴不转）→ noCollide 改为 collider 照建但
+  **filter=0**（质量/惯性保留、不与任何碰撞）——Rapier 无 collider body 质量为零的关键坑。
 
-## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）
+**验收**（p12.mjs 9/9）：复摆预置+fixture 九步全通；滚动阻力对照（阻力球 x=−0.45 vs 普通球 x=4.65）。
+**遗留**：绳张力箭头（专门箭池，避免与摩擦色冲突）——GAP-MATRIX 已更新。
+
+### 下一轮（Round 15 候选）
+
+1. 绳张力箭头（专门张力箭池 + 颜色语义）。
+2. 拍题解析 prompt 覆盖验证（弹簧/铰链/阿特伍德真实模型抽查）。
+3. P3 体验项：ghost 跟随鼠标、约束可视化、正交 gizmo 手感。
+
+## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）
 
 仪器级暗色摄影棚工具界面。冷灰烟色 + 单点缀琥珀（仪表读数与激活态）；直角 hairline（radius 2px）；
 无渐变无玻璃拟态无 emoji 无 em-dash；数字等宽；动效只做状态反馈。
