@@ -38,6 +38,7 @@ export class Runtime {
     this._gravMap = new Map();   // id -> 天体状态（telemetry/trails 用）
     this.epoch = 0;              // rebuild 代数（守恒量基准重取依据）
     this._spinSlots = [];        // spinLock 转台的 PBD 径向滑槽（_createJoints 收集）
+    this.sensorReadings = new Map();  // 传感器读数（id → {speed/crossedT,...}），运行态数据不进文档
     this._bindDocs = null;
   }
 
@@ -65,6 +66,7 @@ export class Runtime {
     this.trails.clear();
     this.contactForces.clear();
     this.accels.clear();
+    this.sensorReadings.clear();
   }
 
   clear() {
@@ -628,6 +630,38 @@ export class Runtime {
     return null;
   }
 
+  // ============ 传感器读数（速度传感器/计时器）：读数存 runtime 不进文档 ============
+  _syncSensors() {
+    for (const b of this.binds.values()) {
+      const e = b.entity;
+      if (e.type !== 'speedSensor' && e.type !== 'timer') continue;
+      if (!Array.isArray(e.attach) || e.attach.length !== 1) continue;
+      const t = this.binds.get(e.attach[0]);
+      if (!t || !t.body) continue;
+      const v = t.body.linvel();
+      const p = t.body.translation();
+      let rec = this.sensorReadings.get(e.id);
+      if (!rec) { rec = {}; this.sensorReadings.set(e.id, rec); }
+      if (e.type === 'speedSensor') {
+        rec.speed = Math.hypot(v.x, v.y, v.z);
+        rec.vx = v.x; rec.vy = v.y; rec.vz = v.z;
+        rec.targetPos = [p.x, p.y, p.z];
+        rec.simT = this.simT;
+      } else {
+        // 计时器光门：运行开始后，目标体首次穿过光门所在 x 平面（±0.15 容差）的时刻
+        if (rec.crossedT == null && this.simT > 0) {
+          const gx = e.transform.pos[0];
+          const prevX = rec._prevX;
+          if (prevX != null && ((prevX - gx) * (p.x - gx) <= 0 || Math.abs(p.x - gx) < 0.15)) {
+            rec.crossedT = this.simT;
+          }
+          rec._prevX = p.x;
+        }
+        rec.simT = this.simT;
+      }
+    }
+  }
+
   _syncLinks() {
     for (const b of this.binds.values()) {
       // 测量尺：两端点间摆放（x 轴向拉伸 + 对齐），纯测量标注不建 joint
@@ -669,6 +703,7 @@ export class Runtime {
       b.mesh.quaternion.copy(b.body.rotation());
     }
     this._syncLinks();
+    this._syncSensors();
   }
 
   // ============ 轨迹采样（解释器/未来教学叠加层用） ============

@@ -196,6 +196,24 @@ function updateOutlineSelection() {
 // ============ 实体操作（UI 与 Agent 共用） ============
 function opAddComponent(typeId, overrides = {}) {
   const c = registry.getComponent(typeId);
+  // 传感器类（速度传感器/计时器）：选 1 个动态体绑定，读数存 runtime 不进文档
+  if (c.isSensor) {
+    if (selectedIds.length !== 1) { toast('先选中 1 个动态实体，再添加' + c.label); return null; }
+    const target = getEntity(doc, selectedIds[0]);
+    if (!target || target.physics.body !== 'dynamic') { toast(c.label + ' 需绑定动态实体'); return null; }
+    const spawn = c.spawnY ? c.spawnY(c.defaults.params) : 0.5;
+    const e = registry.createEntity(typeId, {
+      name: c.label + '→' + (target.name || target.type),
+      attach: [target.id], source: overrides.source || 'user',
+      transform: { pos: [target.transform.pos[0] + 0.6, spawn, target.transform.pos[2]] },
+    });
+    addEntity(doc, e);
+    rebuildAll();
+    commitChange('添加 ' + c.label);
+    selectEntity(e.id);
+    noteRecentUse(typeId);
+    return e.id;
+  }
   // 测量类（测量尺）：两实体语义（同 isLink），产静态测量标注（无 joint）
   if (c.isMeasure) {
     let attach = overrides.attach || null;
@@ -607,10 +625,10 @@ function addCatalogRow(box, c, faved = false) {
   row.querySelector('.nm').textContent = c.label;
   // 兼容性提示（Goal 第六章目录条文）：物理行为/放置要求进 tooltip + 两实体类徽标
   row.title = c.desc + (c.compat ? '\n【兼容性】' + c.compat : '');
-  if (c.isLink || c.isMeasure) {
+  if (c.isLink || c.isMeasure || c.isSensor) {
     const badge = document.createElement('span');
     badge.className = 'need2';
-    badge.textContent = '需两实体';
+    badge.textContent = c.isSensor ? '绑 1 实体' : '需两实体';
     badge.style.cssText = 'font-size:8px;color:var(--accent);border:1px solid rgba(217,164,65,.4);padding:0 3px;border-radius:2px;margin-right:2px;white-space:nowrap';
     row.querySelector('.nm').before(badge);
   }
@@ -842,6 +860,27 @@ function renderInspector() {
   box.innerHTML = '';
   const c = registry.getComponent(e.type);
   const dis = mode === 'run';
+
+  // 传感器读数（速度传感器/计时器）：运行态实时显示
+  if ((e.type === 'speedSensor' || e.type === 'timer') && Array.isArray(e.attach) && e.attach.length === 1) {
+    const rec = runtime.sensorReadings.get(e.id) || {};
+    const rows = [];
+    if (e.type === 'speedSensor') {
+      rows.push(['目标速度', rec.speed != null ? rec.speed.toFixed(3) + ' m/s' : '等待运行']);
+      if (rec.speed != null) rows.push(['分量 vx/vy/vz', [rec.vx, rec.vy, rec.vz].map((v) => v.toFixed(2)).join(' / ') + ' m/s']);
+    } else {
+      rows.push(['光门状态', rec.crossedT != null ? `已通过 t=${rec.crossedT.toFixed(3)} s` : '等待穿过…']);
+    }
+    for (const [k, txt] of rows) {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--line);font-size:12px';
+      const kl = document.createElement('span'); kl.textContent = k; kl.style.color = 'var(--dim)';
+      const vl = document.createElement('span'); vl.textContent = txt;
+      vl.style.cssText = 'font-family:var(--mono);color:var(--accent)';
+      row.append(kl, vl);
+      box.appendChild(row);
+    }
+  }
 
   // 测量尺：实时两端点距离（运行/编辑态均可读）
   if (e.type === 'ruler' && Array.isArray(e.attach) && e.attach.length === 2) {
@@ -2820,6 +2859,7 @@ window.MECH = {
   scaleState: () => ({ step: gridStep, ...viewport.gridInfo(),
     text: document.getElementById('scaleReadout') ? document.getElementById('scaleReadout').textContent : '' }),
   ghostState: () => viewport.ghostState(),
+  sensorState: (id) => runtime.sensorReadings.get(id) || null,
   __rollDbg: () => runtime._rollLast || null,
   get __vp() { return viewport; },   // 诊断通道（非 Agent 白名单，实时引用）
   cameraPos: () => viewport.camera.position.toArray(),

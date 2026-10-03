@@ -306,6 +306,32 @@ export const COMPONENTS = {
     spawnY: (p) => p.height / 2,
   },
 
+  speedSensor: {
+    id: 'speedSensor', label: '速度传感器', category: '测量和教学',
+    desc: '绑定一个动态体，运行时实时读其速度大小与分量（固定、无碰撞）',
+    compat: '需先选一个动态实体：传感器实时显示该体速度',
+    defaults: { params: { }, physics: { body: 'fixed', mass: 0, friction: 0.4, restitution: 0.2, linvel: [0, 0, 0], angvel: [0, 0, 0], linDamping: 0.05, angDamping: 0.05, gravityScale: 1 }, render: { material: 'brass' } },
+    schema: [],
+    buildGeometry: () => new THREE.ConeGeometry(0.06, 0.16, 12),
+    buildCollider: () => null,
+    spawnY: () => 0.5,
+    isSensor: true,                      // 放置语义：选 1 个动态体绑定
+  },
+
+  timer: {
+    id: 'timer', label: '计时器', category: '测量和教学',
+    desc: '竖直光门（固定、无碰撞）：绑定动态体，记录其首次穿过光门平面的时刻',
+    compat: '需先选一个动态实体：运行开始计时，该体穿过光门平面时停止',
+    defaults: { params: { height: 0.9 }, physics: { body: 'fixed', mass: 0, friction: 0.4, restitution: 0.2, linvel: [0, 0, 0], angvel: [0, 0, 0], linDamping: 0.05, angDamping: 0.05, gravityScale: 1 }, render: { material: 'steelDark' } },
+    schema: [
+      { key: 'height', label: '门柱高', unit: 'm', min: 0.2, max: 3, step: 0.05 },
+    ],
+    buildGeometry: (p) => new THREE.BoxGeometry(0.05, p.height, 0.05),
+    buildCollider: () => null,
+    spawnY: (p) => p.height / 2,
+    isSensor: true,
+  },
+
   ruler: {
     id: 'ruler', label: '测量尺', category: '测量和教学',
     desc: '带刻度横尺（固定、无碰撞）：量两实体间距，检查器实时读长度',
