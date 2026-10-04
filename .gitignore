@@ -1,3 +1,4 @@
 tools/server/
 __pycache__/
 shots/
+tools/ui-test/w*-run.log
