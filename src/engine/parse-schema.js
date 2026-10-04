@@ -55,11 +55,20 @@ export function normalizeParse(raw) {
   }
   if (!entities.length) return { ok: false, errors: [...errors, '没有可用的实体'] };
 
+  // 重力防御：解析的是一道"物理题"，必须发生在重力场里。真实模型偶尔把未提重力的题
+  // 解析成 gravity=0（失重）——建场后物体不运动，教学演示直接报废。0 视为无效值
+  // （报错+不生成重力变更）；确需零重力场景请手动改环境卡。
+  let gravityRaw = raw.gravity;
+  if (gravityRaw === 0) {
+    errors.push('gravity=0 已忽略（解析题目需要在重力场中；零重力场景请在环境卡手动设置）');
+    gravityRaw = null;
+  }
+
   const plan = {
     fixture: raw._fixture === true,
     questionType: str(raw.questionType, '未知题型'),
     goal: str(raw.goal, ''),
-    gravity: num(raw.gravity, [0, 50]),
+    gravity: num(gravityRaw, [0.01, 50]),
     G: num(raw.G, [1e-14, 1e6]),            // 场景引力常数（天体题给；null=保持 doc 现值）
     kind: str(raw.kind, ''),                  // rotation = 角动量/转台类（需要自动 joint 布局）
     attaches: Array.isArray(raw.attaches) ? raw.attaches.map((a) => ({
@@ -91,6 +100,27 @@ export function normalizeParse(raw) {
     confidence: clamp01(raw.confidence) ?? 0.5,
   };
   if (plan.gravity === null) { plan.gravity = 9.81; plan.gravityDefault = true; }
+
+  // 光滑语义推断（零信任规范化层的确定性保证）：真实模型常把"光滑/不计摩擦"写进
+  // environment/assumptions 文案，却漏把 friction: 0 写进 given —— 建场会落到默认摩擦
+  // （斜面 0.4/球 0.3），球滚动而非滑动，能量/动量解释全部对不上理论。此处按题面语义
+  // 注入 friction=0（仅接触相关实体、仅模型未显式给出时），标 inferred 供 UI 显示
+  // 「推断」徽标——不冒充题给，用户可在评审表单改回。
+  const smoothText = [plan.questionType, plan.goal, plan.environment, ...plan.assumptions].join(' ');
+  if (/光滑|不计(一切)?摩擦|无摩擦|忽略.{0,2}摩擦|摩擦可?忽略/.test(smoothText)) {
+    const CONTACT = new Set(['ramp', 'ground', 'sphere', 'box', 'cylinder']);
+    let injected = false;
+    for (const e of plan.entities) {
+      if (CONTACT.has(e.type) && e.given.friction == null) {
+        e.given.friction = 0;
+        e.inferred = [...(e.inferred || []), 'friction'];
+        injected = true;
+      }
+    }
+    if (injected) {
+      plan.assumptions = [...plan.assumptions, '按题面光滑语义注入摩擦=0（客户端推断，可在评审中修改）'].slice(0, 8);
+    }
+  }
   return { ok: true, plan, errors };
 }
 

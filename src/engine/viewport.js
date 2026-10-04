@@ -810,6 +810,9 @@ export class Viewport {
 
   setGizmoMode(mode) {
     this.gizmoMode = mode;
+    // 缩放模式语义=均匀视觉缩放：r186 的 showX/Y/Z=false 会连中心 XYZ 手柄一起隐藏（按名字
+    // 联动过滤，实测抓不到手柄），所以轴向手柄保留、松手提交时在 applyGizmoToEntity 统一
+    // 均匀化+钳制——拖拽过程中的瞬时异形是可见预览，落点状态总是合理值。
     if (this.selectedMesh && this.gizmoEnabled !== false) {
       this.gizmo.setMode(mode);
       this.gizmo.attach(this.selectedMesh);
@@ -864,6 +867,15 @@ export class Viewport {
       +this.selectedMesh.rotation.y.toFixed(4),
       +this.selectedMesh.rotation.z.toFixed(4),
     ];
+    // 缩放模式：把视觉缩放写进文档（runtime 重建时会应用），均匀化+钳制到教学合理区间。
+    // 语义：只改视觉网格——碰撞体/质量/转动惯量不变（检查器有标注）。
+    if (this.gizmoMode === 'scale') {
+      const s = this.selectedMesh.scale;
+      const avg = (Math.abs(s.x) + Math.abs(s.y) + Math.abs(s.z)) / 3 || 1;
+      const k = +Math.min(4, Math.max(0.25, avg)).toFixed(3);
+      entity.transform.scale = [k, k, k];
+      this.selectedMesh.scale.set(k, k, k);
+    }
   }
 
   // ============ 相机 ============

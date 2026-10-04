@@ -319,13 +319,39 @@ fixture parse-spin.json + serve.py 解析 prompt 补 kind/joint 规则。
 **遗留（如实）**：受力分解仅斜面语义；I-ω 反比滑移瞬态；曲线单实体；弹力箭头未分列（弹簧力在接触合力内）；
 拍题 prompt 弹簧/铰链类真实输出未抽查（本轮抽查了阿特伍德类）；ghost 不吸附。
 
-### 下一轮（Round 16 候选）
+### Round 35（10-04）独立接管审计：真实基线复现 + 三处真实缺口修复 —— **PASS（w1 30/30 + w2 10/10 + w3 6/6，回归 32 套复现）**
+
+独立接管（不信旧自述）：全量回归复现=31 绿 + **p23 flaky 13/14**（旧"全绿"不成立）；根因=档位迟滞
+收敛遇 headless 帧率抖动，固定 sleep 截断 → waitStep 按目标档位收敛，三连绿。
+
+**审计发现并修复的三处真实缺口**：
+1. **缩放 gizmo 死控件+无钳制**：applyGizmoToEntity 不回写 scale（松手弹回），拖拽中 mesh.scale
+   实测飙到 -2.5e7（视觉爆炸/翻转）→ 提交时均匀化+钳制 [0.25,4] 持久化进 transform.scale，
+   物理（质量/碰撞）不变，检查器「视觉缩放 ×N · 仅视觉」+tooltip 标注边界（w1 A4 组验证）。
+2. **真实图片解析摩擦缺口**（w2 抓到）：模型把"不计一切摩擦"写进文案、漏给 friction:0 → 建场默认
+   摩擦 0.3-0.4 → 球滚动 → 解释偏差 16%（FAIL 级）→ normalizeParse 确定性推断：题面光滑语义+
+   未显式给摩擦 → 注入 0 +「推断」徽标（不冒充题给，用户改动即转「题给」）。修复后同一真实图片
+   E2E：ramp 30.0°+sphere 1kg+μ=0，解释偏差 0.45%。
+3. **文档状态过期**：README 仍写"P0 阶段" → 重写（当前状态/入口/key 配置/无 key 边界/已知限制）；
+   GAP-MATRIX 注明为过程记录，验收事实源=docs/AUDIT-MATRIX.md；「设计定调」标题 ×11 重复修复。
+
+**新增独立审计脚本**（w 系列，fixture/开发者 API 不算数）：
+w1-manual（手动工作台全路径 30 项）、w2-agent（真实图片 E2E 10 项，1 次真实调用）、
+w3-failures（无 key/坏图/服务下线/拒绝路径 6 项，无 key 服务器+真实 kill 编排）、
+w4-mixed（混合搭建+逐条拒绝，真实文字通道 1 次）。
+
+**坑**：①TransformControls showX/Y/Z=false 会连中心手柄一起藏（按名字联动过滤），均匀缩放只能
+提交时均匀化 ②headless 下 setFiles 相对路径按 node cwd 解析（用 import.meta.url 锚定）
+③Git Bash 里 `bash xx.sh` 会落到 WSL bash（.sh 编排不可靠，内联执行）④后台子 shell 里的 cd 不影响
+主 shell cwd ⑤PY 僵尸进程按 PID+tasklist 验名清理（python3.13.exe 不是 python.exe）。
+
+### Round 35 之后（下一前沿候选）
 
 1. 弹簧/铰链类拍题真实模型抽查（每类一次调用）。
 2. 受力分解泛化（接触法向由差分力与重力差分解出）。
 3. P3 体验项（ghost 吸附、约束可视化）。
 
-## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）## 设计定调（延续 Round 0）
+## 设计定调（延续 Round 0）
 
 仪器级暗色摄影棚工具界面。冷灰烟色 + 单点缀琥珀（仪表读数与激活态）；直角 hairline（radius 2px）；
 无渐变无玻璃拟态无 emoji 无 em-dash；数字等宽；动效只做状态反馈。

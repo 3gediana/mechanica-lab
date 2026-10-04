@@ -49,6 +49,11 @@ try {
   });
   const move = (page, dist) => page.evaluate((d) => window.MECH.__camMove(d), dist);
   const waitScale = (page) => page.waitForTimeout(350);   // > 0.15s 读数节流
+  // 档位自适应是逐档迟滞收敛（每 0.15s 节流走一档，防震荡），跳变距离需 2-3 次收敛；
+  // headless rAF 帧率不稳，固定 sleep 会偶发截断在中间档 —— 改为等目标档位收敛（坑㉓同款教训）。
+  const waitStep = (page, step) => page.waitForFunction(
+    (s) => window.MECH.scaleState().step === s, step, { timeout: 8000 },
+  ).catch(() => {});
 
   // ==== A. 初始档位：默认相机距离下落在档位集内且读数同步 ====
   await waitScale(page);
@@ -60,7 +65,7 @@ try {
 
   // ==== B. 拉近：降档到 0.1，网格变密 ====
   await move(page, 0.8);
-  await waitScale(page);
+  await waitStep(page, 0.1);
   const s1 = await page.evaluate(() => window.MECH.scaleState());
   check('拉近后降档(step=0.1)', s1.step === 0.1, `step=${s1.step} text=${s1.text.trim().slice(0, 30)}`);
   check('网格变密(divisions 200)', s1.divisions === 200, `div=${s1.divisions}`);
@@ -69,12 +74,12 @@ try {
 
   // ==== C. 拉远：逐档升档（30m→1 档，60m→5 档），网格变疏 ====
   await move(page, 30);
-  await waitScale(page);
+  await waitStep(page, 1);
   const s2 = await page.evaluate(() => window.MECH.scaleState());
   check('拉远 30m 升到 1 档', s2.step === 1, `step=${s2.step}`);
   check('读数同步(1 m)', s2.text.includes('1 格 = 1 m'), s2.text.trim());
   await move(page, 60);
-  await waitScale(page);
+  await waitStep(page, 5);
   const s2b = await page.evaluate(() => window.MECH.scaleState());
   check('拉远 60m 升到 5 档', s2b.step === 5, `step=${s2b.step}`);
   check('网格变疏(divisions 4)', s2b.divisions === 4, `div=${s2b.divisions}`);
@@ -82,7 +87,7 @@ try {
 
   // ==== D. 回到中间：0.5 档稳定（迟滞不卡死不震荡） ====
   await move(page, 6);
-  await waitScale(page);
+  await waitStep(page, 0.5);
   const s3 = await page.evaluate(() => window.MECH.scaleState());
   check('中间距离恢复 0.5 档', s3.step === 0.5, `step=${s3.step}`);
 

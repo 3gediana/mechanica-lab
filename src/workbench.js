@@ -1025,6 +1025,14 @@ function renderInspector() {
   triRow(grpT, '位置', 'm', e.transform.pos, 0.1, (vals) => patchTransform(e, { pos: vals }, '移动'));
   triRow(grpT, '旋转', '°', e.transform.rot.map((r) => +(r * 180 / Math.PI).toFixed(1)), 1,
     (vals) => patchTransform(e, { rot: vals.map((v) => +(v * Math.PI / 180).toFixed(4)) }, '旋转'));
+  // 视觉缩放（缩放 gizmo 写 transform.scale）：只改显示网格，物理参数不变——必须让用户看得见这条边界
+  const vs = e.transform.scale || [1, 1, 1];
+  const vscaled = Math.abs(vs[0] - 1) > 1e-6 || Math.abs(vs[1] - 1) > 1e-6 || Math.abs(vs[2] - 1) > 1e-6;
+  const vsRow = document.createElement('div');
+  vsRow.className = 'frow';
+  vsRow.innerHTML = `<label>视觉缩放</label><span class="v" style="font-family:var(--mono);font-size:11px;color:var(--dim)">×${vs[0]} · 仅视觉</span>`;
+  vsRow.title = '缩放 gizmo 只改显示大小（0.25–4 倍）；碰撞体/质量/转动惯量不变。要改物理尺寸请编辑下方尺寸参数';
+  grpT.appendChild(vsRow);
   box.appendChild(grpT);
 
   // 参数组（schema 驱动）
@@ -2428,17 +2436,20 @@ function renderParseResult(warnings = []) {
       inp.type = 'number';
       inp.step = 'any';
       const given = plan.entities[i].given;
+      const inferredKeys = Array.isArray(plan.entities[i].inferred) ? plan.entities[i].inferred : [];
       const defVal = (e.type === 'sphere' && key === 'friction' && pairFriction != null) ? pairFriction : def;
       const val = given[key] !== undefined ? given[key] : defVal;
       inp.value = val;
       const src = document.createElement('span');
+      const isInferred = given[key] !== undefined && inferredKeys.includes(key);
       src.className = 'badge' + (given[key] !== undefined ? ' given' : '');
-      src.textContent = given[key] !== undefined ? '题给' : '默认';
+      src.textContent = isInferred ? '推断' : (given[key] !== undefined ? '题给' : '默认');
       inp.onchange = () => {
         const v = Number(inp.value);
         if (!Number.isFinite(v) || v < range[0] || v > range[1]) { inp.value = val; return; }
         recordCorrection(`entities[${i}].${key}`, val, v);
         plan.entities[i].given[key] = v;
+        if (inferredKeys.includes(key)) inferredKeys.splice(inferredKeys.indexOf(key), 1);   // 用户改过=接管归因
         src.textContent = '题给';
         src.className = 'badge given';
       };

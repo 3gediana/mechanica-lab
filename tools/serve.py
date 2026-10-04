@@ -43,6 +43,7 @@ PARSE_PROMPT = """你是大学物理题解析器。看图中的物理题，输�
 - 定滑轮/阿特伍德题：kind 填 atwood，滑轮 type=pulley（given 带 radius 和 position），两物体 type 用 sphere 或 box（given 带各自的 mass；若题目给初速度写 velocity）。
 - given 只写题目文字或图中明确给出的数值；没给的键不要写。
 - 题目说"不计摩擦"时 friction 写 0 并在 assumptions 说明；"由静止释放"时 velocity 不写（默认零）。
+- 题目未明确给重力加速度时 gravity 填 null（不要猜 0 或 10）；gravity 禁止填 0（除非题目明确是失重/零重力环境）。
 - 缺失的重要条件写进 unknowns；你补充的工程默认值写进 assumptions；按惯例处理但无题图依据的写进 uncertain。
 - 只输出 JSON 本体，且必须紧凑：单行、无缩进、无多余空格与换行。"""
 
