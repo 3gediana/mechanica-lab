@@ -316,7 +316,7 @@ export const PRESETS = {
         params: { radius: 0.3 },
         source: 'preset',
       }, seq);
-      // 两侧小球：m1=2（左/重）m2=1（右/轻）；绳长常数 C = 1.0 + 1.0 = 2.0
+      // 两侧小球：m1=1.2（左/重）m2=1.0（右/轻）；绳长常数 C = 1.0 + 1.0 = 2.0
       const mkBall = (side, x, m, mat) => createEntity('sphere', {
         name: `${side}侧球 (${m}kg)`,
         transform: { pos: [x, 1.0, 0], rot: [0, 0, 0] },

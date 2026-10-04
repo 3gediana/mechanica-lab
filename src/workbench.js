@@ -154,6 +154,26 @@ function rebuildAll(rerenderInspector = true) {
   updateSimbarStatic();
 }
 
+// 假设与修正记录面板（PHY-61）：doc.meta 里的解析假设/用户修正可见（存了不能看不见）
+function refreshAssumpPanel() {
+  const grp0 = document.getElementById('assumpGrp');
+  const body = document.getElementById('assumpBody');
+  if (!grp0 || !body) return;
+  const asm = (doc.meta && doc.meta.assumptions) || [];
+  const cor = (doc.meta && doc.meta.corrections) || [];
+  if (!asm.length && !cor.length) { grp0.style.display = 'none'; return; }
+  grp0.style.display = 'block';
+  body.innerHTML = '';
+  const mk = (txt, dim) => {
+    const d = document.createElement('div');
+    d.textContent = txt;
+    d.style.color = dim ? 'var(--faint)' : 'var(--dim)';
+    body.appendChild(d);
+  };
+  for (const a of asm.slice(0, 6)) mk('假设: ' + a, false);
+  for (const c of cor.slice(-4)) mk(`修正: ${c.field} ${c.from} → ${c.to}`, true);
+}
+
 function applyDoc(doc0, label) {   // 整文档替换（预置/打开/新建/撤销重做）——运行态一并终结
   const hadAppliedPlan = agentPlanApplied;
   doc = doc0;
@@ -164,6 +184,7 @@ function applyDoc(doc0, label) {   // 整文档替换（预置/打开/新建/撤
   if (hadAppliedPlan) { resetAgentPanel(); toast('已切换场景，原解析建场结果已清空'); }
   if (viewport) viewport.setGizmoEnabled(true);
   rebuildAll();
+  refreshAssumpPanel();
   updateSimbarStatic();
   commitChange(label);
 }
@@ -1203,7 +1224,41 @@ function renderInspector() {
     numRow(grpPh, '重力缩放', 'x', e.physics.gravityScale, 0.1, (v) => { e.physics.gravityScale = v; patchPhysics(e, '改重力缩放'); }, { min: 0, max: 5 });
     numRow(grpPh, '线性阻尼', '', e.physics.linDamping, 0.01, (v) => { e.physics.linDamping = v; patchPhysics(e, '改阻尼'); }, { min: 0, max: 10 });
   }
+  // 隐藏物理标志只读说明（PHY-10）：这些字段由预置/Agent 布局写入，语义必须可见
+  const physFlags = [];
+  if (e.physics.spinLock) physFlags.push('理想轴承（锁平动、只绕 Y 转）');
+  if (e.physics.gravitating) physFlags.push('天体：参与成对引力，不受世界重力');
+  if (e.physics.onPulley) physFlags.push('阿特伍德绳约束（onPulley）');
+  if (e.physics.onTrack) physFlags.push('管道轨道中心线约束（onTrack，光滑）');
+  if (physFlags.length) {
+    const fh = document.createElement('div');
+    fh.className = 'hint';
+    fh.textContent = '物理标志：' + physFlags.join('；');
+    grpPh.appendChild(fh);
+  }
   box.appendChild(grpPh);
+
+  // 约束组（PHY-3）：e.joints 可见 + 单条删除（悬空由删除级联兜底）
+  if (Array.isArray(e.joints) && e.joints.length) {
+    const grpJ = grp('约束');
+    e.joints.forEach((j, ji) => {
+      const row = document.createElement('div');
+      row.className = 'frow';
+      const tgt = getEntity(doc, j.target);
+      const jlabel = j.type === 'revolute' ? '转轴' : (j.type === 'prismatic' ? '滑槽' : j.type);
+      row.innerHTML = `<label>${jlabel}</label><span style="flex:1;font-size:11px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span><button class="danger" style="flex:0 0 auto;appearance:none;background:none;border:1px solid var(--line);border-radius:2px;color:var(--dim);font-size:10px;padding:2px 8px;cursor:pointer">删除</button>`;
+      row.children[1].textContent = '→ ' + (tgt ? tgt.name : j.target);
+      row.children[1].title = `axis=[${(j.axis || []).map((x) => +x.toFixed(2))}]`;
+      row.querySelector('button').onclick = () => {
+        if (mode === 'run') { toast('运行态不可删约束，请先重置'); return; }
+        const next = e.joints.filter((_, k) => k !== ji);
+        opUpdateEntity(e.id, { joints: next }, '删除' + jlabel + '约束');
+        toast('已删除' + jlabel + '约束（Ctrl+Z 可撤销）');
+      };
+      grpJ.appendChild(row);
+    });
+    box.appendChild(grpJ);
+  }
 
   // 材质组
   const grpM = grp('外观');
@@ -1233,6 +1288,7 @@ function renderInspector() {
     <div class="cell"><span class="k">质量</span><span class="v plain" data-lv="mass">--</span></div>
     <div class="cell"><span class="k">动量</span><span class="v" data-lv="momentum">--</span></div>
     <div class="cell"><span class="k">平动动能</span><span class="v" data-lv="keTrans">--</span></div>
+    <div class="cell"><span class="k">角速度</span><span class="v" data-lv="omega">--</span></div>
     <div class="cell"><span class="k">最近碰撞</span><span class="v plain" data-lv="coll">--</span></div>
     <div class="cell"><span class="k">滚动状态</span><span class="v plain" data-lv="roll">--</span></div>
     <div class="cell" style="grid-column:1/-1"><span class="k">速度矢量</span><span class="v plain" data-lv="vel">--</span></div>`;
@@ -1552,7 +1608,7 @@ function updateConsbar() {
   if (!consOn) return;
   const astro = doc.entities.some((e) => e.physics.gravitating);
   const atwood = !astro && doc.entities.some((e) => e.type === 'pulley');
-  const rotation = !astro && !atwood && doc.kind === 'rotation';
+  const rotation = !astro && !atwood && (doc.kind === 'rotation' || doc.entities.some((e) => e.physics.spinLock));   // PHY-34
   $('consMomentum').style.display = astro || rotation || atwood ? 'none' : 'grid';
   $('consAstro').style.display = astro ? 'grid' : 'none';
   $('consRotation').style.display = rotation ? 'grid' : 'none';
@@ -1660,6 +1716,7 @@ function updateReadouts() {
         set('mass', t.mass.toFixed(2));
         set('momentum', t.momentum.toFixed(3));
         set('keTrans', t.keTrans.toFixed(3));
+        set('omega', `${Math.hypot(t.angvel[0], t.angvel[1], t.angvel[2]).toFixed(2)} rad/s`);
         set('vel', `[${t.vel.map((x) => x.toFixed(2)).join(', ')}]`);
         const col = runtime.lastCollisionFor(e.id);
         set('coll', col ? `t=${col.t.toFixed(2)}s` : '无');
@@ -1674,7 +1731,7 @@ function updateReadouts() {
           set('roll', t.speed <= 0.02 ? '静止' : '—');
         }
       } else {
-        ['speed', 'height', 'mass', 'momentum', 'keTrans', 'vel', 'coll', 'roll'].forEach((k) => set(k, '--'));
+        ['speed', 'height', 'mass', 'momentum', 'keTrans', 'omega', 'vel', 'coll', 'roll'].forEach((k) => set(k, '--'));
       }
     }
   }
@@ -2804,6 +2861,7 @@ function applyAgentPlanInner(M, reportCounts) {
       at: new Date().toISOString(),
     },
   });
+  refreshAssumpPanel();
   // 连接类（绳/弹簧）：plan.attaches 的 from/to 索引 → 真实 id
   let attachSeq = 0;
   for (const at of (agentPlan.attaches || [])) {

@@ -451,16 +451,16 @@
 
 | # | 位置 | 问题 → 改法 | P | 量 | 风险 | 状态 |
 |---|---|---|---|---|---|---|
-| PHY-1 | runtime energyTotals | KE 无转动项（滚动球能量条走低假象）：+0.5·inertiaY·ω²（守恒条/曲线口径一致） | P1 | M | ⚠ p 系列能量断言数值变化 | ⬜ |
+| PHY-1 | runtime energyTotals | KE 无转动项（滚动球能量条走低假象）：+0.5·inertiaY·ω²（守恒条/曲线口径一致） | P1 | M | ⚠ p 系列能量断言数值变化 | ✅ B9：energyTotals 补 ½Iω²（曲线面板口径；守恒量条平动口径不受影响） |
 | PHY-2 | registry joints UI | 无图形化建约束入口：选中 2 实体 → 目录「约束」类（滑槽/转轴）卡（生成 e.joints 文档字段） | P1 | L | ⚠ UI+文档+undo 链路 | ⬜ |
-| PHY-3 | workbench 检查器 | joints 不可见不可删：检查器「约束」组列出 e.joints+attach（类型/target/×删除） | P1 | M | | ⬜ |
+| PHY-3 | workbench 检查器 | joints 不可见不可删：检查器「约束」组列出 e.joints+attach（类型/target/×删除） | P1 | M | | ✅ B9：检查器「约束」组可见+单条删除（走 undo 主通道） |
 | PHY-4 | scene-doc duplicateEntity | 副本 joints 指向原 target（复制转台控制原滑块）：复制时 joints 剥离+toast 说明 | P0 | S | | ✅ B4：duplicateEntity 剥离 joints |
 | PHY-5 | workbench opRemoveEntity | 删除目标实体后悬空 joints/attach 留档：级联清理引用（删除时扫 attach 包含者一并删/ joints target 失效项剔除+toast） | P0 | M | ⚠ w6 删坡恢复场景 | ✅ B4：attach 级联删除+悬空 joints 剔除 |
 | PHY-6 | runtime hinge | jointAxis 固定 [0,0,1]：铰链实体 params.axis 可编辑（schema+runtime 读取） | P2 | S | | ⬜ |
 | PHY-7 | registry spring | 弹簧视觉直杆（MAT-57 螺旋同源）：无独立物理项；Rapier spring joint ✓ | P3 | S | | ⬜ |
 | PHY-8 | runtime rope | 绳张紧外可推（rope joint 语义）：教学可接受；文档注明；无项 | P3 | S | | ⬜ |
 | PHY-9 | runtime rope | 无断裂：params.breakTension 可选（每步查张力差分超限删 joint）| P3 | M | | ⬜ |
-| PHY-10 | registry spinLock | 隐藏物理标志无 UI：检查器「理想轴承」只读 badge（spinLock/gravitating/onPulley/onTrack 通用只读展示组） | P1 | M | | ⬜ |
+| PHY-10 | registry spinLock | 隐藏物理标志无 UI：检查器「理想轴承」只读 badge（spinLock/gravitating/onPulley/onTrack 通用只读展示组） | P1 | M | | ✅ B9：spinLock/gravitating/onPulley/onTrack 只读说明进物理组 |
 | PHY-11 | registry noCollide | 仅 agent 铰链杆内部使用：检查器「参与碰撞」checkbox（noCollide 反义） | P2 | S | | ⬜ |
 | PHY-12 | runtime 碰撞组 | noCollide 实现=碰撞组 0x0002 hack：常量化+注释（工程交叉） | P2 | S | | ⬜ |
 | PHY-13 | workbench 冲量 | 无运行时踢一脚：检查器「施加冲量」（暂停态，沿视线方向 5 N·s，runtime.applyImpulse） | P2 | M | ⚠ 只编辑初速更符合文档驱动：改为写 linvel 增量+undo | ⬜ |
@@ -471,7 +471,7 @@
 | PHY-18 | runtime pulley | 仅定滑轮：动滑轮/滑轮组 P3 决策（教学价值高但约束数学另起） | P3 | L | | ⬜ |
 | PHY-19 | runtime atwood | 绳可视直穿滑轮（MAT-55 视觉项同源）：物理约束 ✓ 正确；无项 | P3 | S | | ⬜ |
 | PHY-20 | registry light | 点光源不投影：可选 castShadow（性能 note）P3 | P3 | S | | ⬜ |
-| PHY-21 | workbench 角速度读数 | liveGrid 无 ω：加「角速度 ‖ω‖」行（telemetry 已有 angvel） | P1 | S | | ⬜ |
+| PHY-21 | workbench 角速度读数 | liveGrid 无 ω：加「角速度 ‖ω‖」行（telemetry 已有 angvel） | P1 | S | | ✅ B9：liveGrid 补角速度 ‖ω‖ 行 |
 | PHY-22 | workbench 质心 | 无质心可视化：选中实体显示质心标记（Group 按质量加权）P3 决策 | P3 | M | | ⬜ |
 | PHY-23 | registry gravityScale | 范围 0~5 无负（上浮演示）：schema 扩 -2~5 决策（物理上 gravityScale 负=反向重力） | P3 | S | | ⬜ |
 | PHY-24 | workbench 阻尼模型 | 仅线性阻尼：空气阻力 kv² 选项（自定义阻力系数 Cd·A·ρ 简化为 params.drag2）：P3 决策 | P3 | M | | ⬜ |
@@ -484,7 +484,7 @@
 | PHY-31 | runtime spin slot | 限位止挡非弹性 ✓ 教学正确；弹性碰撞止挡选项 P3 | P3 | S | | ⬜ |
 | PHY-32 | runtime _constrainAtwood | x/z 归位 home（导轨理想化）✓ 假设已记录；无项 | P3 | S | | ⬜ |
 | PHY-33 | runtime 天体 | n 体 ✓ 通用；三体等 chaos 演示：预设「三体」P2 决策（教学价值） | P2 | M | | ⬜ |
-| PHY-34 | workbench 守恒条 | rotation 模式仅 doc.kind==='rotation' 手动/agent 置位：检测转台 joints 自动置 kind（heuristic）P2 | P2 | S | | ⬜ |
+| PHY-34 | workbench 守恒条 | rotation 模式仅 doc.kind==='rotation' 手动/agent 置位：检测转台 joints 自动置 kind（heuristic）P2 | P2 | S | | ✅ B9：rotation 守恒条自动检测 spinLock（不依赖 doc.kind 手动置位） |
 | PHY-35 | registry 复合体 | 多 collider 单刚体（哑铃两球一杆）：组件「连接后合并」P3 决策 | P3 | L | | ⬜ |
 | PHY-36 | runtime 摩擦组合 | min 注入策略 ✓（parse 层）；手动场景取平均语义在检查器 tooltip 说明 | P2 | S | | ⬜ |
 | PHY-37 | explain 恢复系数 | AG-2 修正后与引擎一致 ✓；无独立项 | P3 | S | | ⬜ |
@@ -501,7 +501,7 @@
 | PHY-48 | workbench 轨迹导出 | trailsDump API ✓；CSV 导出按钮（曲线面板）P2（UI 交叉） | P2 | S | | ⬜ |
 | PHY-49 | runtime 帧导出 | frames 录制无导出：JSON 下载 P3 | P3 | S | | ⬜ |
 | PHY-50 | workbench 图快照 | 无视口截图按钮：renderer.domElement.toDataURL 下载（preserveDrawingBuffer 需开或渲染后同步截）P2 | P2 | S | | ⬜ |
-| PHY-51 | 预置覆盖 | atwood m1 1.2/m2 1 vs 注释 2/1 不一致（注释错）：修正注释或参数一致 | P1 | S | ⚠ p 断言用 1.2/1 | ⬜ |
+| PHY-51 | 预置覆盖 | atwood m1 1.2/m2 1 vs 注释 2/1 不一致（注释错）：修正注释或参数一致 | P1 | S | ⚠ p 断言用 1.2/1 | ✅ B9：atwood 预置注释修正（m1=1.2 与实际参数一致） |
 | PHY-52 | 预置 incline | 摩擦 0.3 非光滑（守恒条动量误差场景？p0 基线）✓ 设计如此；无项 | P3 | S | | ⬜ |
 | PHY-53 | presets celestial | 近圆 5m/s ✓；椭圆预设（v=4 偏心演示）P2 决策 | P2 | S | | ⬜ |
 | PHY-54 | presets classic | 环轨余量 32.8% ✓ 验证过；无项 | P3 | S | | ⬜ |
@@ -511,7 +511,7 @@
 | PHY-58 | runtime jointFailures | 失败记录 ✓ 可见；建场后 toast 汇总（AG-87 同源） | P2 | S | | ⬜ |
 | PHY-59 | viewport jointViz | 运行态也画 ✓；多选全画 ✓；无项 | P3 | S | | ⬜ |
 | PHY-60 | registry spin | spokes 4 ✓ 可视化转动的教学关键；辐条数可调 ✓；无项 | P3 | S | | ⬜ |
-| PHY-61 | workbench 教学假设面板 | doc.meta.assumptions 无 UI 展示（存了看不见）：Agent 页「假设记录」折叠区（含 corrections） | P1 | M | | ⬜ |
+| PHY-61 | workbench 教学假设面板 | doc.meta.assumptions 无 UI 展示（存了看不见）：Agent 页「假设记录」折叠区（含 corrections） | P1 | M | | ✅ B9：Agent 页「假设与修正记录」面板（boot/建场/换场刷新） |
 | PHY-62 | runtime 恢复系数上限 | restitution≤1 schema ✓；极端组合（1+1 完全弹性+高速）能量发散：CCD ✓ 兜底；无项 | P3 | S | | ⬜ |
 
 ## 七、代码与工程健康（ENG-1 ~ ENG-70）

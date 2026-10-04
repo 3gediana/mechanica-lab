@@ -436,6 +436,12 @@ export class Runtime {
       if (!b.body || b.entity.physics.body !== 'dynamic') continue;
       const v = b.body.linvel(), m = b.body.mass();
       ke += 0.5 * m * (v.x * v.x + v.y * v.y + v.z * v.z);
+      // 转动动能 ½Iω²（PHY-1）：滚动/旋转体的动能不再被低估（守恒量条平动口径单独算，互不影响）
+      const I = this._reg && this._reg.inertiaYOf ? this._reg.inertiaYOf(b.entity.type, b.entity.params, m) : 0;
+      if (I > 0) {
+        const w = b.body.angvel();
+        ke += 0.5 * I * (w.x * w.x + w.y * w.y + w.z * w.z);
+      }
       const gs = b.entity.physics.gravityScale != null ? b.entity.physics.gravityScale : 1;
       pe += m * Math.abs(gy) * gs * b.body.translation().y;
     }
