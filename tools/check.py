@@ -35,24 +35,40 @@ for js in [
     need(ROOT / js, (ROOT / js).exists(), f"缺失: {js}")
 for page in ["index.html", "classic.html"]:
     need(ROOT / page, (ROOT / page).exists(), f"缺失: {page}")
-for tool in ["tools/serve.py", "tools/ui-test/p0.mjs", "tools/ui-test/p1.mjs", "tools/ui-test/p2.mjs", "tools/ui-test/p3.mjs", "tools/ui-test/p4.mjs", "tools/ui-test/p5.mjs", "tools/ui-test/p6.mjs", "tools/ui-test/p7.mjs", "tools/ui-test/p8.mjs", "tools/ui-test/p9.mjs", "tools/ui-test/p10.mjs", "tools/ui-test/p11.mjs", "tools/ui-test/p12.mjs", "tools/ui-test/p13.mjs", "tools/ui-test/p14.mjs"]:
+_ui = ["tools/serve.py"] + [f"tools/ui-test/p{i}.mjs" for i in range(0, 32)] + [
+    "tools/ui-test/w1-manual.mjs", "tools/ui-test/w2-agent.mjs", "tools/ui-test/w3-failures.mjs",
+    "tools/ui-test/w4-mixed.mjs", "tools/ui-test/w5-journey.mjs", "tools/ui-test/w6-depth.mjs",
+    "tools/ui-test/w7-presets-explain.mjs",
+]
+for tool in _ui:
     need(ROOT / tool, (ROOT / tool).exists(), f"缺失: {tool}")
+for doc in ["docs/AUDIT-MATRIX.md", "docs/OPTIMIZATION-500.md"]:
+    need(ROOT / doc, (ROOT / doc).exists(), f"缺失: {doc}")
 for fx in ["tools/fixtures/question-incline.png", "tools/fixtures/parse-incline.json",
            "tools/fixtures/question-momentum.png", "tools/fixtures/parse-momentum.json",
-           "tools/fixtures/parse-celestial.json", "tools/fixtures/parse-spin.json", "tools/fixtures/parse-spring.json", "tools/fixtures/parse-hinge.json", "tools/fixtures/parse-projectile.json", "tools/fixtures/parse-atwood.json", "tools/fixtures/question-spring.png", "tools/fixtures/question-hinge.png", "tools/fixtures/question-spin.png", "tools/fixtures/question-atwood.png"]:
+           "tools/fixtures/parse-celestial.json", "tools/fixtures/parse-spin.json", "tools/fixtures/parse-spring.json", "tools/fixtures/parse-hinge.json", "tools/fixtures/parse-projectile.json", "tools/fixtures/parse-atwood.json", "tools/fixtures/parse-momentum2d.json", "tools/fixtures/parse-spin-real.json",
+           "tools/fixtures/question-spring.png", "tools/fixtures/question-hinge.png", "tools/fixtures/question-spin.png", "tools/fixtures/question-atwood.png", "tools/fixtures/question-celestial.png", "tools/fixtures/question-noise.png"]:
     need(ROOT / fx, (ROOT / fx).exists(), f"缺失: {fx}")
 
-# 1c. 密钥纪律：key / 上游端点 / 鉴权头只允许出现在服务端 tools/serve.py，前端零出现
+# 1c. 密钥纪律：key / 上游端点 / 鉴权头只允许出现在服务端 tools/serve.py，前端零出现；
+#     测试脚本可引用环境变量名/文件名做编排（w3 无 key 场景），但不许出现密值与上游 URL/鉴权头
 SECRET_PATTERNS = ["3esUVr", "step_key", "api.stepfun", "Bearer"]
-for rel in ["index.html", "classic.html", "src/workbench.js", "src/legacy-main.js",
-            "src/materials.js", "src/track-curve.js",
-            "src/engine/scene-doc.js", "src/engine/registry.js", "src/engine/runtime.js",
-            "src/engine/viewport.js", "src/engine/presets.js", "src/engine/parse-schema.js",
-            "src/engine/explain.js"]:
-    txt = (ROOT / rel).read_text(encoding="utf-8")
-    for pat in SECRET_PATTERNS:
+_scan_targets = ["index.html", "classic.html", "src/workbench.js", "src/legacy-main.js",
+                 "src/materials.js", "src/track-curve.js",
+                 "src/engine/scene-doc.js", "src/engine/registry.js", "src/engine/runtime.js",
+                 "src/engine/viewport.js", "src/engine/presets.js", "src/engine/parse-schema.js",
+                 "src/engine/explain.js", "src/engine/thumbs.js"]
+for _f in (ROOT / "tools/ui-test").glob("*.mjs"):
+    _scan_targets.append(str(_f.relative_to(ROOT)).replace("\\", "/"))
+for rel in _scan_targets:
+    p = ROOT / rel
+    if not p.exists():
+        continue
+    txt = p.read_text(encoding="utf-8")
+    pats = SECRET_PATTERNS if not rel.startswith("tools/ui-test/") else ["3esUVr", "api.stepfun", "Bearer"]
+    for pat in pats:
         if pat in txt:
-            fails.append(f"前端密钥泄漏红线: {rel} 含 '{pat}'")
+            fails.append(f"密钥泄漏红线: {rel} 含 '{pat}'")
 
 # 2. importmap 路径可达
 html = (ROOT / "index.html").read_text(encoding="utf-8")
@@ -110,6 +126,18 @@ for ch, name in [("\u2014", "em-dash"), ("\u2013", "en-dash")]:
     if ch in html: fails.append(f"index.html 出现 {name}")
 emoji = re.findall(r"[\U0001F300-\U0001FAFF\u2600-\u27BF]", html)
 if emoji: fails.append(f"index.html 出现 emoji: {emoji[:3]}")
+
+# 7. 材质键契约（ENG-10）：registry.MATERIAL_OPTIONS 的每个 key 必须是 materials.js 返回的材质键
+reg_txt = (ROOT / "src/engine/registry.js").read_text(encoding="utf-8")
+mat_txt = (ROOT / "src/materials.js").read_text(encoding="utf-8")
+_opt_block = re.search(r"MATERIAL_OPTIONS\s*=\s*\[(.*?)\]", reg_txt, re.S)
+_mat_keys = set(re.findall(r"^ {4}(\w+)\s*:\s*(?:new THREE|ringC)", mat_txt, re.M))
+if _opt_block and _mat_keys:
+    _opt_keys = set(re.findall(r"key:\s*'(\w+)'", _opt_block.group(1)))
+    for k in sorted(_opt_keys - _mat_keys):
+        fails.append(f"材质契约断裂: MATERIAL_OPTIONS 含 materials.js 未提供的键 '{k}'")
+elif _opt_block and not _mat_keys:
+    warns.append("materials.js 材质键正则未命中（结构变更？）")
 
 print("== MECHANICA check ==")
 for w in warns: print("  WARN:", w)
