@@ -94,6 +94,12 @@ function wedgePoints(L, H, W) {
   ]);
 }
 
+// 共享视觉件材质（MAT-2/3/4 + PER-42）：辐条/旗面/灯泡此前每实例每 rebuild 各 new 一份
+// （12 辐条转台=12 个材质），既费重建又泄漏 dispose 面——模块级共享，永不单独 dispose
+const SPOKE_MAT = new THREE.MeshStandardMaterial({ color: 0x8a6a48, roughness: 0.6, metalness: 0.1 });
+const FLAG_MAT = new THREE.MeshStandardMaterial({ color: 0xc96a5a, roughness: 0.5 });
+const BULB_MAT = new THREE.MeshStandardMaterial({ color: 0xffe0b0, emissive: 0xffc880, emissiveIntensity: 0.9, roughness: 0.4 });
+
 export const COMPONENTS = {
   sphere: {
     id: 'sphere', label: '球', category: '基础物体',
@@ -146,7 +152,7 @@ export const COMPONENTS = {
       for (let i = 0; i < p.spokes; i++) {
         const spoke = new THREE.Mesh(
           new THREE.BoxGeometry(p.radius * 2, 0.015, 0.035),
-          new THREE.MeshStandardMaterial({ color: 0x8a6a48, roughness: 0.6, metalness: 0.1 })
+          SPOKE_MAT
         );
         spoke.position.y = p.height / 2 + 0.008;
         spoke.rotation.y = (i / p.spokes) * Math.PI;   // 每根辐条是一条直径
@@ -392,8 +398,7 @@ function markerGroup(height, material) {
   const g = new THREE.Group();
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, height, 8), material);
   pole.position.y = height / 2;
-  const flag = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.18, 3),
-    new THREE.MeshStandardMaterial({ color: 0xc96a5a, roughness: 0.5 }));
+  const flag = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.18, 3), FLAG_MAT);
   flag.position.y = height - 0.06;
   flag.rotation.z = -Math.PI / 2;
   g.add(pole, flag);
@@ -403,8 +408,7 @@ function markerGroup(height, material) {
 function lightGroup(p) {
   // 点光源：小灯泡球体 + PointLight（暖白，照亮半径约 6m；不投影避免阴影重叠）
   const g = new THREE.Group();
-  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.07, 16, 12),
-    new THREE.MeshStandardMaterial({ color: 0xffe0b0, emissive: 0xffc880, emissiveIntensity: 0.9, roughness: 0.4 }));
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.07, 16, 12), BULB_MAT);
   const lamp = new THREE.PointLight(0xffe2b8, p.intensity ?? 6, 7, 2);
   lamp.position.y = 0;
   g.add(bulb, lamp);

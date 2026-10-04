@@ -40,8 +40,13 @@ try {
     && Math.abs(scene.zA - scene.zB) > 0.05 && Math.abs(scene.vzA) > 0.1,
     JSON.stringify(scene));
   await page.click('#btnPlay');
-  // 接触发生在 ~2.2s（A 行进 1.2 m/s × 2.6m 距离），等 3s 确保碰撞后散开
-  await page.waitForTimeout(3000);
+  // 接触发生在 ~2.2s（A 行进 1.2 m/s × 2.6m 距离）；等待碰撞后 z 分离达标（负载下实时率<1）
+  await page.waitForFunction(() => {
+    const balls = window.MECH.doc().entities.filter((e) => e.type === 'sphere');
+    if (balls.length !== 2) return false;
+    const a = window.MECH.telemetry(balls[0].id), b = window.MECH.telemetry(balls[1].id);
+    return a && b && Math.abs(a.pos[2] - b.pos[2]) > 0.25;
+  }, null, { timeout: 10000 });
   await page.click('#btnPause');
   const spread = await page.evaluate(() => {
     const balls = window.MECH.doc().entities.filter((e) => e.type === 'sphere');

@@ -94,7 +94,8 @@ try {
   await page.waitForTimeout(300);
   await page.click('#btnCurves');
   await page.click('#btnPlay');
-  await page.waitForTimeout(2000);
+  // 固定 2s 在批内负载下可能只采到 <10 个样（采样节流 0.15s）：等待采样到位
+  await page.waitForFunction(() => window.MECH.curveState().samples >= 10, null, { timeout: 6000 });
   const cs = await page.evaluate(() => window.MECH.curveState());
   check('多实体曲线: 两球同时采样', cs.on && cs.entities.length === 2 && cs.samples >= 10,
     JSON.stringify({ entities: cs.entities, samples: cs.samples }));

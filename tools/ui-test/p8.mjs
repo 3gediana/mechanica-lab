@@ -70,7 +70,12 @@ try {
   await page.selectOption('#selPreset', 'celestial');
   await page.waitForTimeout(300);
   await page.click('#btnCons');
-  await page.waitForTimeout(600);
+  // 固定 600ms 在批负载下 astro 分支可能未及首刷（读数节流 0.15s+重绘饥饿）：等真实条件
+  await page.waitForFunction(() => {
+    const ke = parseFloat(document.getElementById('ebFill').style.width);
+    const pe = parseFloat(document.getElementById('ebFillPE').style.width);
+    return ke > 0 && pe > 0;
+  }, null, { timeout: 6000 }).catch(() => {});
   const keW = await page.evaluate(() => document.getElementById('ebFill').style.width);
   const peW = await page.evaluate(() => document.getElementById('ebFillPE').style.width);
   check('astro 能量堆叠条 KE/PE 分色', parseFloat(keW) > 0 && parseFloat(peW) > 0, `KE=${keW} PE=${peW}`);

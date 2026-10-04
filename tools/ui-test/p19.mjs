@@ -82,7 +82,8 @@ try {
 
   // ==== C. 运行 + 斜面解释链路 ====
   await page.click('#btnPlay');
-  await page.waitForTimeout(2600);
+  // 等模拟时长到位（解释链路需要足够的演化；固定 2.6s 在批负载下实时率<1 会欠采）
+  await page.waitForFunction(() => window.MECH.state().simT > 2.6, null, { timeout: 8000 });
   await page.click('#btnPause');
   await page.click('#tabAgent');
   await page.click('#btnRunExplain');

@@ -64,6 +64,8 @@ try {
   await page.waitForTimeout(1200);
   const fs = await page.evaluate(() => window.MECH.forceState());
   check('受力箭头显示(重力+接触合力)', fs.on && fs.visible >= 1, JSON.stringify(fs));
+  // 固定 1.2s 在批负载下可能只采 4 个样（采样节流 0.15s）：等待采样到位
+  await page.waitForFunction(() => window.MECH.curveState().samples >= 5, null, { timeout: 5000 });
   const cs = await page.evaluate(() => window.MECH.curveState());
   check('时间曲线采样中', cs.on && cs.samples >= 5, JSON.stringify(cs));
   await page.screenshot({ path: 'shots/71-forces-curves.png' });

@@ -451,7 +451,7 @@ export class Viewport {
         const geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(1800 * 3), 3));
         geo.setDrawRange(0, 0);
-        const mat = new THREE.LineBasicMaterial({ color: PALETTE[i % PALETTE.length], transparent: true, opacity: 0.75 });
+        const mat = new THREE.LineBasicMaterial({ color: PALETTE[i % PALETTE.length], transparent: true, opacity: 0.75, fog: false });   // 数据线不吃雾（天体远轨仍清晰）
         line = new THREE.Line(geo, mat);
         line.frustumCulled = false;
         line.visible = false;
@@ -542,7 +542,7 @@ export class Viewport {
   }
 
   async init() {
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(this.container.clientWidth, this.container.clientHeight);
     renderer.shadowMap.enabled = true;
@@ -592,10 +592,16 @@ export class Viewport {
     key.shadow.camera.top = 9; key.shadow.camera.bottom = -9;
     key.shadow.camera.near = 1; key.shadow.camera.far = 24;
     key.shadow.bias = -0.0002;
+    key.shadow.normalBias = 0.02;   // 消斜面/球面接触带自阴影 acne（MAT-6）
     scene.add(key);
     const fill = new THREE.DirectionalLight(0xbcccdd, 0.5);
     fill.position.set(-5, 3.5, -4);
     scene.add(fill);
+    // 三点布光的轮廓光（MAT-5，真实摄影棚参考）：低强度冷色从后上方勾边，
+    // 暗背景里把物体边缘从背景分离（主光 2.0 / 补光 0.5 / 轮廓 0.35）
+    const rim = new THREE.DirectionalLight(0x8ab0d0, 0.35);
+    rim.position.set(-3.5, 5.5, -5.5);
+    scene.add(rim);
 
     // 影 receiving 地面（透明 ShadowMaterial，不与实体碰撞概念混淆）
     const shadowFloor = new THREE.Mesh(

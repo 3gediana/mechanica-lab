@@ -136,19 +136,29 @@ try {
   // 拖到中点：pose 应跳变，roT 变化
   const scrub = await page.evaluate(() => {
     const bar = document.getElementById('replayBar');
+    // 跳到「离当前回放位置最远」的端点帧：固定跳中点会与自动推进位置随机重合（差值塌缩竞态）
     const mid = Math.round((+bar.min + +bar.max) / 2);
     const before = window.MECH.state().simT;
-    bar.value = mid;
+    const curIdx = +bar.value;
+    // 四分位帧：离当前位置足够远，且不是尾帧（跳尾帧会让回放立即到头触发 stopReplay）
+    const q1 = Math.max(2, Math.round(+bar.max / 4)), q3 = Math.min(+bar.max - 2, Math.round(3 * +bar.max / 4));
+    const target = curIdx > mid ? q1 : q3;
+    bar.value = target;
     bar.dispatchEvent(new Event('input', { bubbles: true }));
-    bar.dispatchEvent(new Event('change', { bubbles: true }));
     const after = window.MECH.state().simT;
-    return { mid, before, after, val: bar.value };
+    bar.dispatchEvent(new Event('change', { bubbles: true }));
+    return { mid, target, before, after, val: bar.value };
   });
-  check('拖动时间轴逐帧 scrub(simT 跳到中点帧)', scrub.after > 0.3 && Math.abs(scrub.after - scrub.before) > 0.05,
+  check('拖动时间轴逐帧 scrub(simT 跳到远端帧)', scrub.after > 0.3 && Math.abs(scrub.after - scrub.before) > 0.05,
     `t=${scrub.before.toFixed(2)}→${scrub.after.toFixed(2)} @frame${scrub.mid}`);
-  await page.waitForTimeout(500);
-  const resumed = await page.evaluate(() => window.MECH.state().simT);
-  check('松手后回放继续推进', resumed > scrub.after, `t=${resumed.toFixed(2)}`);
+  // 松手后推进判定（事件式）：simT 越过 scrub 时刻即算推进；若先到尾帧结束则如实报
+  // （固定 500ms 采样会因短录像+60fps 自动推进在窗口内到头而随机失真）
+  const advanced = await page.waitForFunction((tAfter) => {
+    const s = window.MECH.state();
+    if (s.simT > tAfter + 1e-9) return 'up';
+    return s.mode === 'edit' ? 'ended' : false;
+  }, scrub.after, { timeout: 2500 }).then((r) => r.jsonValue());
+  check('松手后回放继续推进', advanced === 'up', advanced === 'ended' ? '回放已到尾(未及采样)' : '未推进');
   await page.screenshot({ path: 'shots/302-replay-scrub.png' });
   await page.evaluate(() => window.MECH.loadPreset('empty'));
   await page.waitForTimeout(300);

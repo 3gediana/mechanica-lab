@@ -19,7 +19,7 @@
 | PER-9 | runtime.js trails push/shift | 1800 封顶后每采样 shift O(n)：环形缓冲或超限 64 个一批 splice | P1 | S | ⚠ drawRange 语义 | ⬜ |
 | PER-10 | runtime.js telemetry | 每次调用 6+ 数组分配且每帧每实体调用：热路径（矢量层）改为只读填充复用对象，MECH.telemetry 保留现语义 | P2 | M | ⚠ 调用方持有引用 | ⬜ |
 | PER-11 | runtime.js _createEntity | 传感器/标记/绳/铰链视觉件 castShadow=true 徒增阴影 pass：buildCollider()==null 的实体默认关 castShadow | P0 | S | | ✅ B2：无碰撞体实体免阴影 pass |
-| PER-12 | viewport.js init | renderer 无 powerPreference:'high-performance'：补上（独显直连本机收益明确） | P1 | S | | ⬜ |
+| PER-12 | viewport.js init | renderer 无 powerPreference:'high-performance'：补上（独显直连本机收益明确） | P1 | S | | ✅ B5：powerPreference high-performance |
 | PER-13 | viewport.js spawnImpact | 每次碰撞 new RingGeometry+Material：环池复用（8 个循环） | P2 | S | | ⬜ |
 | PER-14 | viewport.js setHighlights | 每次选中变更 new/dispose BoxHelper：按实体缓存 BoxHelper 复用 update() | P2 | M | | ⬜ |
 | PER-15 | workbench.js autosave | 每次 commit 同步写 localStorage 全 JSON：300ms 防抖（页面隐藏前 flush） | P1 | S | ⚠ beforeunload flush | ⬜ |
@@ -189,11 +189,11 @@
 | # | 位置 | 问题 → 改法 | P | 量 | 风险 | 状态 |
 |---|---|---|---|---|---|---|
 | MAT-1 | materials.js repeat | marble/wood repeat 定值，大尺寸 ramp/box 纹理拉伸：按实体尺寸缩放 repeat（registry 钩子 matRepeat(params)） | P1 | M | ⚠ 材质共享需 per-instance 纹理或接受共享档 | ⬜ |
-| MAT-2 | registry cylinder makeMesh | spokes 每次 rebuild new MeshStandardMaterial×辐条数：模块级共享 spoke 材质 | P0 | S | | ⬜ |
-| MAT-3 | registry markerGroup | flag 材质每实例 new：共享常量材质 | P0 | S | | ⬜ |
-| MAT-4 | registry lightGroup | bulb 材质每实例 new：共享 | P0 | S | | ⬜ |
-| MAT-5 | viewport.js 灯光 | 三点布光缺轮廓光：加低强度冷色 rim DirectionalLight(0x8ab0d0, 0.35) 从后上（真实摄影棚参考） | P1 | S | ⚠ 全场景亮度微变，w 截图金标 | ⬜ |
-| MAT-6 | viewport.js shadow | 无 normalBias：加 key.shadow.normalBias=0.02 消斜面自阴影 acne（实机验证） | P1 | S | | ⬜ |
+| MAT-2 | registry cylinder makeMesh | spokes 每次 rebuild new MeshStandardMaterial×辐条数：模块级共享 spoke 材质 | P0 | S | | ✅ B5：SPOKE_MAT/FLAG_MAT/BULB_MAT 模块级共享 |
+| MAT-3 | registry markerGroup | flag 材质每实例 new：共享常量材质 | P0 | S | | ✅ B5：同 MAT-2 |
+| MAT-4 | registry lightGroup | bulb 材质每实例 new：共享 | P0 | S | | ✅ B5：同 MAT-2 |
+| MAT-5 | viewport.js 灯光 | 三点布光缺轮廓光：加低强度冷色 rim DirectionalLight(0x8ab0d0, 0.35) 从后上（真实摄影棚参考） | P1 | S | ⚠ 全场景亮度微变，w 截图金标 | ✅ B5：冷色轮廓光 0x8ab0d0/0.35（visual-judge 逐像素验收 PASS：轮廓 10x 对比、无过亮勾边） |
+| MAT-6 | viewport.js shadow | 无 normalBias：加 key.shadow.normalBias=0.02 消斜面自阴影 acne（实机验证） | P1 | S | | ✅ B5：key.shadow.normalBias=0.02（验收确认无 acne） |
 | MAT-7 | viewport.js 阴影范围 | ±9 固定：天体/大板场景阴影裁切：按场景包围盒自适应 left/right/top/bottom/far（rebuild 时更新） | P2 | M | | ⬜ |
 | MAT-8 | viewport.js exposure | 1.06 定值无用户控制：顶栏视角组加曝光滑杆（0.6~1.6，内存不进文档） | P2 | S | | ⬜ |
 | MAT-9 | viewport.js envRotation | environmentRotation 不可调（r163+ 支持）：材质检查用滑杆（P3） | P3 | S | | ⬜ |
@@ -203,7 +203,7 @@
 | MAT-13 | materials.js steelDark | 无表面变化：加程序化各向异性 anisotropy 0.3（机加纹理感） | P3 | S | ⚠ 贵族化过度风险 | ⬜ |
 | MAT-14 | materials.js wood | 无法线图：补 wood/normal.jpg 加载（缺则跳过 ✓ 契约） | P3 | M | | ⬜ |
 | MAT-15 | workbench render.color | 无 per-entity 色调：doc.render.tint (#rrggbb) + 材质 clone 着色（不破坏共享材质缓存语义：tint 实体 clone） | P2 | M | | ⬜ |
-| MAT-16 | viewport.js trail 线 | 受雾影响远处轨迹淡出：LineBasicMaterial fog=false（数据线不参与大气） | P1 | S | | ⬜ |
+| MAT-16 | viewport.js trail 线 | 受雾影响远处轨迹淡出：LineBasicMaterial fog=false（数据线不参与大气） | P1 | S | | ✅ B5：轨迹线 fog=false |
 | MAT-17 | viewport.js grid | 无主刻度强调：step≥0.5 时每 5 格加 0x4a4e55 强线（双 GridHelper 叠加或自定义几何） | P2 | M | | ⬜ |
 | MAT-18 | viewport.js 轴线 | ±10 固定，5m 档视野 20m+ 轴不到边：轴线长度随 gridStep×10 | P2 | S | | ⬜ |
 | MAT-19 | registry ruler | 光杆无刻度：rulerGeometry 加 0.1m 刻度槽（BoxGeometry merge 或小段 mesh） | P2 | M | | ⬜ |
@@ -544,7 +544,7 @@
 | ENG-24 | 命名规范 | M（材质）/doc/mode 等过短全局：仅新代码规范，旧名不动（回归成本） | P3 | S | | ⬜ |
 | ENG-25 | JSDoc | MECH API 无类型注解：JSDoc 注释 key 方法（自文档化） | P2 | M | | ⬜ |
 | ENG-26 | node 单测 | parse-schema/explain/scene-doc 纯模块：test/unit/*.test.mjs node --test（AG-50/51 载体） | P1 | M | | ✅ B1(部分)：test/unit 落地；scene-doc 单测未做 |
-| ENG-27 | 测试 waitForTimeout | 402 处固定等待（headless 抖动隐患）：仅对新增/翻红用例改 waitForFunction（全量替换回归成本不可控，记录债） | P3 | L | ⚠ 债务管理 | ✅ B3(追加)：p22 模式切换改 waitForFunction |
+| ENG-27 | 测试 waitForTimeout | 402 处固定等待（headless 抖动隐患）：仅对新增/翻红用例改 waitForFunction（全量替换回归成本不可控，记录债） | P3 | L | ⚠ 债务管理 | ✅ B5(追加)：p7/p8/p15/p19/p26/p30 固定等待全改 waitForFunction/事件式判定 |
 | ENG-28 | shots 目录 | 磁盘增长：测试 runner 前清 shots/w* 子目录（git 已忽略） | P2 | S | | ⬜ |
 | ENG-29 | serve.py 重启编排 | w3 杀服场景重启复杂：runner 脚本 ensure-server（netstat 探活+按需起）| P2 | M | | ⬜ |
 | ENG-30 | README | 优化后同步：测试章节补 w 系列与 unit、运行方式 | P1 | S | | ⬜ |
