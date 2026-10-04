@@ -163,6 +163,11 @@ class H(http.server.SimpleHTTPRequestHandler):
     extensions_map = {**http.server.SimpleHTTPRequestHandler.extensions_map,
                       ".mjs": "text/javascript", ".wasm": "application/wasm"}
 
+    def log_message(self, fmt, *args):
+        # 只记 API 请求（PER-29/ENG-14）：静态资源日志刷屏且含 GBK 控制台乱码风险
+        if self.path.startswith("/api/"):
+            super().log_message(fmt, *args)
+
     def end_headers(self):
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
