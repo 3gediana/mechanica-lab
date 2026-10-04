@@ -1,0 +1,50 @@
+  [G1 信息] incline fixture 实体类型=["ramp","sphere"]，天体解释走 p6 fixture 通道（E2）
+PASS  G1 预置解释入口受限（runAndExplain 需先解析）为已知产品语义  | 预置本身给守恒量条实时读数（漂移/周期/偏心率），解释块需经解析建场
+PASS  G1b 天体预置: E/Lz 漂移 0.000% + 偏心率有值  | simT=5.11
+PASS  G2 转台预置: ω 有值+L 漂移<1%+外力矩 0  | simT=3.61 ω=2.628 rad/s L漂移=0.000% 外力矩=0（无外力矩）
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+locator.fill: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for locator('#inspBody .frow').filter({ has: locator('label').filter({ hasText: '质量' }) }).first().locator('input').first()[22m
+[2m    - locator resolved to <input step="0.1" min="0.01" max="10000" type="number"/>[22m
+[2m    - fill("99999999")[22m
+[2m  - attempting fill action[22m
+[2m    2 × waiting for element to be visible, enabled and editable[22m
+[2m      - element is not visible[22m
+[2m    - retrying fill action[22m
+[2m    - waiting 20ms[22m
+[2m    2 × waiting for element to be visible, enabled and editable[22m
+[2m      - element is not visible[22m
+[2m    - retrying fill action[22m
+[2m      - waiting 100ms[22m
+[2m    40 × waiting for element to be visible, enabled and editable[22m
+[2m       - element is not visible[22m
+[2m     - retrying fill action[22m
+[2m       - waiting 500ms[22m
+
+    at D:\mechanica-lab\tools\ui-test\w6-depth.mjs:88:17 {
+  log: [
+    "  - waiting for locator('#inspBody .frow').filter({ has: locator('label').filter({ hasText: '质量' }) }).first().locator('input').first()",
+    '    - locator resolved to <input step="0.1" min="0.01" max="10000" type="number"/>',
+    '    - fill("99999999")',
+    '  - attempting fill action',
+    '    2 × waiting for element to be visible, enabled and editable',
+    '      - element is not visible',
+    '    - retrying fill action',
+    '    - waiting 20ms',
+    '    2 × waiting for element to be visible, enabled and editable',
+    '      - element is not visible',
+    '    - retrying fill action',
+    '      - waiting 100ms',
+    '    40 × waiting for element to be visible, enabled and editable',
+    '       - element is not visible',
+    '     - retrying fill action',
+    '       - waiting 500ms'
+  ],
+  name: 'TimeoutError'
+}
+
+Node.js v24.18.1

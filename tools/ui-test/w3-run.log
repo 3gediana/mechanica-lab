@@ -1,0 +1,12 @@
+PASS  D1 非图片文件: 用户可见「图片读取失败」+不进预览  | status="图片读取失败，请换一张"
+PASS  D2 无 Key 解析: 阶段=出错+用户可见原因+重试/fixture 提示  | stage=出错 status="解析失败：服务端未配置解析 API Key（可用示例数据验证链路）（可重试，或用下方示例数据）"
+PASS  D2b fixture 兜底按钮仍可用
+PASS  D2c 无 Key 时 fixture 兜底走通（标注示例/fixture）  | stage=待确认 badge=示例数据
+PASS  D3 清空解析: 场景文档未被污染(前后一致)+结果面板收起  | total=3 docSame=true
+PASS  D4 服务不可用: 用户可见恢复文案（网络或服务不可用+重试）  | status="解析请求失败（网络或服务不可用）。可重试，或用下方示例数据"
+
+== 汇总 ==
+PASS 6/6
+浏览器 console/page 错误:
+   Failed to load resource: the server responded with a status of 503 (Service Unavailable)
+   Failed to load resource: net::ERR_CONNECTION_REFUSED

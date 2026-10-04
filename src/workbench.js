@@ -1227,7 +1227,17 @@ function numRow(parent, label, unit, value, step, onCommit, { min, max, schema }
       onCommit(r.value);
     } else {
       const v = Number(input.value);
-      if (!Number.isFinite(v)) { input.value = +Number(value).toFixed(3); return; }
+      const lo = min !== undefined ? min : -Infinity;
+      const hi = max !== undefined ? max : Infinity;
+      // min/max 必须进 JS 校验：HTML 属性拦不住 fill/粘贴/科学计数（曾实测 mass=99999999、-5、
+      // 溢出清空成 0 质量直入文档——0 质量动态体在物理上灾难性）。
+      if (!Number.isFinite(v) || v < lo || v > hi) {
+        input.classList.add('bad');
+        err.textContent = min !== undefined && max !== undefined ? `允许范围 ${min} ~ ${max}` : '数值无效';
+        err.style.display = 'block';
+        setTimeout(() => { input.classList.remove('bad'); err.style.display = 'none'; input.value = +Number(value).toFixed(3); }, 1600);
+        return;
+      }
       onCommit(v);
     }
   };
@@ -2175,7 +2185,12 @@ function setParseStatus(msg, isErr = false, busy = false) {
 // 服务端解析结果采纳（图片/文字通道共用）：normalize → 渲染 → 变更预览
 function adoptServerParse(out) {
   const n = normalizeParse(out.parse);
-  if (!n.ok) { setParseStatus('解析结果无效：' + n.errors.join('; '), true); return false; }
+  if (!n.ok) {
+    // 阶段必须流转到出错：否则徽标永远停在「解析中」（噪声图/模型输出无实体实测卡死 150s+）
+    setAgentStage('error', '解析失败');
+    setParseStatus('解析结果无效：' + n.errors.join('; ') + '（可重试，或换一张图）', true);
+    return false;
+  }
   agentPlan = n.plan;
   agentCorrections = [];
   renderParseResult(n.errors);
