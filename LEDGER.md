@@ -351,6 +351,45 @@ w4-mixed（混合搭建+逐条拒绝，真实文字通道 1 次）。
 2. 受力分解泛化（接触法向由差分力与重力差分解出）。
 3. P3 体验项（ghost 吸附、约束可视化）。
 
+## Round 36（2026-10-04/05）：550 项台账 + 七批次优化冲刺
+
+闲时任务发起的全面优化：先逐文件通读产出 `docs/OPTIMIZATION-500.md`（七类 550 条，
+性能82/UI88/材质64/手感92/Agent92/自由度62/工程70），再按批次实施约 70 条（P0 全清），
+每批全量回归绿后单独提交。提交链：a790c70(台账) → fc53821(B1 Agent 正确性) → 942e1fd(工具链)
+→ 6d972d9(B2 热路径) → 6e0c8b7(B3 建场+鲁棒) → 4ef662b(B4 手感) → 536b652(B5 材质光影)
+→ 2fae8b7(B6 UI) → ba9e3f5(B7 服务+真实抽查)。
+
+**真实 bug 修复（6 处）**：①恢复系数合成与引擎不符（node 实测 Rapier=平均，一侧 0 时旧码用 0）
+②抛体解释摘要把实测印进理论槽 ③hinge/atwood 理论硬编码 g=9.81（fixture 题给 g=10 场景自相矛盾，
+p11/p12 断言改 g=10 口径）④天体解释中心质量取 entities[0]（顺序陷阱，改取最大质量者）
+⑤正交相机 resize 后 frustum 不更新 ⑥focusOn 无 null 守卫（w5 崩）。
+
+**性能**：静止帧脏标记跳渲染（hasFocus 守卫防 headless rAF 饿死 + 500ms 保险丝）、stepOnce
+零分配（_prevVel 原地复用）、碰撞 handle→id 索引、trails 增量写点、建场批内挂起重建
+（N 次 Rapier 世界重建→1 次）、辐条/旗面/灯泡材质模块级共享、无碰撞体实体免阴影。
+
+**Agent/鲁棒**：解析 100s AbortController、低置信警示、三通道互斥、已应用 plan 换场景作废
+（未应用保留——p9 解析→换空场→建场流程锁定）、删除级联清理 attach/悬空 joints、复制剥 joints。
+
+**手感/UI**：number 滚轮防误触、F 平滑聚焦、吸附改 gizmo 释放时生效、方向键微调、? 速查浮层、
+拖拽/Ctrl+V 传题、fixture 十题型下拉、解析徽标转圈、建场留 Agent 页签+场景自动取景、丢步警示、
+空场景引导、检查器保滚动、删除 toast 含撤销提示。
+
+**材质光影**：冷色轮廓光（visual-judge 逐像素验收 PASS：背景死平 lum11-12、轮廓 10x 对比、
+无 acne、无色带）、shadow normalBias 0.02、轨迹线免雾、high-performance 上下文。
+
+**工具链**：check.py 扩全量存在性（p0-p31+w1-w7+docs）+测试目录密值扫描+材质键契约；
+test/unit 31 项纯函数单测（解析金标+解释八分支，含恢复系数/场景重力回归锚）；
+run-all.mjs 聚合 runner（last-run.txt）；realspot.mjs 七类真实抽查（断言对齐布局层口径）。
+
+**真实模型抽查（AG-90，7 次调用）**：6/7 过——incline(光滑推断生效)/momentum/celestial(G+双天体)/
+spin(rotation+joint)/spring(box 墙+sphere 振子)/atwood(pulley+双 box) 全过；hinge 模型仅回单实体
+（客户端诚实降级 0 实体，模型短板非客户端缺陷，原始输出落盘可追溯）。
+
+**测试健壮化**：p7/p8/p15/p19/p22/p26/p30/w1 的固定 sleep 边缘断言改 waitForFunction/事件式判定
+（批内负载抖动实测 0.77~0.82 横跨阈值）；p8 能量条两段式断言+显式 change 派发（selectOption
+合成事件偶发未生效）。
+
 ## 设计定调（延续 Round 0）
 
 仪器级暗色摄影棚工具界面。冷灰烟色 + 单点缀琥珀（仪表读数与激活态）；直角 hairline（radius 2px）；

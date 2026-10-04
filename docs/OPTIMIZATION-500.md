@@ -36,7 +36,7 @@
 | PER-26 | workbench.js updateScaleReadout | 每 0.15s 无条件拼字符串写 DOM：值未变跳过 | P2 | S | | ⬜ |
 | PER-27 | runtime.js CCD | 所有动态体恒开 CCD：仅速度阈值>2m/s 或用户勾选时开启（重场景收益） | P2 | S | ⚠ 高速穿隧回归 | ⬜ |
 | PER-28 | runtime.js world | numSolverIterations=8 固定：场景级质量档（教学默认 8，>60 实体自动降 4 并 toast） | P3 | M | ⚠ 精度变化 | ⬜ |
-| PER-29 | serve.py | SimpleHTTPRequestHandler 每静态请求 stderr log（GBK 控制台噪音+IO）：覆写 log_message 静默静态、仅记 API | P1 | S | | ⬜ |
+| PER-29 | serve.py | SimpleHTTPRequestHandler 每静态请求 stderr log（GBK 控制台噪音+IO）：覆写 log_message 静默静态、仅记 API | P1 | S | | ✅ B7：log_message 只记 /api/（静态日志静默） |
 | PER-30 | index.html | 15 个模块逐请求无打包：本地 dev 可接受；生产形态再议（bundling 决策） | P3 | M | | ⬜ |
 | PER-31 | viewport.js 箭头池 | 各箭头池只增不减（实体删除后隐藏不回收）：rebuild 时收缩至需求量 | P2 | S | | ⬜ |
 | PER-32 | workbench.js tick jointViz | 每帧 position.toArray() 分配：仅 selectedIds 变化或运行态节流到 0.15s 更新 | P2 | S | | ⬜ |
@@ -52,7 +52,7 @@
 | PER-42 | runtime.js clear | mesh traverse dispose geometry 但 Group 子件材质（spoke/flag 内联材质）泄漏：dispose 时排除共享材质、回收内联材质 | P1 | S | ⚠ 共享材质误删 | ⬜ |
 | PER-43 | workbench.js renderParseResult | 每次解析全 DOM 重建：事件驱动可接受；不动 | P3 | S | | ⬜ |
 | PER-44 | viewport.js ghost showGhost | 每次 hover new MeshStandardMaterial+几何：材质单例缓存，几何随 PER-19 缓存 | P2 | S | | ⬜ |
-| PER-45 | serve.py ThreadingHTTPServer | 每请求一线程：dev 可接受；daemon_threads=True 补上防 Ctrl+C 挂死（并入工程项） | P2 | S | | ⬜ |
+| PER-45 | serve.py ThreadingHTTPServer | 每请求一线程：dev 可接受；daemon_threads=True 补上防 Ctrl+C 挂死（并入工程项） | P2 | S | | ✅ B7：核实 ThreadingHTTPServer 自带 daemon_threads=True，免改 |
 | PER-46 | workbench tick impacts | tickImpacts 每帧遍历 + scale.set：数量小 ✓；与 PER-13 环池合并处理 | P3 | S | | ⬜ |
 | PER-47 | runtime applyFrame 回放 | 每帧 states 循环 set：无分配 ✓ 不动 | P3 | S | | ⬜ |
 | PER-48 | registry.js wedgePoints | 每次 build new Float32Array(6 顶点)：微小；随 PER-19 缓存 | P3 | S | | ⬜ |
@@ -443,7 +443,7 @@
 | AG-87 | workbench 建场失败可见性 | agentOps ✓/✗ ✓；失败汇总 toast（n 失败） | P2 | S | | ⬜ |
 | AG-88 | parse-schema 复用物理 | 复用 patch 含 physics 全量（覆盖用户摩擦为题给）✓ 题意正确；无项 | P3 | S | | ⬜ |
 | AG-89 | workbench explain unsupported | 不支持题型文案 ✓ 诚实；补当前遥测摘要 ✓ 已有；无项 | P3 | S | | ⬜ |
-| AG-90 | 真实模型回归 | 7 类题图历史抽查（每类 1 次）：新 prompt+推断层下复验（预算 7 次调用） | P1 | M | ⚠ 调用预算 | ⬜ |
+| AG-90 | 真实模型回归 | 7 类题图历史抽查（每类 1 次）：新 prompt+推断层下复验（预算 7 次调用） | P1 | M | ⚠ 调用预算 | ✅ B7：realspot.mjs 七类各 1 次=7 调用，布局层口径 6/7 过（hinge 单实体模型短板诚实降级；原始输出落盘） |
 | AG-91 | parse-schema 输出规模 | entities>12 截断+提示：防长输出建出垃圾场 | P2 | S | | ⬜ |
 | AG-92 | workbench 拍照通道 | 摄像头 BLOCKED（无硬件）记录 ✓；不重复投入；无项 | P3 | S | | ⬜ |
 
@@ -530,8 +530,8 @@
 | ENG-10 | check.py | 材质键契约（MAT-59）：MATERIAL_OPTIONS 与 materials.js 返回键 diff | P1 | S | | ✅ B1：材质键契约检查 |
 | ENG-11 | tools/ui-test | helper 重复（goto/shot/ctx 每份复制）：抽 lib.mjs 共享（不动现有绿测，仅新测使用） | P2 | M | ⚠ 回归面大 | ⬜ |
 | ENG-12 | tools/ui-test | 端口硬编 8721：MECH_URL env 读取（默认 8721） | P2 | S | | ⬜ |
-| ENG-13 | serve.py | daemon_threads 未设：ThreadingHTTPServer(..., daemon_threads=True)（Ctrl+C 干净退出） | P1 | S | | ⬜ |
-| ENG-14 | serve.py | 静态请求日志刷屏（PER-29 同源）：log_message 静默非 API | P1 | S | | ⬜ |
+| ENG-13 | serve.py | daemon_threads 未设：ThreadingHTTPServer(..., daemon_threads=True)（Ctrl+C 干净退出） | P1 | S | | ✅ B7：同 PER-45，默认已满足 |
+| ENG-14 | serve.py | 静态请求日志刷屏（PER-29 同源）：log_message 静默非 API | P1 | S | | ✅ B7：同 PER-29 |
 | ENG-15 | index.html ?v=1 | 手工版本号：serve.py no-store 已兜底；删除 ?v=1（少一处必改点） | P2 | S | | ⬜ |
 | ENG-16 | 无 lint | 无 ESLint：加最小 no-unused-vars/no-undef 扁平配置+package.json script（不引入框架） | P2 | M | | ⬜ |
 | ENG-17 | 无 pre-commit | check.py 手跑：.git/hooks/pre-commit 调 check.py（本地钩子不进库+README 说明） | P2 | S | | ⬜ |
@@ -580,7 +580,7 @@
 | ENG-60 | 文档交叉引用 | README↔AUDIT-MATRIX↔本台账链接互链 | P1 | S | | ⬜ |
 | ENG-61 | 测试截图断言 | w 系列截图人工核验流程说明（AUDIT-MATRIX 已有）✓；无项 | P3 | S | | ⬜ |
 | ENG-62 | unit 测试进 check.py | check.py 挂 node --test 聚合（一键全绿入口） | P2 | S | | ⬜ |
-| ENG-63 | runner 汇总 | 批次回归结果落盘 tools/ui-test/last-run.txt（时间/套件/断言数） | P2 | S | | ✅ B1(部分)：run-all.mjs 落地；last-run 机制启用 |
+| ENG-63 | runner 汇总 | 批次回归结果落盘 tools/ui-test/last-run.txt（时间/套件/断言数） | P2 | S | | ✅ B7(完成)：run-all 落地并全程使用（last-run.txt gitignored） |
 | ENG-64 | 错误消息规范 | errbar/toast/parseStatus 三通道语义（致命/操作/流程）文档化注释 | P2 | S | | ⬜ |
 | ENG-65 | workbench bindUI 体量 | bindUI 90 行 ✓ 可读；无项 | P3 | S | | ⬜ |
 | ENG-66 | 重复 G 检查 | _collectGravitating G falsy 早退 ✓（G=0 教学无引力场景退化警告 P3） | P3 | S | | ⬜ |
@@ -588,6 +588,11 @@
 | ENG-68 | serve.py 体量 | 228 行 ✓ 单文件合适；无项 | P3 | S | | ⬜ |
 | ENG-69 | OPT 台账维护 | 本文档批次勾选+一行结果纪律（执行中） | P1 | S | | ⬜ |
 | ENG-70 | 台账编号引用 | commit message 引用条目号（PER-x/AG-x）可追溯 | P1 | S | | ⬜ |
+
+## Round 36 实施记录（2026-10-04/05）
+
+七个批次全部落地，每批全量回归绿后单独提交：
+B1 Agent 正确性（fc53821）→ 工具链（942e1fd）→ B2 热路径性能（6d972d9）→ B3 建场性能+鲁棒（6e0c8b7）→ B4 手感快赢（4ef662b）→ B5 材质共享+光影（536b652，visual-judge 逐像素验收 PASS）→ B6 UI 补全（2fae8b7）→ B7 服务与真实抽查（ba9e3f5）。合计实施 **约 70 条**（P0 全清 + P1 主体 + 部分 P2），其中 6 处真实 bug 修复（恢复系数合成/抛体摘要错印/硬编码 g×2/天体中心取序/正交 resize/focusOn null）+ 一批 headless 敏感测试改条件等待（p7/p8/p15/p19/p22/p26/p30/w1）。
 
 ## 统计与批次计划
 
