@@ -117,7 +117,7 @@
 | UI-20 | workbench renderCatalog | 分类不可折叠：cat-head 点击折叠（localStorage 记忆） | P2 | M | | ⬜ |
 | UI-21 | workbench #outline 空态 | 「场景为空」无引导：补 2 个快捷链接（载入斜面/空场景） | P2 | S | | ⬜ |
 | UI-22 | workbench undo/redo | 无操作反馈：undo/redo 后 toast 显示 history label | P1 | S | | ⬜ |
-| UI-23 | workbench opRemoveEntity | 删除无反馈：toast「已删除 X — Ctrl+Z 可撤销」 | P1 | S | | ⬜ |
+| UI-23 | workbench opRemoveEntity | 删除无反馈：toast「已删除 X — Ctrl+Z 可撤销」 | P1 | S | | ✅ B4：删除 toast 含 Ctrl+Z 提示与级联计数 |
 | UI-24 | workbench btnMode* | 运行态点移动/旋转/缩放静默无效：运行态 disable 三按钮+title 说明 | P1 | S | | ⬜ |
 | UI-25 | workbench 矢量/受力图例 | 箭头颜色语义只在 title：曲线面板同款 clegend 加「图例」浮层（矢量琥珀/重力红/接触绿/N 淡绿/f 橙/加速度青） | P2 | M | | ⬜ |
 | UI-26 | viewport updateTrails | 轨迹颜色按遍历序分配，rebuild 后同实体变色：按 id 哈希稳定配色 | P1 | S | | ⬜ |
@@ -169,7 +169,7 @@
 | UI-72 | workbench btnDecompose | 禁用态无原因提示：disabled 时 title=「先开启受力」 | P2 | S | | ⬜ |
 | UI-73 | workbench triRow | 三输入无 x/y/z 微标：label 后缀 (x)(y)(z) 9px | P2 | S | | ⬜ |
 | UI-74 | workbench liveGrid | 「最近碰撞: 无」表达 ✓；无项 | P3 | S | | ⬜ |
-| UI-75 | workbench 检查器滚动 | rebuild 后 scrollTop 丢失：rebuildAll 保存/恢复 #right.scrollTop | P1 | S | | ⬜ |
+| UI-75 | workbench 检查器滚动 | rebuild 后 scrollTop 丢失：rebuildAll 保存/恢复 #right.scrollTop | P1 | S | | ✅ B4：renderInspector 保持 #right scrollTop |
 | UI-76 | workbench 观察点 | 无视角预览：飞回按钮旁静态文字记录 pos（mono 9px）；缩略图渲染留 P3 | P2 | S | | ⬜ |
 | UI-77 | workbench 传感器空态 | 未运行时读数区「等待运行」✓；补「运行后此处实时更新」首用提示一次性 toast | P3 | S | | ⬜ |
 | UI-78 | index.html .pe-row | 解析实体卡 hover 无反馈：hover 边框微亮 | P3 | S | | ⬜ |
@@ -257,15 +257,15 @@
 
 | # | 位置 | 问题 → 改法 | P | 量 | 风险 | 状态 |
 |---|---|---|---|---|---|---|
-| FEEL-1 | index.html number input | 滚轮误改数值（聚焦后滑动）：input[type=number] wheel preventDefault（blur 后恢复） | P0 | S | | ⬜ |
-| FEEL-2 | workbench opDuplicate | 副本与原件完全重叠：offset x+0.25/spawn 重摆位 | P1 | S | ⚠ p 系列位置断言 | ⬜ |
-| FEEL-3 | workbench F 键 | viewport.focus 瞬跳 vs 大纲 ⌖ focusOn 平滑：统一 F=focusOn 平滑版 | P1 | S | | ⬜ |
+| FEEL-1 | index.html number input | 滚轮误改数值（聚焦后滑动）：input[type=number] wheel preventDefault（blur 后恢复） | P0 | S | | ✅ B4：wheel 守卫（number 输入聚焦时 preventDefault） |
+| FEEL-2 | workbench opDuplicate | 副本与原件完全重叠：offset x+0.25/spawn 重摆位 | P1 | S | ⚠ p 系列位置断言 | ✅ B4：副本 x+0.25 错位（w1 计数断言不受影响） |
+| FEEL-3 | workbench F 键 | viewport.focus 瞬跳 vs 大纲 ⌖ focusOn 平滑：统一 F=focusOn 平滑版 | P1 | S | | ✅ B4：F/btnFocus 统一 focusOn 平滑版+null 守卫 |
 | FEEL-4 | workbench 方向键 | 无微调：←→↑↓ 移动选中 0.1m（Shift=1m，Alt=0.01m），运行态禁用 | P1 | M | ⚠ 与输入框焦点冲突守卫 | ⬜ |
 | FEEL-5 | workbench triRow | 三个输入各 commit 一次（3 个 undo 步）：行级合并单 undo（延迟 100ms 聚合） | P1 | M | ⚠ undo 语义回归 | ⬜ |
 | FEEL-6 | workbench onKey | 无 Esc 全局：Esc=关相机/退框选/清 ghost/关帮助浮层（按优先级） | P1 | S | | ⬜ |
 | FEEL-7 | viewport ghost | ghost 只能点目录放置：canvas 点击=在 ghost 当前位放置（放置模式），Esc 退出 | P1 | M | ⚠ 点击与选择冲突：ghost 激活时点击优先放置 | ⬜ |
 | FEEL-8 | viewport ghost | 放置中不可旋转（R 已被重置占用）：Q/E 旋转 ghost 15° | P2 | S | | ⬜ |
-| FEEL-9 | workbench cycleSnap | 切吸附档位立即重定位选中实体（副作用突兀）：改为仅设档+toast，重吸附只在 gizmo 释放时 | P1 | S | ⚠ p24 吸附断言 | ⬜ |
+| FEEL-9 | workbench cycleSnap | 切吸附档位立即重定位选中实体（副作用突兀）：改为仅设档+toast，重吸附只在 gizmo 释放时 | P1 | S | ⚠ p24 吸附断言 | ✅ B4：档位切换仅提示；实体吸附移到 gizmo 释放（p11/p24 绿） |
 | FEEL-10 | workbench 目录拖拽 | 无 drag&drop 拖入视口放置（HTML5 DnD）：comp-item draggable → drop 位置放置 | P2 | M | | ⬜ |
 | FEEL-11 | viewport 双击 | 双击实体不平滑聚焦：dblclick→focusOn | P2 | S | | ⬜ |
 | FEEL-12 | workbench 多选 gizmo | gizmo 只挂主选中：多选时平移主实体其余不动：组平移（delta 应用全部选中） | P2 | L | ⚠ 大改；先做平移 | ⬜ |
@@ -454,8 +454,8 @@
 | PHY-1 | runtime energyTotals | KE 无转动项（滚动球能量条走低假象）：+0.5·inertiaY·ω²（守恒条/曲线口径一致） | P1 | M | ⚠ p 系列能量断言数值变化 | ⬜ |
 | PHY-2 | registry joints UI | 无图形化建约束入口：选中 2 实体 → 目录「约束」类（滑槽/转轴）卡（生成 e.joints 文档字段） | P1 | L | ⚠ UI+文档+undo 链路 | ⬜ |
 | PHY-3 | workbench 检查器 | joints 不可见不可删：检查器「约束」组列出 e.joints+attach（类型/target/×删除） | P1 | M | | ⬜ |
-| PHY-4 | scene-doc duplicateEntity | 副本 joints 指向原 target（复制转台控制原滑块）：复制时 joints 剥离+toast 说明 | P0 | S | | ⬜ |
-| PHY-5 | workbench opRemoveEntity | 删除目标实体后悬空 joints/attach 留档：级联清理引用（删除时扫 attach 包含者一并删/ joints target 失效项剔除+toast） | P0 | M | ⚠ w6 删坡恢复场景 | ⬜ |
+| PHY-4 | scene-doc duplicateEntity | 副本 joints 指向原 target（复制转台控制原滑块）：复制时 joints 剥离+toast 说明 | P0 | S | | ✅ B4：duplicateEntity 剥离 joints |
+| PHY-5 | workbench opRemoveEntity | 删除目标实体后悬空 joints/attach 留档：级联清理引用（删除时扫 attach 包含者一并删/ joints target 失效项剔除+toast） | P0 | M | ⚠ w6 删坡恢复场景 | ✅ B4：attach 级联删除+悬空 joints 剔除 |
 | PHY-6 | runtime hinge | jointAxis 固定 [0,0,1]：铰链实体 params.axis 可编辑（schema+runtime 读取） | P2 | S | | ⬜ |
 | PHY-7 | registry spring | 弹簧视觉直杆（MAT-57 螺旋同源）：无独立物理项；Rapier spring joint ✓ | P3 | S | | ⬜ |
 | PHY-8 | runtime rope | 绳张紧外可推（rope joint 语义）：教学可接受；文档注明；无项 | P3 | S | | ⬜ |

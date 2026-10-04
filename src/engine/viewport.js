@@ -43,6 +43,7 @@ export class Viewport {
 
   // ============ 选中对象定位：相机 target/距离平滑移向实体（第六章「选中对象定位」） ============
   focusOn(mesh) {
+    if (!mesh) return;   // 无选中时聚焦是安全空操作（与 focus() 同守卫）
     const box = new THREE.Box3().setFromObject(mesh);
     const size = box.isEmpty() ? 0.6
       : Math.max(box.getSize(new THREE.Vector3()).x, box.getSize(new THREE.Vector3()).y, box.getSize(new THREE.Vector3()).z, 0.4);

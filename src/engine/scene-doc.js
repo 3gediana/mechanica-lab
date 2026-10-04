@@ -48,6 +48,7 @@ export function duplicateEntity(doc, id) {
   copy.id = newId(src.type);
   copy.name = src.name.replace(/#(\d+)$|$/, (m, n) => `#${n ? +n + 1 : 2}`);
   copy.source = 'user';
+  delete copy.joints;   // 副本剥离约束（PHY-4）：复制转台不该顺带控制原滑块；attach 指向外部实体保持有效
   doc.entities.push(copy);
   return copy;
 }

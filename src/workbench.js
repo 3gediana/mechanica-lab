@@ -67,6 +67,11 @@ const AUTOSAVE_KEY = 'mechanica.autosave.v1';
       onGizmoCommit: () => {
         const e = getEntity(doc, selectedId);
         if (!e) return;
+        // 平移释放时按当前吸附档位归位（endpoint/surface/center；grid 档由 gizmo 拖动内建吸附）
+        if (viewport.gizmoMode === 'translate') {
+          const bind = runtime.binds.get(selectedId);
+          if (bind) applySnapToMesh(bind.mesh);
+        }
         viewport.applyGizmoToEntity(e);
         rebuildAll();
         commitChange('移动 ' + e.name);
@@ -350,22 +355,40 @@ function opUpdateEntity(id, patch, label, { rebuild = true, rerender = true } = 
 function opRemoveEntity(id) {
   const targets = selectedIds.includes(id) && selectedIds.length > 1 ? [...selectedIds] : [id];
   const names = [];
-  for (const tid of targets) {
+  const removed = new Set();
+  const queue = [...targets];
+  // 级联删除（PHY-5）：attach 引用被删实体的绳/弹簧/尺/传感器一并移除（留着必悬空）
+  while (queue.length) {
+    const tid = queue.shift();
+    if (removed.has(tid)) continue;
     const e = getEntity(doc, tid);
     if (!e) continue;
     docRemove(doc, tid);
+    removed.add(tid);
     names.push(e.name);
+    for (const other of [...doc.entities]) {
+      if (Array.isArray(other.attach) && other.attach.includes(tid) && !removed.has(other.id)) queue.push(other.id);
+    }
   }
   if (!names.length) return false;
+  // 悬空 joints 清理：target 已删除的约束条目剔除（否则重建时报缺目标）
+  for (const e of doc.entities) {
+    if (Array.isArray(e.joints) && e.joints.some((j) => removed.has(j.target))) {
+      e.joints = e.joints.filter((j) => !removed.has(j.target));
+    }
+  }
   selectedIds = selectedIds.filter((x) => getEntity(doc, x));
   if (!getEntity(doc, selectedId)) selectedId = selectedIds.length ? selectedIds[selectedIds.length - 1] : null;
   rebuildAll();
-  commitChange('删除 ' + names.join('、'));
+  commitChange('删除 ' + names.join('、') + (names.length > targets.length ? `（含 ${names.length - targets.length} 个关联对象）` : ''));
+  toast(`已删除 ${names.length} 个对象，Ctrl+Z 可撤销`);
   return true;
 }
 function opDuplicate(id) {
   const copy = duplicateEntity(doc, id);
   if (!copy) return null;
+  // 错位摆放（FEEL-2）：与原件完全重叠时副本不可见、拖走会带偏直觉
+  copy.transform.pos = [copy.transform.pos[0] + 0.25, copy.transform.pos[1], copy.transform.pos[2]];
   rebuildAll();
   commitChange('复制 ' + copy.name);
   selectEntity(copy.id);
@@ -509,7 +532,7 @@ function bindUI() {
   $('btnViewTop').onclick = () => viewport.setViewPreset('top');
   $('btnViewFront').onclick = () => viewport.setViewPreset('front');
   $('btnViewSide').onclick = () => viewport.setViewPreset('side');
-  $('btnFocus').onclick = () => viewport.focus(selectedId ? runtime.binds.get(selectedId).mesh : null);
+  $('btnFocus').onclick = () => viewport.focusOn(selectedId ? runtime.binds.get(selectedId).mesh : null);
 
   $('btnPlay').onclick = play;
   $('btnPause').onclick = pauseToggle;
@@ -551,6 +574,11 @@ function bindUI() {
   $('btnOpen').onclick = () => fi.click();
 
   window.addEventListener('keydown', onKey);
+  // 滚轮误触防护（FEEL-1）：聚焦 number 输入后滑动滚轮会悄悄改值，教学场景高频误操作
+  document.addEventListener('wheel', (ev) => {
+    const t = ev.target;
+    if (t && t.tagName === 'INPUT' && t.type === 'number') ev.preventDefault();
+  }, { passive: false });
 
   renderCatalog();
   refreshHistoryButtons();
@@ -568,10 +596,7 @@ function cycleSnap() {
   const btn = $('btnSnap');
   btn.classList.toggle('hot', snapMode !== 'off');
   btn.textContent = SNAP_LABEL[snapMode];
-  if (selectedId) {
-    const bind = runtime.binds.get(selectedId);
-    if (bind) applySnapToMesh(bind.mesh);
-  }
+  toast(SNAP_LABEL[snapMode] + '（拖动 gizmo 释放时生效）');
 }
 
 function applySnapToMesh(mesh) {
@@ -639,7 +664,7 @@ function onKey(e) {
   if (e.code === 'Space') { e.preventDefault(); mode === 'run' ? pauseToggle() : play(); }
   else if (e.code === 'KeyW') setGizmoMode('translate');
   else if (e.code === 'KeyE') setGizmoMode('rotate');
-  else if (e.code === 'KeyF') viewport.focus(selectedId ? runtime.binds.get(selectedId).mesh : null);
+  else if (e.code === 'KeyF') viewport.focusOn(selectedId ? runtime.binds.get(selectedId).mesh : null);
   else if (e.code === 'KeyR') resetSim();
   else if (e.code === 'Delete' || e.code === 'Backspace') { if (selectedId) opRemoveEntity(selectedId); }
 }
@@ -957,6 +982,9 @@ function renderInspector() {
   }
   empty.style.display = 'none';
   box.style.display = 'block';
+  // 面板重建保持滚动位置（UI-75）：参数多的实体在长面板里调参不该跳回顶部
+  const rightPane = $('right');
+  const keepScroll = rightPane.scrollTop;
   box.innerHTML = '';
   const c = registry.getComponent(e.type);
   const dis = mode === 'run';
@@ -1190,6 +1218,7 @@ function renderInspector() {
   br.querySelector('[data-a=del]').onclick = () => opRemoveEntity(e.id);
   grpA.appendChild(br);
   box.appendChild(grpA);
+  rightPane.scrollTop = keepScroll;
 }
 
 function patchTransform(e, t, label) { opUpdateEntity(e.id, { transform: t }, label, { rerender: false }); }
