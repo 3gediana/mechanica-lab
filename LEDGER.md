@@ -390,6 +390,19 @@ spin(rotation+joint)/spring(box 墙+sphere 振子)/atwood(pulley+双 box) 全过
 （批内负载抖动实测 0.77~0.82 横跨阈值）；p8 能量条两段式断言+显式 change 派发（selectOption
 合成事件偶发未生效）。
 
+## Round 36 续跑（同日第二批 B8~B10，commit 33f33c3 / 9175bb5 / 本批）
+
+- **B8 Agent 准确度**（18 项）：prompt 硬化（输出纪律/实体≤12/紧凑示例/hinge·抛体·天体切向规则）/
+  中文类型别名 13 个/box·cylinder·ground 尺寸透传/坡宽随球半径/不支持字段进 uncertain/gravity 非法
+  显式报错/502 族自动重试一次/api/status 无 key 探针。真实验证 2/2 过，**incline 解析 29s→8s**（示例
+  降低模型思考量）；单测扩到 36 项。
+- **B9 自由度/读数**（7 项）：能量账补转动动能 ½Iω²/检查器「约束」组可见可删/spinLock 等隐藏物理
+  标志只读说明/liveGrid 角速度行/rotation 守恒条自动检测 spinLock/假设与修正记录面板。
+- **B10 UI 清尾**（9 项+1 决策）：focus-visible 焦点环/大纲名 ellipsis/veil 重试按钮/undo·redo 反馈/
+  运行态禁用 gizmo 按钮/轨迹色 id 哈希稳定/label 加宽/解释复制按钮/解释运行进度秒数；
+  PER-67 改判决策不做（p61 框选依赖默认摆位）。
+- 三批各全量回归 35 套 451 断言全绿；真实模型调用累计 12 次（上限 40）。
+
 ## 设计定调（延续 Round 0）
 
 仪器级暗色摄影棚工具界面。冷灰烟色 + 单点缀琥珀（仪表读数与激活态）；直角 hairline（radius 2px）；

@@ -25,6 +25,8 @@ function fail(msg) {
   errbar.textContent = msg;
   errbar.style.display = 'block';
   veil.classList.remove('gone');
+  const retry = document.getElementById('btnVeilRetry');   // UI-13
+  if (retry) retry.style.display = 'inline-block';
 }
 let toastTimer = 0;
 function toast(msg) {
@@ -442,6 +444,12 @@ function resetSim() {
   toast('已重置到初始态');
 }
 function updateSimbarStatic() {
+  const runDis = mode === 'run';   // UI-24：gizmo/框选是编辑态专属，运行态明确禁用
+  $('btnModeMove').disabled = runDis;
+  $('btnModeRotate').disabled = runDis;
+  $('btnModeScale').disabled = runDis;
+  $('btnBoxSel').disabled = runDis;
+  $('btnSnap').disabled = runDis;
   $('btnPlay').disabled = mode === 'run' && !paused;
   $('btnPlay').textContent = mode === 'run' && paused ? '继续' : '运行';
   $('btnPlay').classList.toggle('hot', mode === 'run' && paused);
@@ -475,11 +483,14 @@ function undo() {
   const prev = history.undo(() => serializeDoc(doc));
   if (!prev) return;
   doc = prev; autosave(); rebuildAll(); refreshHistoryButtons();
+  const lb = history.label().redo;   // undo 后当前态=被撤销的那一步
+  toast('已撤销: ' + (lb || ''));
 }
 function redo() {
   const next = history.redo(() => serializeDoc(doc));
   if (!next) return;
   doc = next; autosave(); rebuildAll(); refreshHistoryButtons();
+  toast('已重做: ' + (history.label().undo || ''));
 }
 function saveFile() {
   const blob = new Blob([serializeDoc(doc)], { type: 'application/json' });
@@ -2190,6 +2201,18 @@ function bindAgentPanel() {
   $('btnApplyParse').onclick = () => applyAgentPlan();
   $('btnClearParse').onclick = () => { resetAgentPanel(); };
   $('btnRunExplain').onclick = () => runAndExplain();
+  $('btnVeilRetry').onclick = () => location.reload();
+  $('btnCopyExplain').onclick = () => {
+    const r = agentExplain;
+    if (!r) return;
+    const lines = [`MECHANICA 运行解释（${r.kind || 'n/a'}）`, r.summary];
+    if (r.theoretical && r.theoretical.value != null) lines.push(`理论: ${r.theoretical.value} m/s`);
+    if (r.measured && r.measured.value != null) lines.push(`实测: ${r.measured.value} m/s`);
+    navigator.clipboard.writeText(lines.join('\n')).then(
+      () => toast('解释结果已复制'),
+      () => toast('复制失败（浏览器剪贴板不可用）'),
+    );
+  };
   bindCropEvents();
   setAgentStage('idle', '未开始：上传/拍照题目图片，或用下方示例数据');
   // 无 Key 探针（AG-75）：boot 时问一次服务端，不回显 key 只拿布尔——首用教师不再对着 503 猜
@@ -2953,6 +2976,10 @@ async function runAndExplain() {
   await new Promise((resolve) => {
     // 终止条件：斜面=球越过底边；对撞=出现使球速改变的碰撞报告（跳过出生触地）；天体=跑满时长；通用=超时
     const iv = setInterval(() => {
+      if (mode === 'run' && !paused) {
+        const tt = $('taskText');   // UI-47：长运行（天体 11s）给进度
+        if (tt) tt.textContent = `运行并记录数据中… t=${runtime.simT.toFixed(1)}s / 目标约 ${needT}s`;
+      }
       const tel = runtime.telemetry(ball.id);
       const done = isAstro || isRotation || isHinge || isProjectile
         ? runtime.simT > needT
@@ -2973,6 +3000,7 @@ async function runAndExplain() {
     isAstro ? astroWithDrift() : null, isRotation ? rotationWithDrift() : null, isAtwood ? atwoodInfo() : null);
   renderExplanation();
   setAgentStage(agentExplain && agentExplain.supported ? 'explained' : 'built', agentExplain && agentExplain.supported ? '解释已生成' : '暂无该题型解释器');
+  $('btnCopyExplain').disabled = !(agentExplain && agentExplain.supported);
   btn.disabled = false;
   btn.textContent = '重新运行解释';
   explainBusy = false;

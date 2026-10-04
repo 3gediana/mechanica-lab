@@ -459,14 +459,16 @@ export class Viewport {
   updateTrails(trails) {
     if (!this.trailsVisible) return;
     const PALETTE = [0xd9a441, 0x7ba7d9, 0x93c47d, 0xc27ba0, 0xd98a6f];
+    // 颜色按 id 哈希稳定（UI-26）：rebuild 后同一实体不再因遍历序变色
     let i = 0;
-    for (const pts of trails.values()) {
+    for (const [trailId, pts] of trails) {
+      const color = PALETTE[Math.abs([...trailId].reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 7)) % PALETTE.length];
       let line = this._trailLines[i];
       if (!line) {
         const geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(1800 * 3), 3));
         geo.setDrawRange(0, 0);
-        const mat = new THREE.LineBasicMaterial({ color: PALETTE[i % PALETTE.length], transparent: true, opacity: 0.75, fog: false });   // 数据线不吃雾（天体远轨仍清晰）
+        const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.75, fog: false });   // 数据线不吃雾（天体远轨仍清晰）
         line = new THREE.Line(geo, mat);
         line.frustumCulled = false;
         line.visible = false;
@@ -482,6 +484,7 @@ export class Viewport {
       } else {
         for (let k = w; k < n; k++) attr.setXYZ(k, pts[k][0], pts[k][1], pts[k][2]);
       }
+      if (line.material.color.getHex() !== color) line.material.color.setHex(color);
       line.userData.written = n;
       if (w !== n || pts.length >= 1800) {
         attr.needsUpdate = true;

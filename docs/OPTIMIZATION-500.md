@@ -74,7 +74,7 @@
 | PER-64 | runtime world.free | rebuild 释放旧 world ✓；确认 eventQueue 一并释放（wasm 引用） | P2 | S | | ⬜ |
 | PER-65 | workbench tick 回放 applyFrame | 每帧整帧 set ✓；拖动时 setRange 节流可选 | P3 | S | | ⬜ |
 | PER-66 | index.html CSS | 无性能问题；:hover transition ✓ | P3 | S | | ⬜ |
-| PER-67 | workbench opAddComponent 摆位 | n%3 网格摆位与相机无关（用户找半天）：spawn 在 controls.target 附近偏移 | P1 | S | ⚠ 回归断言摆位 | ⬜ |
+| PER-67 | workbench opAddComponent 摆位 | n%3 网格摆位与相机无关（用户找半天）：spawn 在 controls.target 附近偏移 | P1 | S | ⚠ 回归断言摆位 | ⛔ B10(决策不做)：p61 框选用例依赖默认摆位（⚠ 标记兑现），改动收益不抵回归成本 |
 | PER-68 | runtime _constrainToPipe | 最近线段窗口 ±8/+40 硬编码：跨环时窗口边界抖动风险；按弧长缓存自适应窗口 | P2 | M | ⚠ p8 经典轨 | ⬜ |
 | PER-69 | explain/telemetry 频率 | runAndExplain 期间叠加层照跑：解释运行时暂停矢量/受力更新（减负+防干扰） | P2 | S | | ⬜ |
 | PER-70 | viewport render 内 controls.update | 阻尼系数 0.07 需持续 update：脏标记方案需含 controls 'end' 后 1s 缓冲（并入 PER-1 设计） | P0 | M | ⚠ | ✅ B2：controls.update 前置+阻尼 change 置脏 |
@@ -96,18 +96,18 @@
 | # | 位置 | 问题 → 改法 | P | 量 | 风险 | 状态 |
 |---|---|---|---|---|---|---|
 | UI-1 | index.html .comp-item | border-radius 4px 违反「直角 hairline 2px」语言（thumb 3px 同）：统一 2px | P1 | S | | ⬜ |
-| UI-2 | index.html 全局 | 无 :focus-visible 键盘焦点环：加 accent 色 1px 焦点样式（不动默认 outline 场景） | P1 | S | | ⬜ |
+| UI-2 | index.html 全局 | 无 :focus-visible 键盘焦点环：加 accent 色 1px 焦点样式（不动默认 outline 场景） | P1 | S | | ✅ B10：:focus-visible 琥珀 1px 焦点环 |
 | UI-3 | index.html #dropZone | 仅点击上传，无拖拽/无粘贴：补 dragover 高亮+drop 载入、Ctrl+V 粘贴截图（教师传题高频路径） | P0 | M | | ✅ B6：dropZone 拖拽上传（dragover/drop 校验 image/*）+ Ctrl+V 粘贴截图 |
 | UI-4 | index.html #btnFixtureParse | fixture 按钮只载入 incline 一种，实际有 10 份 fixture：改成下拉选择（无 Key 用户可看全部题型链路） | P1 | S | | ✅ B6：fixtureSel 下拉 10 题型，btnFixtureParse 读选择器（默认 incline 兼容 w3/w4） |
 | UI-5 | index.html #toast | 无类型语义（成功/警告同色）：toast(msg, kind) 警告用 danger 描边 | P2 | S | | ⬜ |
 | UI-6 | index.html #errbar | 无关闭按钮：补 × | P2 | S | | ⬜ |
 | UI-7 | index.html #sceneName | 130px 定宽长名截断无 tooltip：title 同步值+自适应宽度 | P2 | S | | ⬜ |
-| UI-8 | index.html .ol-row .nm | 长名无 ellipsis：CSS text-overflow | P1 | S | | ⬜ |
+| UI-8 | index.html .ol-row .nm | 长名无 ellipsis：CSS text-overflow | P1 | S | | ✅ B10：.ol-row .nm ellipsis |
 | UI-9 | index.html #simbar | <1100px 按钮溢出换行错乱：media query 折叠次要按钮（矢量/受力/分解并入「叠加层」组） | P1 | M | ⚠ p 系列按钮选择器 | ⬜ |
 | UI-10 | index.html #left/#right | 面板定宽不可调：加 4px 拖拽条（拖动改 CSS 变量，consbar/curvePanel 偏移同源变量） | P2 | M | | ⬜ |
 | UI-11 | index.html #consbar | 4 列网格窄屏溢出：auto-fit minmax 折行 | P2 | S | | ⬜ |
 | UI-12 | index.html #veil | 加载无进度感：3 步 setLoad 已有文案；补细进度条（真步进非假动画） | P2 | S | | ⬜ |
-| UI-13 | index.html #veil 失败态 | 加载失败无重试按钮：fail() 加「重试」reload | P1 | S | | ⬜ |
+| UI-13 | index.html #veil 失败态 | 加载失败无重试按钮：fail() 加「重试」reload | P1 | S | | ✅ B10：veil 失败态「重试加载」按钮（location.reload） |
 | UI-14 | index.html 图标系统 | 纯文字按钮一致性 ✓（生死线：不上 emoji）；播放/暂停可用 CSS 三角/双竖条 glyph 增强辨识（需实机截图验证不廉价） | P3 | M | ⚠ 廉价感红线 | ⬜ |
 | UI-15 | index.html btnRec | 录制态仅文字变色：加 6px 琥珀呼吸圆点（CSS animation，克制） | P2 | S | | ⬜ |
 | UI-16 | workbench setAgentStage | 解析中无 spinner：badge 加 CSS 转圈（1 个元素，不引入图标库） | P1 | S | | ✅ B6：parsing/explaining 徽标内嵌 CSS spinner（琥珀弧线 1s） |
@@ -116,15 +116,15 @@
 | UI-19 | workbench #catalogSearch | 无清空按钮、无结果计数：补 × 与 「n 项」 | P2 | S | | ⬜ |
 | UI-20 | workbench renderCatalog | 分类不可折叠：cat-head 点击折叠（localStorage 记忆） | P2 | M | | ⬜ |
 | UI-21 | workbench #outline 空态 | 「场景为空」无引导：补 2 个快捷链接（载入斜面/空场景） | P2 | S | | ⬜ |
-| UI-22 | workbench undo/redo | 无操作反馈：undo/redo 后 toast 显示 history label | P1 | S | | ⬜ |
+| UI-22 | workbench undo/redo | 无操作反馈：undo/redo 后 toast 显示 history label | P1 | S | | ✅ B10：undo/redo toast 回显历史标签 |
 | UI-23 | workbench opRemoveEntity | 删除无反馈：toast「已删除 X — Ctrl+Z 可撤销」 | P1 | S | | ✅ B4：删除 toast 含 Ctrl+Z 提示与级联计数 |
-| UI-24 | workbench btnMode* | 运行态点移动/旋转/缩放静默无效：运行态 disable 三按钮+title 说明 | P1 | S | | ⬜ |
+| UI-24 | workbench btnMode* | 运行态点移动/旋转/缩放静默无效：运行态 disable 三按钮+title 说明 | P1 | S | | ✅ B10：运行态禁用 gizmo/框选/吸附按钮 |
 | UI-25 | workbench 矢量/受力图例 | 箭头颜色语义只在 title：曲线面板同款 clegend 加「图例」浮层（矢量琥珀/重力红/接触绿/N 淡绿/f 橙/加速度青） | P2 | M | | ⬜ |
-| UI-26 | viewport updateTrails | 轨迹颜色按遍历序分配，rebuild 后同实体变色：按 id 哈希稳定配色 | P1 | S | | ⬜ |
+| UI-26 | viewport updateTrails | 轨迹颜色按遍历序分配，rebuild 后同实体变色：按 id 哈希稳定配色 | P1 | S | | ✅ B10：轨迹颜色按 id 哈希稳定（rebuild 不变色） |
 | UI-27 | workbench updateCurveLegend | 多实体图例溢出无折行：flex-wrap+最多 6 项+「+n」 | P2 | S | | ⬜ |
 | UI-28 | index.html #curveCanvas | 固定 320×96 不随 dpr（发虚）且不可调：dpr 缩放+拖拽改宽 | P2 | M | | ⬜ |
 | UI-29 | workbench drawCurves | 无 y 轴最大值读数：右上角 vmax 文本（mono 9px） | P2 | S | | ⬜ |
-| UI-30 | index.html .frow label | 58px 定宽中文四字截断（「劲度系数」挤）：62px+letter-spacing 0 | P1 | S | ⚠ 全面板微移 | ⬜ |
+| UI-30 | index.html .frow label | 58px 定宽中文四字截断（「劲度系数」挤）：62px+letter-spacing 0 | P1 | S | ⚠ 全面板微移 | ✅ B10：label 58→64px + errmsg margin 同步 |
 | UI-31 | index.html .errmsg | margin-left 66px 硬编码：跟随 label 宽度变量 | P2 | S | | ⬜ |
 | UI-32 | workbench numRow | 错误提示 1.6s 硬消失无过渡：CSS opacity 过渡 | P3 | S | | ⬜ |
 | UI-33 | workbench 材质 select | 纯文字选项：option 前加色点（material.color）不可行（option 限制）；改 select 旁 swatch 点随选择更新 | P2 | S | | ⬜ |
@@ -139,9 +139,9 @@
 | UI-42 | workbench 拍照预览 | 无镜像预览：video transform scaleX(-1)（拍摄自然性，捕获不镜像） | P2 | S | | ⬜ |
 | UI-43 | workbench imgPrev | 无旋转按钮（手机横拍常见）：↺ 按钮旋转 90°（canvas 重绘） | P1 | S | | ⬜ |
 | UI-44 | workbench 裁剪框 | 只能重画不能调边：四角手柄拖拽调整（M 量，P2） | P2 | M | | ⬜ |
-| UI-45 | workbench explainGrp | 无复制按钮：summary+数据表 一键复制纯文本（教师备课） | P1 | S | | ⬜ |
+| UI-45 | workbench explainGrp | 无复制按钮：summary+数据表 一键复制纯文本（教师备课） | P1 | S | | ✅ B10：解释「复制结果」按钮（summary+理论/实测，剪贴板降级提示） |
 | UI-46 | workbench explain 数值 | toFixed 位数不一（2/3 混用）：统一 3 位小数规范 | P2 | S | | ⬜ |
-| UI-47 | workbench runAndExplain | 11s 天体解释无进度：badge 百分比（simT/needT） | P1 | S | | ⬜ |
+| UI-47 | workbench runAndExplain | 11s 天体解释无进度：badge 百分比（simT/needT） | P1 | S | | ✅ B10：解释运行进度 t/目标秒（复用 40ms 轮询） |
 | UI-48 | workbench applyAgentPlan | 建场后强制跳检查器页签：留在 Agent 页签+新按钮「查看场景」跳转（避免丢失操作明细） | P1 | S | ⚠ w2 流程断言 tab 切换 | ✅ B6：建场后留 Agent 页签（明细不被打断），相机自动取景代偿（w2/p1 断言兼容） |
 | UI-49 | workbench 建场后 | 不自动取景：建场完成 viewport.focus 场景包围盒 | P1 | S | | ✅ B6：viewport.focusScene() 包围盒平滑取景，建场完成调用 |
 | UI-50 | workbench changePreview | 无全选/全不选：顶部两个小链接 | P2 | S | | ⬜ |
@@ -588,6 +588,12 @@
 | ENG-68 | serve.py 体量 | 228 行 ✓ 单文件合适；无项 | P3 | S | | ⬜ |
 | ENG-69 | OPT 台账维护 | 本文档批次勾选+一行结果纪律（执行中） | P1 | S | | ⬜ |
 | ENG-70 | 台账编号引用 | commit message 引用条目号（PER-x/AG-x）可追溯 | P1 | S | | ⬜ |
+
+## 续跑记录（同日第二批：B8~B10）
+
+B8 Agent 准确度（33f33c3，真实验证 2/2 过且 incline 解析 29s→8s）→ B9 自由度/读数（9175bb5）
+→ B10 UI/手感清尾（本批）。三批各 35 套 451 断言全绿；累计落地 **约 100 条**。
+PER-67 改判「决策不做」：p61 框选用例依赖默认摆位，改动收益不抵回归成本（台账 ⛔ 标记）。
 
 ## Round 36 实施记录（2026-10-04/05）
 
