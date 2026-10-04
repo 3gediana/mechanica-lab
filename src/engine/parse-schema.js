@@ -417,6 +417,48 @@ export function planToOverrides(plan) {
       physics: { body: 'fixed', friction: pairFriction != null ? pairFriction : 0, restitution: 0.05 },
     });
   }
+  // 天体圆轨道确定性推断：应用引力教学约定轨道在 xz 平面（守恒量跟踪 Lz、周期检测用 xz 方位角）。
+  // 模型给的绕转体位置/速度可能带 y 分量或纯径向（xy 平面轨道会让 Lz≈0、周期采样失灵）——
+  // 统一归一：位置贴中心天体所在平面，速度投影到 xz 切向；速度缺失时按圆轨道 v=√(GM/r) 推断。
+  const celOut = out.filter((o) => o.type === 'celestial');
+  if (celOut.length >= 2) {
+    const Gv = plan.G ?? 1;
+    const center = celOut.reduce((a, b) => (b.physics.mass > a.physics.mass ? b : a));
+    for (const sat of celOut) {
+      if (sat === center) continue;
+      const c = center.transform.pos;
+      sat.transform.pos = [sat.transform.pos[0], c[1], sat.transform.pos[2]];
+      let p = sat.transform.pos;
+      let rv = [p[0] - c[0], 0, p[2] - c[2]];
+      let r = Math.hypot(rv[0], rv[2]);
+      const v0 = sat.physics.linvel || [0, 0, 0];
+      const speed0 = Math.hypot(v0[0], v0[1], v0[2]);
+      // 位置与中心重合（模型把轨道半径塞进 radius 被范围校验拒掉、position 缺失——实测行为）：
+      // 按圆轨道条件反推 r = GM/v²（题面圆周运动语义下的确定性推论）
+      if (r < 1e-6 && speed0 >= 1e-6) {
+        r = Gv * center.physics.mass / (speed0 * speed0);
+        sat.transform.pos = [c[0] + r, c[1], c[2]];
+        p = sat.transform.pos;
+        rv = [r, 0, 0];
+        plan.assumptions = [...plan.assumptions, `位置缺失，按圆轨道条件反推轨道半径 r=${r.toFixed(2)}（客户端推断）`].slice(0, 8);
+      }
+      if (r < 1e-6) continue;
+      const v = sat.physics.linvel || [0, 0, 0];
+      const speed = Math.hypot(v[0], v[1], v[2]);
+      // xz 切向分量（保留题给切向方向），径向与 y 分量丢弃（圆周运动题面语义）；
+      // 切向为零（速度缺失/纯径向/法向）时按圆轨道 v=√(GM/r) 推断
+      const vn = (v[0] * rv[0] + v[2] * rv[2]) / (r * r);
+      const vt = [v[0] - vn * rv[0], 0, v[2] - vn * rv[2]];
+      const vtl = Math.hypot(vt[0], vt[2]);
+      if (vtl < 1e-6 || speed < 1e-6) {
+        const vc = Math.sqrt(Gv * center.physics.mass / r);
+        sat.physics.linvel = [-rv[2] / r * vc, 0, rv[0] / r * vc].map((x) => +x.toFixed(4));
+        plan.assumptions = [...plan.assumptions, `按圆轨道语义推断绕转体入轨速度 v=${vc.toFixed(2)}（xz 切向，客户端推断）`].slice(0, 8);
+      } else {
+        sat.physics.linvel = [vt[0] / vtl * speed, 0, vt[2] / vtl * speed].map((x) => +x.toFixed(4));
+      }
+    }
+  }
   return out;
 }
 

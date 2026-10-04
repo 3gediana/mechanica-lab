@@ -20,7 +20,7 @@ PARSE_PROMPT = """你是大学物理题解析器。看图中的物理题，输�
  "goal": "实验或求解目标",
  "gravity": 数值m/s2 或 null,
  "entities": [
-   {"type": "ramp|sphere|box|cylinder|ground",
+   {"type": "ramp|sphere|box|cylinder|ground|celestial",
     "name": "实体名",
     "given": {"angleDeg":数值, "length":数值m, "height":数值m, "width":数值m, "radius":数值m, "mass":数值kg, "friction":数值, "restitution":数值, "velocity":[vx,vy,vz]},
     "confidence": 0到1}
@@ -39,8 +39,9 @@ PARSE_PROMPT = """你是大学物理题解析器。看图中的物理题，输�
 - kind 填 "rotation" 时给 joint（转台体索引 from、滑块体索引 to、径向滑槽参数）。
 - 转台初始角速度写在其 given.angvel = [0, ω, 0]。
 规则：
-- type 必须从六个值中选：斜面/楔子=ramp，球=sphere，方块/物块=box，圆柱=cylinder，地面=ground，定滑轮/滑轮=pulley。无关实体不要列。
+- type 必须从七个值中选：斜面/楔子=ramp，球=sphere，方块/物块=box，圆柱=cylinder，地面=ground，定滑轮/滑轮=pulley，恒星/行星/卫星/天体=celestial。无关实体不要列。
 - 定滑轮/阿特伍德题：kind 填 atwood，滑轮 type=pulley（given 带 radius 和 position），两物体 type 用 sphere 或 box（given 带各自的 mass；若题目给初速度写 velocity）。
+- 天体/引力题（恒星/行星/卫星绕转）：kind 填 astro，恒星/行星/卫星 type 一律填 celestial（不要填 sphere），中心天体和绕转体 given 都带 mass。轨道半径是位置不是尺寸：不要写进 radius（radius 是渲染尺寸，省略即可）；把绕转体位置写进 position（相对中心天体，如卫星在 x 方向 4 米处填 [4,0,0]，中心填 [0,0,0]）。速度写 velocity 三分量。题给场景引力常数时输出顶层 "G" 字段（数值），未给则省略。
 - given 只写题目文字或图中明确给出的数值；没给的键不要写。
 - 题目说"不计摩擦"时 friction 写 0 并在 assumptions 说明；"由静止释放"时 velocity 不写（默认零）。
 - 题目未明确给重力加速度时 gravity 填 null（不要猜 0 或 10）；gravity 禁止填 0（除非题目明确是失重/零重力环境）。
