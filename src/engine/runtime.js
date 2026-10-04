@@ -11,6 +11,8 @@ const _sq = new THREE.Quaternion(), _sqInv = new THREE.Quaternion();
 const _sv = new THREE.Vector3(), _sw = new THREE.Vector3(), _ax = new THREE.Vector3();
 const _vt = new THREE.Vector3(), _vs = new THREE.Vector3();
 const _n1 = new THREE.Vector3(), _n2 = new THREE.Vector3();
+// 受力差分基准（PER-3/52：120Hz 下每步新分配 Map+数组是 GC 大头，模块级复用原地写入）
+const _prevVel = new Map();
 
 export class Runtime {
   constructor(RAPIER, materials, scene) {
@@ -39,6 +41,7 @@ export class Runtime {
     this.epoch = 0;              // rebuild 代数（守恒量基准重取依据）
     this._spinSlots = [];        // spinLock 转台的 PBD 径向滑槽（_createJoints 收集）
     this.sensorReadings = new Map();  // 传感器读数（id → {speed/crossedT,...}），运行态数据不进文档
+    this._colOwner = new Map();       // collider.handle → 实体 id（碰撞事件 O(1) 归属，PER-4）
     this._bindDocs = null;
   }
 
@@ -47,6 +50,8 @@ export class Runtime {
   rebuild(doc) {
     this.clear();
     this._bindDocs = doc;
+    this._colOwner.clear();
+    _prevVel.clear();
     this.world = new this.RAPIER.World({ x: 0, y: doc.gravity, z: 0 });
     this.world.timestep = FIXED_H;
     this.world.numSolverIterations = 8;
@@ -89,7 +94,8 @@ export class Runtime {
     mesh.position.fromArray(e.transform.pos);
     mesh.rotation.set(...e.transform.rot);
     if (e.transform.scale) mesh.scale.fromArray(e.transform.scale);
-    mesh.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    // 默认只接收阴影：投影子在确认实体带碰撞体后开启（传感器/标记/连接类免阴影 pass，PER-11）
+    mesh.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = true; } });
     mesh.visible = e.visible !== false;
     mesh.userData.entityId = e.id;
     mesh.userData.locked = e.locked === true;
@@ -150,6 +156,10 @@ export class Runtime {
       if (e.params.noCollide && bind.collider) {
         // noCollide：保留质量/惯性（joint 求解需要），但不与任何东西碰撞
         bind.collider.setCollisionGroups((0x0002 << 16) | 0);
+      }
+      if (bind.collider) {
+        mesh.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+        this._colOwner.set(bind.collider.handle, e.id);
       }
       bind.body = body;
     }
@@ -447,11 +457,12 @@ export class Runtime {
     if (!this.world) return;
     const nCol0 = this.collisions.length;
     const pre = this.systemTotals();          // 上一步末速度 = 本次碰撞前状态
-    const prevVel = new Map();                // 受力差分基准
     for (const [id, b] of this.binds) {
       if (!b.body || b.entity.physics.body !== 'dynamic') continue;
       const v = b.body.linvel();
-      prevVel.set(id, [v.x, v.y, v.z]);
+      let pv = _prevVel.get(id);
+      if (!pv) { pv = [0, 0, 0]; _prevVel.set(id, pv); }
+      pv[0] = v.x; pv[1] = v.y; pv[2] = v.z;
     }
     this._gravStep(FIXED_H);                  // 天体（自积分）先行；Rapier 步内不含天体
     this.world.step(this.eventQueue);         // 事件队列必须传入 step 才会被填充
@@ -506,17 +517,19 @@ export class Runtime {
     const gy = this._bindDocs ? this._bindDocs.gravity : -9.81;
     for (const [id, b] of this.binds) {
       if (!b.body || b.entity.physics.body !== 'dynamic') continue;
-      const pv = prevVel.get(id);
+      const pv = _prevVel.get(id);
       if (!pv) continue;
       const v = b.body.linvel();
       const m = b.body.mass();
       const gs = b.entity.physics.gravityScale != null ? b.entity.physics.gravityScale : 1;
-      this.accels.set(id, [(v.x - pv[0]) / FIXED_H, (v.y - pv[1]) / FIXED_H, (v.z - pv[2]) / FIXED_H]);
-      this.contactForces.set(id, [
-        m * ((v.x - pv[0]) / FIXED_H - 0),
-        m * ((v.y - pv[1]) / FIXED_H - gy * gs),
-        m * ((v.z - pv[2]) / FIXED_H - 0),
-      ]);
+      let av = this.accels.get(id);
+      if (!av) { av = [0, 0, 0]; this.accels.set(id, av); }
+      av[0] = (v.x - pv[0]) / FIXED_H; av[1] = (v.y - pv[1]) / FIXED_H; av[2] = (v.z - pv[2]) / FIXED_H;
+      let cf = this.contactForces.get(id);
+      if (!cf) { cf = [0, 0, 0]; this.contactForces.set(id, cf); }
+      cf[0] = m * ((v.x - pv[0]) / FIXED_H - 0);
+      cf[1] = m * ((v.y - pv[1]) / FIXED_H - gy * gs);
+      cf[2] = m * ((v.z - pv[2]) / FIXED_H - 0);
     }
     // 接触法向（通用受力分解）：取第一个接触对的世界法向，定向为「对方表面指向本体」；
     // 对方实体 params.inMeasure === false（「参与测量」关闭）时不作为测量接触面
@@ -631,10 +644,7 @@ export class Runtime {
   }
 
   _idOfCollider(handle) {
-    for (const [id, b] of this.binds) {
-      if (b.collider && b.collider.handle === handle) return id;
-    }
-    return null;
+    return this._colOwner.get(handle) ?? null;
   }
 
   // ============ 传感器读数（速度/计时/力）：读数存 runtime 不进文档 ============

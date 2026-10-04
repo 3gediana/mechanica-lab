@@ -143,7 +143,9 @@ try {
   await page.click('#btnTrails');
   await page.waitForTimeout(150);
   await page.click('#btnPlay');
-  await page.waitForTimeout(1300);
+  // 固定 sleep 会受 headless 吞吐抖动摆布（实测同代码 simT 0.77~0.82 横跨阈值）：
+  // 改为等待 simT 达标（语义不弱化，只是不吃机器方差）
+  await page.waitForFunction(() => window.MECH.state().simT > 0.8, null, { timeout: 6000 });
   const run1 = await page.evaluate(() => {
     const s = window.MECH.state();
     const ball = window.MECH.entities().find((e) => e.type === 'sphere');

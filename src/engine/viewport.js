@@ -91,6 +91,7 @@ export class Viewport {
     ring.userData.spawnT = performance.now();
     this.scene.add(ring);
     this._impacts.push(ring);
+    this.markDirty();
   }
 
   tickImpacts(now) {
@@ -200,6 +201,7 @@ export class Viewport {
       if (this._snapMarker) this._snapMarker.visible = false;
       this._ghostSnapHit = false;
     }
+    this.markDirty();
   }
 
   ghostState() {
@@ -220,12 +222,14 @@ export class Viewport {
     this._ghost = new THREE.Mesh(geo, mat);
     this._ghost.position.set(0, component.spawnY ? component.spawnY(component.defaults.params) + 0.02 : 0.5, 0);
     this.scene.add(this._ghost);
+    this.markDirty();
   }
   hideGhost() {
     if (this._ghost) {
       this.scene.remove(this._ghost);
       this._ghost.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
       this._ghost = null;
+      this.markDirty();
     }
   }
 
@@ -235,6 +239,7 @@ export class Viewport {
     this.forcesOn = on;
     this.decompose = decompose;
     for (const a of this._forceArrows) a.visible = false;
+    this.markDirty();
   }
 
   setForceDecompose(on) {
@@ -297,6 +302,7 @@ export class Viewport {
   setSpringArrows(on) {
     this.springsOn = on;
     for (const a of this._springArrows) a.visible = false;
+    this.markDirty();
   }
 
   // items: [{aPos, bPos, fA}] fA = A 端弹力向量（拉伸>0 指向 B；B 端取反；F=k·|Δx|，阻尼力不画）
@@ -362,6 +368,7 @@ export class Viewport {
   setTensionArrows(on) {
     this.tensionsOn = on;
     for (const a of this._tensionArrows) a.visible = false;
+    this.markDirty();
   }
 
   // items: [{aPos, bPos, tA, tB}] tA/tB 为两端张力大小（N）
@@ -394,43 +401,7 @@ export class Viewport {
     return { total: this._tensionArrows.length, visible: this._tensionArrows.filter((a) => a.visible).length };
   }
 
-  // ============ 透视 / 正交相机切换 ============
-  setProjection(mode) {
-    if (mode === this.projection) return;
-    if (!this._orthoCam) {
-      const ar = this.camera.aspect;
-      const h = 6;
-      this._orthoCam = new THREE.OrthographicCamera(-h * ar / 2, h * ar / 2, h / 2, -h / 2, 0.01, 300);
-    }
-    const target = this.controls.target.clone();
-    const pos = this.camera.position.clone();
-    const o = this._orthoCam;
-    o.position.copy(pos);
-    o.zoom = 1;
-    o.updateProjectionMatrix();
-    this.controls.object = o;
-    this.gizmo.camera = o;
-    this.camera = o;
-    this.controls.target.copy(target);
-    this.controls.update();
-    this.projection = mode;
-  }
-
-  setPersp() {
-    if (this.projection === 'persp') return;
-    const pos = this.camera.position.clone();
-    this.controls.object = this._perspCamSaved || this.camera;
-    // 恢复透视：_orthoCam 保存了切走前的透视相机
-    const persp = this._perspSaved;
-    this.controls.object = persp;
-    this.gizmo.camera = persp;
-    this.camera = persp;
-    persp.position.copy(pos);
-    this.controls.target.copy(this.controls.target);
-    this.controls.update();
-    this.projection = 'persp';
-  }
-
+  // ============ 透视 / 正交相机切换（唯一入口 toggleProjection；正交视野高固定 6） ============
   toggleProjection() {
     if (this.projection === 'persp') {
       this._perspSaved = this.camera;
@@ -455,47 +426,20 @@ export class Viewport {
       p.position.copy(pos);
       this.projection = 'persp';
     }
-    this.controls.target.copy(this.controls.target);
     this.controls.update();
+    this.markDirty();
     return this.projection;
-  }
-
-  // ============ 多选高亮（BoxHelper 池，末位为主选中） ============
-  setHighlights(ids) {
-    for (const h of this._highlights) {
-      this.scene.remove(h);
-      h.geometry.dispose();
-    }
-    this._highlights = [];
-    let mainMesh = null;
-    for (const id of ids) {
-      const bind = this._bindLookup && this._bindLookup(id);
-      if (!bind || !bind.mesh) continue;
-      const h = new THREE.BoxHelper(bind.mesh, id === ids[ids.length - 1] ? ACCENT : 0x82878f);
-      h.material.transparent = true;
-      h.material.opacity = id === ids[ids.length - 1] ? 0.9 : 0.45;
-      this.scene.add(h);
-      this._highlights.push(h);
-      mainMesh = bind.mesh;
-    }
-    if (mainMesh && this.gizmoEnabled !== false && this.gizmoMode) {
-      this.gizmo.attach(mainMesh);
-      this.gizmo.enabled = true;
-    } else {
-      this.gizmo.detach();
-      this.gizmo.enabled = false;
-    }
-    this.selectedMesh = mainMesh || null;
-    this.highlightIds = ids;
   }
 
   // ============ 轨迹线叠加层 ============
   setTrailsVisible(on) {
     this.trailsVisible = on;
     for (const line of this._trailLines) line.visible = on && line.geometry.drawRange.count >= 4;
+    this.markDirty();
   }
 
-  // trails: Map<id, [[x,y,z],...]>（runtime.trails），每实体一条线，颜色按序固定
+  // trails: Map<id, [[x,y,z],...]>（runtime.trails），每实体一条线，颜色按序固定。
+  // 增量写点（PER-2）：未到 1800 封顶时只 append 新点；封顶后数组每步 shift 滑动，退回全量重写。
   updateTrails(trails) {
     if (!this.trailsVisible) return;
     const PALETTE = [0xd9a441, 0x7ba7d9, 0x93c47d, 0xc27ba0, 0xd98a6f];
@@ -510,13 +454,23 @@ export class Viewport {
         line = new THREE.Line(geo, mat);
         line.frustumCulled = false;
         line.visible = false;
+        line.userData.written = 0;
         this.scene.add(line);
         this._trailLines.push(line);
       }
       const attr = line.geometry.attributes.position;
       const n = Math.min(pts.length, 1800);
-      for (let k = 0; k < n; k++) attr.setXYZ(k, pts[k][0], pts[k][1], pts[k][2]);
-      attr.needsUpdate = true;
+      const w = line.userData.written;
+      if (pts.length >= 1800 || w > n) {
+        for (let k = 0; k < n; k++) attr.setXYZ(k, pts[k][0], pts[k][1], pts[k][2]);
+      } else {
+        for (let k = w; k < n; k++) attr.setXYZ(k, pts[k][0], pts[k][1], pts[k][2]);
+      }
+      line.userData.written = n;
+      if (w !== n || pts.length >= 1800) {
+        attr.needsUpdate = true;
+        this.markDirty();
+      }
       line.geometry.setDrawRange(0, n);
       line.visible = n >= 2;
       i++;
@@ -534,6 +488,7 @@ export class Viewport {
     if (!on) {
       for (const a of this._arrows) { a.visible = false; }
     }
+    this.markDirty();
   }
 
   // items: [{pos:[x,y,z], vel:[vx,vy,vz]}] 每 tick 由 workbench 用最新遥测驱动
@@ -612,6 +567,7 @@ export class Viewport {
     controls.minDistance = 0.4;
     controls.maxDistance = 100;   // 大场景（天体系）与 5m 刻度档可达
     controls.maxPolarAngle = 1.54;
+    controls.addEventListener('change', () => this.markDirty());   // 阻尼收尾帧持续置脏，静止后停渲染
     this.controls = controls;
 
     // 环境：HDRI 失败降级 RoomEnvironment（材质复用 materials.js，光照环境必须先就绪）
@@ -668,7 +624,8 @@ export class Viewport {
     const gizmo = new TransformControls(camera, renderer.domElement);
     gizmo.setMode('translate');
     gizmo.setSize(0.85);
-    gizmo.addEventListener('dragging-changed', (ev) => { controls.enabled = !ev.value; });
+    gizmo.addEventListener('dragging-changed', (ev) => { controls.enabled = !ev.value; this.markDirty(); });
+    gizmo.addEventListener('objectChange', () => this.markDirty());
     gizmo.addEventListener('mouseUp', () => this.cb.onGizmoCommit && this.cb.onGizmoCommit());
     gizmo.enabled = false;
     this.gizmo = gizmo;
@@ -802,6 +759,7 @@ export class Viewport {
     }
     this.selectedMesh = mainMesh || null;
     this.highlightIds = ids;
+    this.markDirty();
   }
 
   refreshHighlight() {
@@ -810,6 +768,7 @@ export class Viewport {
 
   setGizmoMode(mode) {
     this.gizmoMode = mode;
+    this.markDirty();
     // 缩放模式语义=均匀视觉缩放：r186 的 showX/Y/Z=false 会连中心 XYZ 手柄一起隐藏（按名字
     // 联动过滤，实测抓不到手柄），所以轴向手柄保留、松手提交时在 applyGizmoToEntity 统一
     // 均匀化+钳制——拖拽过程中的瞬时异形是可见预览，落点状态总是合理值。
@@ -822,6 +781,7 @@ export class Viewport {
 
   setGizmoEnabled(on) {
     this.gizmoEnabled = on;
+    this.markDirty();
     if (!on || !this.selectedMesh) {
       this.gizmo.detach();
       this.gizmo.enabled = false;
@@ -852,6 +812,7 @@ export class Viewport {
     grid.material.opacity = 0.85;
     this.scene.add(grid);
     this._grid = grid;
+    this.markDirty();
   }
 
   gridInfo() {
@@ -912,12 +873,32 @@ export class Viewport {
     if (this.camera.isPerspectiveCamera) {
       this.camera.aspect = w / h;
       this.camera.updateProjectionMatrix();
+    } else if (this._orthoCam) {
+      // 正交相机按新纵横比重建 frustum（视野高保持切换时的 6，与 toggleProjection 一致）
+      const ar = w / h;
+      this._orthoCam.left = -3 * ar;
+      this._orthoCam.right = 3 * ar;
+      this._orthoCam.top = 3;
+      this._orthoCam.bottom = -3;
+      this._orthoCam.updateProjectionMatrix();
     }
     this.renderer.setSize(w, h);
+    this.markDirty();
+  }
+
+  // ============ 脏标记（静止帧跳过 GPU 渲染，PER-1） ============
+  // 任何可能改变画面的事件都必须 markDirty()；controls/gizmo 在 init 里统一接线。
+  // 保险丝：连续跳过最长 500ms——未知置脏源漏网时至多半秒旧画，不会冻结。
+  markDirty() { this._dirty = true; }
+  consumeDirty(now = performance.now()) {
+    if (this._dirty) { this._dirty = false; this._lastRenderAt = now; return true; }
+    if (now - (this._lastRenderAt || 0) > 500) { this._lastRenderAt = now; return true; }
+    return false;
   }
 
   render() {
-    this.controls.update();
+    // controls.update() 由 workbench tick 每帧调用（脏帧与静止帧都要跑，保证阻尼收敛）；
+    // 这里只做高亮盒跟随与 GPU 提交。
     this.refreshHighlight();
     this.renderer.render(this.scene, this.camera);
   }

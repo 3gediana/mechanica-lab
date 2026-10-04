@@ -38,7 +38,12 @@ try {
     return window.MECH.telemetry(ball.id);
   });
   check('球沿轨滑行(x 前进)', mid && mid.pos[0] > -1.5, `x=${mid.pos[0].toFixed(2)}`);
-  await page.waitForTimeout(1800);
+  // 固定 sleep 受 headless 实时率抖动摆布（同代码 y 在 1.0~1.2 波动）：改为等待下坡完成
+  await page.waitForFunction(() => {
+    const ball = window.MECH.entities().find((e) => e.name === '轨道小球');
+    const t = window.MECH.telemetry(ball.id);
+    return t && t.pos[1] < 1.0;
+  }, null, { timeout: 8000 });
   const late = await page.evaluate(() => {
     const ball = window.MECH.entities().find((e) => e.name === '轨道小球');
     const t = window.MECH.telemetry(ball.id);

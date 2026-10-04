@@ -135,6 +135,7 @@ function endHistoryBatch(label) {
 
 function rebuildAll(rerenderInspector = true) {
   runtime.rebuild(doc);
+  viewport.markDirty();   // 全量重建=视觉必然变化（静止帧跳渲染必须感知）
   rotationBase = null; momentumBase = null; astroBase = null;   // 基准必须在初始态重采
   selectedIds = selectedIds.filter((x) => runtime.binds.has(x));
   if (selectedId && !selectedIds.includes(selectedId)) {
@@ -487,6 +488,7 @@ function bindUI() {
       scrubbing = true;
       replayIdx = Math.min(+bar.value, runtime.frames.length - 1);
       runtime.applyFrame(replayIdx);
+      viewport.markDirty();
     });
     bar.addEventListener('change', () => { scrubbing = false; });
   }
@@ -1015,6 +1017,7 @@ function renderInspector() {
   visCb.onchange = () => {
     const mesh = runtime.binds.get(e.id).mesh;
     mesh.visible = visCb.checked;
+    viewport.markDirty();
     opUpdateEntity(e.id, { visible: visCb.checked }, visCb.checked ? '显示' : '隐藏', { rebuild: false });
   };
   head.children[2].children[1].textContent = c.label;
@@ -1809,7 +1812,32 @@ function tick() {
       runtime.applyFrame(replayIdx);
       $('replayBar').value = replayIdx;
     }
-  } else if (mode === 'run' && !paused) runtime.advance(rawDt * timeScale);
+    viewport.markDirty();
+  } else if (mode === 'run' && !paused) {
+    runtime.advance(rawDt * timeScale);
+    viewport.markDirty();
+  }
+  viewport.controls.update();     // 阻尼收敛期持续触发 change→脏（render 内不再重复调用）
+  viewport.tickFocus();
+  viewport.tickPose();
+  if (viewport._focusAnim || viewport._poseAnim || viewport.impactCount() > 0) viewport.markDirty();
+  // 叠加层的状态字必须每帧同步（不能落进脏区：静止帧跳过会让 wantContactNormals 停摆）
+  runtime.wantContactNormals = viewport.decompose;
+  // 静止帧跳渲染仅限有焦点的真实窗口：headless/后台页无帧提交会被合成器降频，
+  // 连 requestAnimationFrame 都被饿死（实测 p8/w1 物理推进掉到 ~1fps）
+  const shouldRender = viewport.consumeDirty();
+  if (document.hasFocus() && !shouldRender) {
+    // 静止编辑帧：无任何视觉变更，跳过叠加层与 GPU 渲染（PER-1；读数节流照常）
+    roTimer += rawDt;
+    if (roTimer > 0.15) {
+      roTimer = 0;
+      updateReadouts();
+      updateConsbar();
+      if (curvesOn && mode === 'run') sampleCurves();
+      updateScaleReadout();
+    }
+    return;
+  }
   if (vectorsOn) {
     // 编辑态显示初速度，运行/暂停显示当前速度（遥测即当前世界态）；
     // per-entity「显示速度向量」关闭的体不画（检查器观察组）
@@ -1840,7 +1868,7 @@ function tick() {
   if (forcesOn) {
     // 通用接触法向：Rapier 接触对收集（任意面：地面/斜坡/墙面/曲轨），运行过才有；
     // 绳/弹簧类无接触对 → 不分解、显示接触合力（张力语义），不再依赖斜面几何特判
-    runtime.wantContactNormals = viewport.decompose;
+    // （wantContactNormals 已前移到主循环脏门槛之前，每帧同步）
     const items = [];
     for (const e of doc.entities) {
       if (e.physics.body !== 'dynamic' || e.visible === false) continue;

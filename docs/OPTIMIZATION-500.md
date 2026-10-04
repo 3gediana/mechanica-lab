@@ -8,17 +8,17 @@
 
 | # | 位置 | 问题 → 改法 | P | 量 | 风险 | 状态 |
 |---|---|---|---|---|---|---|
-| PER-1 | viewport.js render()/workbench tick | 编辑态静止时仍每帧 render+refreshHighlight：加脏标记（controls change/叠加层/物理推进置脏，连续 2 帧干净则跳过 renderer.render），空闲 CPU 大降 | P0 | M | ⚠ 控件阻尼收尾帧不能漏 | ⬜ |
-| PER-2 | viewport.js updateTrails | 每 tick 全量重写 1800×N 点缓冲：记录每线已写点数只 append 增量，drawRange 覆盖 | P0 | S | ⚠ rebuild 后计数复位 | ⬜ |
-| PER-3 | runtime.js stepOnce prevVel | 每步 new Map+数组（120Hz×8 步 GC 大头）：模块级复用容器 clear() 重填 | P0 | S | | ⬜ |
-| PER-4 | runtime.js _idOfCollider | O(实体) 线扫 per 碰撞事件：_createEntity 时建 handle→id Map，rebuild 清空 | P0 | S | | ⬜ |
+| PER-1 | viewport.js render()/workbench tick | 编辑态静止时仍每帧 render+refreshHighlight：加脏标记（controls change/叠加层/物理推进置脏，连续 2 帧干净则跳过 renderer.render），空闲 CPU 大降 | P0 | M | ⚠ 控件阻尼收尾帧不能漏 | ✅ B2：脏标记跳渲染（hasFocus 守卫防 headless rAF 饿死） |
+| PER-2 | viewport.js updateTrails | 每 tick 全量重写 1800×N 点缓冲：记录每线已写点数只 append 增量，drawRange 覆盖 | P0 | S | ⚠ rebuild 后计数复位 | ✅ B2：trails 增量写点，封顶后退回全量 |
+| PER-3 | runtime.js stepOnce prevVel | 每步 new Map+数组（120Hz×8 步 GC 大头）：模块级复用容器 clear() 重填 | P0 | S | | ✅ B2：_prevVel 模块级复用原地写 |
+| PER-4 | runtime.js _idOfCollider | O(实体) 线扫 per 碰撞事件：_createEntity 时建 handle→id Map，rebuild 清空 | P0 | S | | ✅ B2：_colOwner handle→id Map |
 | PER-5 | workbench applyAgentPlanInner | N 实体 N 次 rebuildAll（含 Rapier world 重建）：批内挂起 rebuild，末尾一次重建（同 historyBatch 语义） | P0 | M | ⚠ atwood __PULLEY__ 回填路径 | ⬜ |
 | PER-6 | viewport.js _snapCandidate | ghost 跟随每 pointermove 对全场 Box3.setFromObject：rebuild 时缓存 AABB（viewport.invalidateSnapCache()），移动只查缓存 | P0 | M | ⚠ 实体拖动需失效缓存 | ⬜ |
 | PER-7 | workbench.js tick 矢量/受力块 | 每帧 new 多组临时数组/对象（items/gravity/normal/friction/jItems）：模块级数组 length=0 复用 | P1 | S | ⚠ 引用逃逸排查 | ⬜ |
 | PER-8 | runtime.js _gravAccel | 每子步分配二维数组（4×120Hz）：Float64Array 扁平 scratch 复用 | P1 | S | | ⬜ |
 | PER-9 | runtime.js trails push/shift | 1800 封顶后每采样 shift O(n)：环形缓冲或超限 64 个一批 splice | P1 | S | ⚠ drawRange 语义 | ⬜ |
 | PER-10 | runtime.js telemetry | 每次调用 6+ 数组分配且每帧每实体调用：热路径（矢量层）改为只读填充复用对象，MECH.telemetry 保留现语义 | P2 | M | ⚠ 调用方持有引用 | ⬜ |
-| PER-11 | runtime.js _createEntity | 传感器/标记/绳/铰链视觉件 castShadow=true 徒增阴影 pass：buildCollider()==null 的实体默认关 castShadow | P0 | S | | ⬜ |
+| PER-11 | runtime.js _createEntity | 传感器/标记/绳/铰链视觉件 castShadow=true 徒增阴影 pass：buildCollider()==null 的实体默认关 castShadow | P0 | S | | ✅ B2：无碰撞体实体免阴影 pass |
 | PER-12 | viewport.js init | renderer 无 powerPreference:'high-performance'：补上（独显直连本机收益明确） | P1 | S | | ⬜ |
 | PER-13 | viewport.js spawnImpact | 每次碰撞 new RingGeometry+Material：环池复用（8 个循环） | P2 | S | | ⬜ |
 | PER-14 | viewport.js setHighlights | 每次选中变更 new/dispose BoxHelper：按实体缓存 BoxHelper 复用 update() | P2 | M | | ⬜ |
@@ -28,7 +28,7 @@
 | PER-18 | thumbs.js | 第二个 WebGLRenderer 常驻：渲染完成后可释放（或保留但低优先） | P3 | S | | ⬜ |
 | PER-19 | registry.js track | buildTroughGeometry(620,48)≈3 万顶点每次 rebuild 重建：registry 层按 (type+params json) 哈希缓存几何，clear() 不 dispose 缓存 | P1 | M | ⚠ 参数变更失配 | ⬜ |
 | PER-20 | workbench.js commitChange | 每次 commit serializeDoc 整文档：小场景可忽略；仅当 entities>80 时改增量（阈值项，先不做） | P3 | L | | ⬜ |
-| PER-21 | viewport.js resize | 正交相机切窗后 frustum 不更新（bug 兼性能）：ortho 分支按 aspect 重建 left/right/top/bottom | P0 | S | | ⬜ |
+| PER-21 | viewport.js resize | 正交相机切窗后 frustum 不更新（bug 兼性能）：ortho 分支按 aspect 重建 left/right/top/bottom | P0 | S | | ✅ B2：resize 修正交 frustum（toggleProjection 单入口） |
 | PER-22 | viewport.js pointermove | 全局 pointermove 恒挂（ghost/框选都空时也进函数）：rAF 节流 + 早退条件前置 | P2 | S | | ⬜ |
 | PER-23 | runtime.js rebuild | 每次 doc 变更全量重建所有实体 mesh：叠加 PER-19 几何缓存后 mesh 层按 params+transform 哈希跳过未变实体（仅重建刚体，不重建网格） | P2 | L | ⚠ 高风险大改，先几何缓存 | ⬜ |
 | PER-24 | runtime.js stepOnce postVels | 含碰撞步构造整对象图：仅保留白名单键+复用数组 | P2 | S | | ⬜ |
@@ -59,7 +59,7 @@
 | PER-49 | workbench drawCurves | 能量模式 ke.map(v=>v+pe[i]) 每帧新数组：trace 内联求和 | P2 | S | | ⬜ |
 | PER-50 | viewport updateVelocityArrows | setDirection 内部 new Vector3：ArrowHelper API 限制；批量时先 normalize 复用外部向量传入 | P2 | S | | ⬜ |
 | PER-51 | 大场景守护 | entities>150 时 toast 警告+建议关阴影/轨迹（防呆而非真优化） | P2 | S | | ⬜ |
-| PER-52 | runtime stepOnce accels Map | 每步写 Map 分配数组：与 PER-3 同批（复用 Map+数组） | P1 | S | | ⬜ |
+| PER-52 | runtime stepOnce accels Map | 每步写 Map 分配数组：与 PER-3 同批（复用 Map+数组） | P1 | S | | ✅ B2：accels/contactForces 原地写 |
 | PER-53 | workbench tick 法线可视化块 | 每 ramp 每帧 new Vector3×3：模块级 scratch | P2 | S | | ⬜ |
 | PER-54 | workbench tick 张力块 | telemetry+accels 每 rope 每帧：节流 0.15s（箭头平滑无感） | P2 | S | | ⬜ |
 | PER-55 | viewport _updateGhostFollow | getBoundingClientRect 每 move 两次：进 rAF 时缓存一次 | P2 | S | | ⬜ |
@@ -77,7 +77,7 @@
 | PER-67 | workbench opAddComponent 摆位 | n%3 网格摆位与相机无关（用户找半天）：spawn 在 controls.target 附近偏移 | P1 | S | ⚠ 回归断言摆位 | ⬜ |
 | PER-68 | runtime _constrainToPipe | 最近线段窗口 ±8/+40 硬编码：跨环时窗口边界抖动风险；按弧长缓存自适应窗口 | P2 | M | ⚠ p8 经典轨 | ⬜ |
 | PER-69 | explain/telemetry 频率 | runAndExplain 期间叠加层照跑：解释运行时暂停矢量/受力更新（减负+防干扰） | P2 | S | | ⬜ |
-| PER-70 | viewport render 内 controls.update | 阻尼系数 0.07 需持续 update：脏标记方案需含 controls 'end' 后 1s 缓冲（并入 PER-1 设计） | P0 | M | ⚠ | ⬜ |
+| PER-70 | viewport render 内 controls.update | 阻尼系数 0.07 需持续 update：脏标记方案需含 controls 'end' 后 1s 缓冲（并入 PER-1 设计） | P0 | M | ⚠ | ✅ B2：controls.update 前置+阻尼 change 置脏 |
 | PER-71 | workbench roSel 字符串 | 每 0.15s 拼接写 DOM：值未变跳过（与 PER-26 同法） | P2 | S | | ⬜ |
 | PER-72 | localStorage 同步读 | loadAutosave boot 一次 ✓ 不动 | P3 | S | | ⬜ |
 | PER-73 | runtime frames 记录 | 1200 帧上限数组 ✓；录制中 sampleCurves 照跑：录制时曲线暂停采样可选 | P3 | S | | ⬜ |
@@ -518,9 +518,9 @@
 
 | # | 位置 | 问题 → 改法 | P | 量 | 风险 | 状态 |
 |---|---|---|---|---|---|---|
-| ENG-1 | viewport.js | setHighlights 定义两次（L464/L778 重复体）：删一处 | P0 | S | | ⬜ |
-| ENG-2 | viewport.js setPersp | 死赋值/无操作行（controls.object 双写、target.copy(target)）：清理 | P0 | S | | ⬜ |
-| ENG-3 | viewport.js setProjection/setPersp/toggleProjection | 三函数逻辑重叠（仅 toggleProjection 被用）：保留 toggle+resize 修复，其余删或合并 | P0 | S | | ⬜ |
+| ENG-1 | viewport.js | setHighlights 定义两次（L464/L778 重复体）：删一处 | P0 | S | | ✅ B2：删重复 setHighlights |
+| ENG-2 | viewport.js setPersp | 死赋值/无操作行（controls.object 双写、target.copy(target)）：清理 | P0 | S | | ✅ B2：setPersp 死赋值随函数删除 |
+| ENG-3 | viewport.js setProjection/setPersp/toggleProjection | 三函数逻辑重叠（仅 toggleProjection 被用）：保留 toggle+resize 修复，其余删或合并 | P0 | S | | ✅ B2：setProjection/setPersp 删除，toggleProjection 唯一入口 |
 | ENG-4 | workbench.js setTensions | 死函数（无调用方）：删除 | P0 | S | | ✅ B1：删死函数 setTensions |
 | ENG-5 | parse-schema.js | 注释「抛体布局」重复两行+hasSpringAttach 未用变量：清理 | P0 | S | | ✅ B1：删重复注释/未用变量 |
 | ENG-6 | workbench.js M 命名 | applyAgentPlanInner 内 const M=window.MECH 遮蔽外层材质 M：重命名 MECHApi | P1 | S | | ⬜ |
@@ -544,7 +544,7 @@
 | ENG-24 | 命名规范 | M（材质）/doc/mode 等过短全局：仅新代码规范，旧名不动（回归成本） | P3 | S | | ⬜ |
 | ENG-25 | JSDoc | MECH API 无类型注解：JSDoc 注释 key 方法（自文档化） | P2 | M | | ⬜ |
 | ENG-26 | node 单测 | parse-schema/explain/scene-doc 纯模块：test/unit/*.test.mjs node --test（AG-50/51 载体） | P1 | M | | ✅ B1(部分)：test/unit 落地；scene-doc 单测未做 |
-| ENG-27 | 测试 waitForTimeout | 402 处固定等待（headless 抖动隐患）：仅对新增/翻红用例改 waitForFunction（全量替换回归成本不可控，记录债） | P3 | L | ⚠ 债务管理 | ⬜ |
+| ENG-27 | 测试 waitForTimeout | 402 处固定等待（headless 抖动隐患）：仅对新增/翻红用例改 waitForFunction（全量替换回归成本不可控，记录债） | P3 | L | ⚠ 债务管理 | ✅ B2(部分)：p8/w1-A5 固定 sleep 改 waitForFunction（p23 先例） |
 | ENG-28 | shots 目录 | 磁盘增长：测试 runner 前清 shots/w* 子目录（git 已忽略） | P2 | S | | ⬜ |
 | ENG-29 | serve.py 重启编排 | w3 杀服场景重启复杂：runner 脚本 ensure-server（netstat 探活+按需起）| P2 | M | | ⬜ |
 | ENG-30 | README | 优化后同步：测试章节补 w 系列与 unit、运行方式 | P1 | S | | ⬜ |
