@@ -83,10 +83,11 @@ else:
 
 # 3. JS 语法检查：node --check 为权威（粗扫器在模板串内嵌引号上会误报，已弃用）
 import subprocess
-for js in ["src/legacy-main.js", "src/track-curve.js", "src/materials.js",
-           "src/workbench.js", "src/engine/scene-doc.js", "src/engine/registry.js",
-           "src/engine/runtime.js", "src/engine/viewport.js", "src/engine/presets.js",
-           "src/engine/parse-schema.js", "src/engine/explain.js"]:
+JS_FILES = ["src/legacy-main.js", "src/track-curve.js", "src/materials.js",
+            "src/workbench.js", "src/engine/scene-doc.js", "src/engine/registry.js",
+            "src/engine/runtime.js", "src/engine/viewport.js", "src/engine/presets.js",
+            "src/engine/parse-schema.js", "src/engine/explain.js", "src/engine/thumbs.js"]
+for js in JS_FILES:
     p2 = ROOT / js
     if not p2.exists():
         fails.append(f"缺失: {js}")
@@ -94,6 +95,11 @@ for js in ["src/legacy-main.js", "src/track-curve.js", "src/materials.js",
     r = subprocess.run(["node", "--check", str(p2)], capture_output=True, text=True)
     if r.returncode != 0:
         fails.append(f"JS 语法错误 {js}: {r.stderr.strip()[:200]}")
+
+# 3a. console.log 红线（ENG-37 清零的回归护栏；error/warn 放行）
+for js in JS_FILES:
+    if "console.log(" in (ROOT / js).read_text(encoding="utf-8"):
+        fails.append(f"console.log 残留: {js}")
 
 # 3b. 页面入口指向正确
 if "src/workbench.js" not in html:

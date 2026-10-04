@@ -25,8 +25,15 @@ try {
   await page.waitForFunction(() => window.MECH && window.MECH.ready(), null, { timeout: 25000 });
 
   // ==== A+B. 动量预置：能量条 + 碰撞时刻标记
-  await page.selectOption('#selPreset', 'momentum');
-  await page.waitForTimeout(300);
+  await page.evaluate(() => {   // 批量负载下 selectOption 偶发丢 change（一轮 p8 教训）：显式派发
+    const s = document.querySelector('#selPreset');
+    s.value = 'momentum';
+    s.dispatchEvent(new Event('change'));
+  });
+  await page.waitForFunction(() => {
+    const eb = document.getElementById('ebFill'), pct = document.getElementById('ebPct');
+    return !!(eb && pct && eb.offsetWidth > 0 && pct.offsetWidth > 0);
+  }, null, { timeout: 15000 });
   check('守恒量条含能量保持率', await page.isVisible('#ebFill') && await page.isVisible('#ebPct'));
   await page.click('#btnPlay');
   await page.waitForFunction(() => window.MECH.consState().reports.some((r) => r.t > 0.5), null, { timeout: 15000 });

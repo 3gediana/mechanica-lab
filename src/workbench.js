@@ -9,7 +9,7 @@ import {
 } from './engine/scene-doc.js';
 import { Runtime, FIXED_H, attachRegistry } from './engine/runtime.js';
 import { Viewport } from './engine/viewport.js';
-import { getPreset } from './engine/presets.js';
+import { getPreset, PRESETS } from './engine/presets.js';
 import { createMaterials } from './materials.js';
 import { normalizeParse, planToOverrides } from './engine/parse-schema.js';
 import { explainRun } from './engine/explain.js';
@@ -518,6 +518,43 @@ function openFile(file) {
 // ============ UI 绑定 ============
 function bindUI() {
   $('btnNew').onclick = () => { applyDoc(createEmptyDoc('未命名场景'), '新建'); $('sceneName').value = doc.name; };
+  // 预置下拉单源化（MDL-41）：选项由 PRESETS 自动生成，消除 index.html 手写双份漂移；
+  // 分组只做归类，未列出的预置自动落「更多」组
+  const PRESET_GROUPS = [
+    ['基础经典', ['incline', 'momentum', 'momentum2d', 'projectile', 'classic', 'celestial', 'spin', 'atwood', 'hingePend']],
+    ['振动', ['pendulum', 'conical', 'vertCircle', 'springSHM', 'springVert', 'coupled', 'springGun']],
+    ['碰撞', ['collLab', 'bulletBlock', 'newtonCradle', 'ballChain', 'bounceCompare', 'blockOnBlock']],
+    ['抛体对照', ['galileoDrop', 'rangeAngles']],
+    ['转动·摩擦', ['rollRace', 'frictionLock', 'atwoodHeavy']],
+    ['天体', ['binaryStar', 'threeBody']],
+  ];
+  const selPreset = $('selPreset');
+  {
+    const grouped = new Map(PRESET_GROUPS.map(([g]) => [g, []]));
+    grouped.set('更多', []);
+    for (const [id, p] of Object.entries(PRESETS)) {
+      if (id === 'empty') continue;                       // 空场景走「新建」，不进下拉
+      const g = PRESET_GROUPS.find(([, ids]) => ids.includes(id));
+      grouped.get(g ? g[0] : '更多').push([id, p.label]);
+    }
+    const frag = document.createDocumentFragment();
+    const ph = document.createElement('option');
+    ph.value = ''; ph.textContent = '预置场景';
+    frag.appendChild(ph);
+    for (const [g, items] of grouped) {
+      if (!items.length) continue;
+      const og = document.createElement('optgroup');
+      og.label = g;
+      for (const [id, label] of items) {
+        const o = document.createElement('option');
+        o.value = id; o.textContent = label;
+        og.appendChild(o);
+      }
+      frag.appendChild(og);
+    }
+    selPreset.innerHTML = '';
+    selPreset.appendChild(frag);
+  }
   $('selPreset').onchange = (e) => {
     if (!e.target.value) return;
     applyDoc(getPreset(e.target.value), '载入预置');
@@ -531,6 +568,9 @@ function bindUI() {
       const pl = doc.entities.find((x) => x.type === 'pulley');   // 滑轮在 y=3，载入后聚焦
       if (pl && runtime.binds.has(pl.id)) viewport.focus(runtime.binds.get(pl.id).mesh);
     }
+    // R2 新预置的教学默认叠加层：振动/轨道类开轨迹+守恒，碰撞类开矢量+守恒
+    if (/^(pendulum|conical|vertCircle|springSHM|springVert|coupled|galileoDrop|rangeAngles|bounceCompare|binaryStar|threeBody|ballChain|newtonCradle)$/.test(e.target.value)) { setTrails(true); setCons(true); }
+    if (/^(collLab|bulletBlock|blockOnBlock)$/.test(e.target.value)) { setVectors(true); setCons(true); }
     e.target.value = '';
   };
   $('btnSave').onclick = saveFile;
@@ -2007,12 +2047,13 @@ function tick() {
     // 绳/弹簧类无接触对 → 不分解、显示接触合力（张力语义），不再依赖斜面几何特判
     // （wantContactNormals 已前移到主循环脏门槛之前，每帧同步）
     const items = [];
+    const gMag = Math.abs(doc.gravity ?? -9.81);            // PAR-1：重力箭头随场景重力卡（月球卡曾画错）
     for (const e of doc.entities) {
       if (e.physics.body !== 'dynamic' || e.visible === false) continue;
       const t = runtime.telemetry(e.id);
       if (!t) continue;
       const contact = runtime.contactForces.get(e.id) || null;
-      const gravity = [0, 9.81 * (e.physics.gravityScale != null ? e.physics.gravityScale : 1) * t.mass, 0];
+      const gravity = [0, gMag * (e.physics.gravityScale != null ? e.physics.gravityScale : 1) * t.mass, 0];
       const item = { pos: t.pos, contact, gravity, accel: runtime.accels.get(e.id) || [0, 0, 0] };
       const nrm = runtime.contactNormals.get(e.id);
       if (viewport.decompose && contact && nrm) {
@@ -2035,7 +2076,7 @@ function tick() {
         if (!ba || !bb || !ba.mesh || !bb.mesh) continue;
         const tel = runtime.telemetry(e.attach[0]);
         const acc = runtime.accels.get(e.attach[0]);
-        const T = tel && acc ? tel.mass * Math.hypot(acc[0], acc[1] + 9.81, acc[2]) : 0;
+        const T = tel && acc ? tel.mass * Math.hypot(acc[0], acc[1] + gMag, acc[2]) : 0;
         tItems.push({ aPos: ba.mesh.position.toArray(), bPos: bb.mesh.position.toArray(), tA: T, tB: T });
       }
       viewport.updateTensionArrows(tItems);
@@ -2095,9 +2136,7 @@ function tick() {
     }
     _seenReports = nRep;
   }
-  viewport.tickFocus();
-  viewport.tickPose();
-  viewport.render();
+  viewport.render();     // tickFocus/tickPose 已在脏门槛前统一调用（FEEL-96/PER-83：此前双调致动画 2 倍速收敛）
   viewport.tickImpacts(performance.now());
   roTimer += rawDt;
   if (roTimer > 0.15) {
@@ -2458,6 +2497,7 @@ async function parseQuestion() {
     if (!out.ok) { setAgentStage('error', '解析失败'); setParseStatus('解析失败：' + out.error + '（可重试，或用下方示例数据）', true); return; }
     adoptServerParse(out);
   } catch (e) {
+    setAgentStage('error', '解析失败');   // AG-93：异常路径也要流转阶段，徽标不得停在「解析中」
     setParseStatus(e && e.name === 'AbortError'
       ? '解析超时（100s），可重试或换一张更清晰的图'
       : '解析请求失败（网络或服务不可用）。可重试，或用下方示例数据', true);
@@ -2483,6 +2523,7 @@ async function parseTextQuestion() {
       setParseStatus('文字要求解析完成（真实模型）。请检查/修正/勾选变更后再创建实体');
     }
   } catch (e) {
+    setAgentStage('error', '解析失败');   // AG-93：同上
     setParseStatus(e && e.name === 'AbortError'
       ? '解析超时（100s），可重试或精简要求描述'
       : '解析请求失败（网络或服务不可用）。可重试', true);
@@ -3377,11 +3418,12 @@ window.MECH = {
     const dot = c[0] * nrm[0] + c[1] * nrm[1] + c[2] * nrm[2];
     const N = [dot * nrm[0], dot * nrm[1], dot * nrm[2]];
     const f = [c[0] - N[0], c[1] - N[1], c[2] - N[2]];
+    const gMag = Math.abs(doc.gravity ?? -9.81);            // PAR-1：理论值随场景重力卡
     return {
       thetaDeg: +(th * 180 / Math.PI).toFixed(2),
-      N: { measured: +Math.hypot(...N).toFixed(4), theory: +(m * 9.81 * Math.cos(th)).toFixed(4) },
+      N: { measured: +Math.hypot(...N).toFixed(4), theory: +(m * gMag * Math.cos(th)).toFixed(4) },
       f: { measured: +Math.hypot(...f).toFixed(4), muEff: +(Math.hypot(...f) / Math.max(dot, 1e-9)).toFixed(4) },
-      gravity: +(m * 9.81).toFixed(4),
+      gravity: +(m * gMag).toFixed(4),
       contactMag: +Math.hypot(c[0], c[1], c[2]).toFixed(4),
     };
   },

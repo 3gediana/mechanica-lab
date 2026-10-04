@@ -143,7 +143,8 @@
     flex: 1; min-width: 0; background: rgba(255,255,255,.03); border: 1px solid var(--line);
     color: var(--text); font-family: var(--mono); font-size: 12px; padding: 4px 7px; border-radius: 2px;
   }
-  .frow input:focus, .frow select:focus { outline: none; border-color: rgba(217,164,65,.55); }
+  .frow input:focus, .frow select:focus { border-color: rgba(217,164,65,.55); }
+  .frow input:focus:not(:focus-visible), .frow select:focus:not(:focus-visible) { outline: none; }
   .frow input.bad { border-color: var(--danger); background: rgba(201,106,90,.08); }
   .frow input:disabled, .frow select:disabled { opacity: .45; }
   .frow input[type=checkbox] { accent-color: var(--accent); }
@@ -194,7 +195,8 @@
   .pgrid label { flex: 0 0 auto; font-size: 10px; color: var(--dim); }
   .pgrid input { width: 0; flex: 1; min-width: 0; background: rgba(255,255,255,.03); border: 1px solid var(--line);
     color: var(--text); font-family: var(--mono); font-size: 12px; padding: 3px 6px; border-radius: 2px; }
-  .pgrid input:focus { outline: none; border-color: rgba(217,164,65,.55); }
+  .pgrid input:focus { border-color: rgba(217,164,65,.55); }
+  .pgrid input:focus:not(:focus-visible) { outline: none; }
   .pgrid .u { font-size: 9px; color: var(--faint); font-family: var(--mono); }
   .plist { margin: 6px 0 0; padding-left: 16px; }
   .plist li { font-size: 11px; color: var(--dim); line-height: 1.8; }
@@ -336,15 +338,6 @@
     <button id="btnNew" title="新建空场景">新建</button>
     <select id="selPreset" title="载入预置场景">
       <option value="">预置场景</option>
-      <option value="incline">斜面小球</option>
-      <option value="momentum">动量守恒（一维对撞）</option>
-      <option value="momentum2d">动量守恒（二维斜碰）</option>
-      <option value="celestial">天体运动（恒星+卫星）</option>
-      <option value="spin">角动量守恒（转台+滑块）</option>
-      <option value="classic">管道轨道（经典演示）</option>
-      <option value="atwood">阿特伍德机（定滑轮）</option>
-      <option value="hingePend">复摆（铰链杆）</option>
-      <option value="projectile">抛体运动（斜抛）</option>
     </select>
     <button id="btnSave" title="下载场景 JSON">保存</button>
     <button id="btnOpen" title="打开场景 JSON">打开</button>

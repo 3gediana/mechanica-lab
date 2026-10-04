@@ -188,3 +188,56 @@ test('坡宽随球半径放大（AG-21）', () => {
   const out = planToOverrides(normalizeParse(raw).plan);
   assert.ok(out.find((o) => o.type === 'ramp').params.width >= 2.2 * 0.5 - 1e-6);
 });
+
+// ---------- R2 防御层（AG-97/99/112/95 单测锚） ----------
+test('二维向量补零升维：velocity [vx,vy] → [vx,vy,0] 并进 uncertain', () => {
+  const raw = { questionType: '抛体', entities: [{ type: 'sphere', given: { mass: 1, velocity: [3, 4] } }] };
+  const n = normalizeParse(raw);
+  assert.equal(n.ok, true);
+  assert.deepEqual(n.plan.entities[0].given.velocity, [3, 4, 0]);
+  assert.ok(n.plan.uncertain.some((u) => u.includes('补零升维')));
+});
+
+test('KIND_MAP 中文 kind 归一：转台→rotation（布局不再失配）', () => {
+  const raw = { questionType: '角动量', kind: '转台', entities: [
+    { type: 'cylinder', given: { radius: 1, mass: 8, angvel: [0, 3, 0] } },
+    { type: 'box', given: { mass: 1.5 } }] };
+  const n = normalizeParse(raw);
+  assert.equal(n.plan.kind, 'rotation');
+  const out = planToOverrides(n.plan);
+  assert.ok(out.length >= 2);
+  const slider = out.find((o) => o.type === 'box');
+  assert.ok(slider, 'rotation 布局应产出滑块');
+  assert.ok(Math.abs(slider.physics.linvel[2] - (-3 * 0.7)) < 1e-6, '滑块切向速度应与 ω0·r0 匹配');
+});
+
+test('attaches 索引越界被丢弃并报错（AG-112）', () => {
+  const raw = { questionType: '连接体', entities: [
+    { type: 'sphere', given: { mass: 1 } }, { type: 'sphere', given: { mass: 2 } }],
+    attaches: [{ type: 'rope', from: 0, to: 9 }] };
+  const n = normalizeParse(raw);
+  assert.equal(n.ok, true);
+  assert.equal(n.plan.attaches.length, 0);
+  assert.ok(n.errors.some((e) => e.includes('越界')));
+});
+
+test('joint 索引越界被丢弃并报错（AG-112）', () => {
+  const raw = { questionType: '转台', kind: 'rotation', entities: [
+    { type: 'cylinder', given: { radius: 1 } }, { type: 'box', given: { mass: 1 } }],
+    joint: { type: 'prismatic', from: 0, to: 99 } };
+  const n = normalizeParse(raw);
+  assert.equal(n.plan.joint, null);
+  assert.ok(n.errors.some((e) => e.includes('joint') && e.includes('越界')));
+});
+
+test('atwood 摆球数≠2 回退通用布局而非 0 实体（AG-95）', () => {
+  const raw = { questionType: '滑轮', kind: 'atwood', entities: [
+    { type: 'pulley', given: { radius: 0.3 } },
+    { type: 'sphere', given: { mass: 1 } },
+    { type: 'sphere', given: { mass: 2 } },
+    { type: 'sphere', given: { mass: 1.5 } }] };
+  const n = normalizeParse(raw);
+  const out = planToOverrides(n.plan);
+  assert.ok(out.length >= 4, `应回退通用布局产出全部实体，实际 ${out.length}`);
+  assert.ok(n.plan.uncertain.some((u) => u.includes('阿特伍德')));
+});

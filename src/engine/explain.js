@@ -454,7 +454,9 @@ function explainMomentum2D(plan, doc, reports, b1, b2) {
 
   const w1 = Math.hypot(pv1[0], pv1[2]), w2 = Math.hypot(pv2[0], pv2[2]);
   const u1mag = Math.hypot(u1v[0], u1v[2]);
-  const keBefore = 0.5 * m1 * u1mag * u1mag;
+  const u2mag = Math.hypot(u2v[0], u2v[2]);
+  // AG-96：碰前动能必须含 B 球（此前漏项致 lossPct 虚高）
+  const keBefore = 0.5 * m1 * u1mag * u1mag + 0.5 * m2 * u2mag * u2mag;
   const keAfter = 0.5 * m1 * w1 * w1 + 0.5 * m2 * w2 * w2;
   const keLossPct = (1 - keAfter / Math.max(keBefore, 1e-9)) * 100;
 
@@ -466,7 +468,7 @@ function explainMomentum2D(plan, doc, reports, b1, b2) {
     `碰后速度：球 A ${w1.toFixed(3)} m/s（入射 ${u1mag.toFixed(3)}）、球 B ${w2.toFixed(3)} m/s——`,
     `两球沿碰撞法向与切向分解散开，方向由碰撞几何决定（无闭式一维公式）。`,
     `动能账：碰前 ${keBefore.toFixed(3)} J → 碰后 ${keAfter.toFixed(3)} J`,
-    e < 0.999 ? `（法向非弹性损失 ${keLossPct.toFixed(1)}%，小于一维同 e 值的 ${(1 - e * e).toFixed(1) * 1}%——切向分量保持）。` : '（完全弹性应守恒）。',
+    e < 0.999 ? `（法向非弹性损失 ${keLossPct.toFixed(1)}%，小于一维同 e 值的 ${((1 - e * e) * 100).toFixed(1)}%——切向分量保持）。` : '（完全弹性应守恒）。',
   ].join('');
   return {
     supported: true,

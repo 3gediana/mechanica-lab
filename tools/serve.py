@@ -70,14 +70,16 @@ def _extract_json(text):
     text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip(), flags=re.S)
     candidates = []
     # 主启发式：定位 "questionType" 键，回溯 JSON 起始、顺延到末尾大括号
-    qi = text.find('"questionType"')
+    # AG-94：用 rfind 取最后一次出现——思考流先草拟样例 JSON 再输出真 JSON 时，
+    # 第一个 questionType 属于草稿；真解析结果在最后
+    qi = text.rfind('"questionType"')
     if qi != -1:
         start = text.rfind('{', 0, qi)
         end = text.rfind('}')
         if start != -1 and end > start:
             candidates.append(text[start:end + 1])
-    # 兜底：首个 { 起做括号配平扫描（感知字符串），取最后一个 depth==0 闭合点
-    # ——同时处理「JSON 前后夹推理文字」与「思考流里模型自拟的样例 JSON」
+    # 兜底：首个 { 起做括号配平扫描（感知字符串），不 break、记录最后一个 depth==0 闭合点
+    # ——同时处理「JSON 前后夹推理文字」与「思考流里模型自拟的样例 JSON」（后者在前，真结果在后）
     fb = text.find('{')
     if fb != -1:
         depth = 0; in_str = False; esc = False; last_full = -1
@@ -92,7 +94,7 @@ def _extract_json(text):
             elif ch in '{[': depth += 1
             elif ch in '}]':
                 depth -= 1
-                if depth == 0: last_full = i; break
+                if depth == 0: last_full = i
         if last_full != -1:
             candidates.append(text[fb:last_full + 1])
     for c in candidates:

@@ -77,17 +77,17 @@ try {
   check('初位置写入', Math.abs(ballPos[0] + 1.15) < 1e-6 && Math.abs(ballPos[1] - 0.78) < 1e-6 && Math.abs(ballPos[2] + 0.6) < 1e-6,
     JSON.stringify(ballPos));
 
-  // ---- 运行 2.5s：真实物理滚落
+  // ---- 运行 2.5s：真实物理滚落（waitForFunction 替代固定等待：批量负载下 rAF 节流会饿死墙钟推断）
   await page.click('#btnPlay');
   await page.waitForTimeout(1200);
   await page.screenshot({ path: 'shots/02-running.png' });
-  await page.waitForTimeout(1300);
+  await page.waitForFunction(() => window.MECH.state().simT > 2.2, null, { timeout: 15000 });
   const tRun = await page.evaluate(() => {
     const s = window.MECH.state();
     const ball = window.MECH.entities().find((e) => e.type === 'sphere');
     return { state: s, tel: window.MECH.telemetry(ball.id) };
   });
-  check('运行: 模拟时间推进', tRun.state.simT > 2.0, `simT=${tRun.state.simT.toFixed(2)}`);
+  check('运行: 模拟时间推进', tRun.state.simT > 2.2, `simT=${tRun.state.simT.toFixed(2)}`);
   check('运行: 小球沿坡滚落(x+,y-)', tRun.tel.pos[0] > -0.9 && tRun.tel.pos[1] < 0.55,
     `pos=[${tRun.tel.pos.map((v) => v.toFixed(2))}] v=${tRun.tel.speed.toFixed(2)}`);
   check('运行: 运行态', tRun.state.mode === 'run' && !tRun.state.paused);

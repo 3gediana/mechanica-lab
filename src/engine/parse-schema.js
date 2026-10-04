@@ -13,6 +13,15 @@ const TYPE_MAP = {
   圆盘: 'cylinder', 转盘: 'cylinder',
 };
 
+// kind 中文/近义归一（AG-99）：模型偶发输出中文 kind，布局分派全靠英文枚举，不归一直接走通用路径丢关节
+const KIND_MAP = {
+  转台: 'rotation', 转动: 'rotation', 角动量: 'rotation', 圆盘: 'rotation', 转盘: 'rotation',
+  铰链: 'hinge', 复摆: 'hinge', 单摆: 'hinge',
+  弹簧: 'spring', 振子: 'spring', 简谐: 'spring',
+  滑轮: 'atwood', 阿特伍德: 'atwood',
+  天体: 'celestial', 卫星: 'celestial', 行星: 'celestial',
+};
+
 const RANGES = {
   angleDeg: [1, 80], length: [0.1, 12], height: [0.02, 6], width: [0.05, 6],
   radius: [0.01, 2], mass: [0.01, 10000], friction: [0, 2], restitution: [0, 1],
@@ -32,6 +41,7 @@ export function normalizeParse(raw) {
   if (!raw || typeof raw !== 'object') return { ok: false, errors: ['解析结果不是对象'] };
   const entities = [];
   const droppedNotes = [];
+  let vec2Padded = 0;                                       // 二维向量补零升维计数（AG-97）
   for (const e of (Array.isArray(raw.entities) ? raw.entities : [])) {
     const type = TYPE_MAP[e.type];
     if (!type) { errors.push(`未知实体类型: ${e.type}（已跳过）`); continue; }
@@ -41,16 +51,19 @@ export function normalizeParse(raw) {
       if (k === 'velocity') {
         const arr = Array.isArray(v) ? v.map((x) => Number(x)) : null;
         if (arr && arr.length === 3 && arr.every(Number.isFinite)) given.velocity = arr;
+        else if (arr && arr.length === 2 && arr.every(Number.isFinite)) { given.velocity = [arr[0], arr[1], 0]; vec2Padded++; }
         continue;
       }
       if (k === 'position') {
         const arr = Array.isArray(v) ? v.map((x) => Number(x)) : null;
         if (arr && arr.length === 3 && arr.every(Number.isFinite)) given.position = arr;
+        else if (arr && arr.length === 2 && arr.every(Number.isFinite)) { given.position = [arr[0], arr[1], 0]; vec2Padded++; }
         continue;
       }
       if (k === 'angvel') {
         const arr = Array.isArray(v) ? v.map((x) => Number(x)) : null;
         if (arr && arr.length === 3 && arr.every(Number.isFinite)) given.angvel = arr;
+        else if (arr && arr.length === 2 && arr.every(Number.isFinite)) { given.angvel = [arr[0], arr[1], 0]; vec2Padded++; }
         continue;
       }
       if (!(k in RANGES)) { dropped.push(k); continue; }   // 未知键丢弃不猜，但让用户看见（AG-9）
@@ -72,31 +85,53 @@ export function normalizeParse(raw) {
     gravityRaw = null;
   }
 
+  // attaches/joint 索引越界在 normalize 层拦截（AG-112）：不拖到建场才静默失败
+  const attList = (Array.isArray(raw.attaches) ? raw.attaches : []).map((a) => ({
+    type: a.type === 'rope' ? 'rope' : 'spring',
+    from: Math.max(0, Number(a.from) | 0),
+    to: Math.max(0, Number(a.to) | 0),
+    length: num(a.length, [0.05, 20]),
+    stiffness: num(a.stiffness, [0.5, 5000]),
+    restLength: num(a.restLength, [0.1, 10]),
+    damping: num(a.damping, [0, 50]),
+  }));
+  for (const a of attList) {
+    // 索引语义针对「布局后实体列表」：springLayout 会补墙、projectile 会补地面（各 +1），
+    // 故 normalize 层只挡明显荒谬的越界（>= 原始实体数+2）；精确边界由建场时的 created[] 映射守卫
+    if (a.from === a.to || a.from >= entities.length + 2 || a.to >= entities.length + 2) {
+      a.drop = true;
+      errors.push(`attaches ${a.type} ${a.from}→${a.to} 实体索引越界（原始 ${entities.length} 个实体），已丢弃`);
+    }
+  }
+  const attaches = attList.filter((a) => !a.drop).slice(0, 4);
+  let joint = null;
+  if (raw.joint && typeof raw.joint === 'object') {
+    const jf = Math.max(0, Number(raw.joint.from) | 0);
+    const jt = Math.max(0, Number(raw.joint.to) | 0);
+    if (jf >= entities.length + 2 || jt >= entities.length + 2) {
+      errors.push(`joint from/to 实体索引越界（${raw.joint.from}→${raw.joint.to}，原始 ${entities.length} 个实体），已丢弃`);
+    } else {
+      joint = {
+        type: raw.joint.type === 'revolute' ? 'revolute' : 'prismatic',
+        from: jf,
+        to: jt,
+        axis: Array.isArray(raw.joint.axis) ? raw.joint.axis.map((x) => Number(x)) : [1, 0, 0],
+        limits: Array.isArray(raw.joint.limits) ? raw.joint.limits.map((x) => Number(x)) : [0.15, 1.05],
+        anchor1: Array.isArray(raw.joint.anchor1) ? raw.joint.anchor1.map((x) => Number(x)) : [0, 0, 0],
+        anchor2: Array.isArray(raw.joint.anchor2) ? raw.joint.anchor2.map((x) => Number(x)) : [0, 0, 0],
+      };
+    }
+  }
+
   const plan = {
     fixture: raw._fixture === true,
     questionType: str(raw.questionType, '未知题型'),
     goal: str(raw.goal, ''),
     gravity: num(gravityRaw, [0.01, 50]),
     G: num(raw.G, [1e-14, 1e6]),            // 场景引力常数（天体题给；null=保持 doc 现值）
-    kind: str(raw.kind, ''),                  // rotation = 角动量/转台类（需要自动 joint 布局）
-    attaches: Array.isArray(raw.attaches) ? raw.attaches.map((a) => ({
-      type: a.type === 'rope' ? 'rope' : 'spring',
-      from: Math.max(0, Number(a.from) | 0),
-      to: Math.max(0, Number(a.to) | 0),
-      length: num(a.length, [0.05, 20]),
-      stiffness: num(a.stiffness, [0.5, 5000]),
-      restLength: num(a.restLength, [0.1, 10]),
-      damping: num(a.damping, [0, 50]),
-    })).filter((a) => a.from !== a.to).slice(0, 4) : [],
-    joint: raw.joint && typeof raw.joint === 'object' ? {
-      type: raw.joint.type === 'revolute' ? 'revolute' : 'prismatic',
-      from: Math.max(0, Number(raw.joint.from) | 0),
-      to: Math.max(0, Number(raw.joint.to) | 0),
-      axis: Array.isArray(raw.joint.axis) ? raw.joint.axis.map((x) => Number(x)) : [1, 0, 0],
-      limits: Array.isArray(raw.joint.limits) ? raw.joint.limits.map((x) => Number(x)) : [0.15, 1.05],
-      anchor1: Array.isArray(raw.joint.anchor1) ? raw.joint.anchor1.map((x) => Number(x)) : [0, 0, 0],
-      anchor2: Array.isArray(raw.joint.anchor2) ? raw.joint.anchor2.map((x) => Number(x)) : [0, 0, 0],
-    } : null,
+    kind: KIND_MAP[str(raw.kind, '')] || str(raw.kind, ''),   // rotation = 角动量/转台类（需要自动 joint 布局）
+    attaches,
+    joint,
     entities,                                        // 保留 given 供 UI 标来源
     observations: strs(raw.observations),
     anchorPoints: strs(raw.anchorPoints),            // 固定点（支撑/悬挂/铰接点描述；Goal 七）
@@ -112,6 +147,7 @@ export function normalizeParse(raw) {
     if (plan.uncertain.length >= 8) break;
     if (!plan.uncertain.some((u) => u.includes('不支持'))) plan.uncertain.push(note);
   }
+  if (vec2Padded) plan.uncertain.push(`二维向量已按 [x,y,0] 补零升维（velocity/position/angvel 共 ${vec2Padded} 处）`);
   // 越界/非数值 gravity 的显式提示（AG-10）：不再静默落默认
   if (gravityRaw != null && plan.gravity === null) {
     errors.push(`gravity 值无效（${gravityRaw}），已按默认 9.81 处理`);
@@ -302,7 +338,12 @@ function rotationLayout(plan) {
 export function planToOverrides(plan) {
   if (plan.kind === 'rotation') return rotationLayout(plan);
   if (plan.kind === 'hinge') return hingeLayout(plan);
-  if (plan.kind === 'atwood' || plan.entities.some((e) => e.type === 'pulley')) return atwoodLayout(plan);
+  if (plan.kind === 'atwood' || plan.entities.some((e) => e.type === 'pulley')) {
+    const atw = atwoodLayout(plan);
+    if (atw.length) return atw;
+    // AG-95：摆球数≠2 时不再静默建场 0 实体——回退通用布局并让用户在评审界面看见原因
+    if (!plan.uncertain.some((u) => u.includes('阿特伍德'))) plan.uncertain.push('摆球数≠2，未按阿特伍德专用布局建场（已回退通用摆位），请检查实体数量');
+  }
   const ramp = plan.entities.find((e) => e.type === 'ramp');
   // 抛体布局：单球带斜向初速（无斜面）→ 球 + 地面板（抛物线落到地面）
   const projBalls = plan.entities.filter((e) => (e.type === 'sphere') && (e.given.velocity || []).some((v) => Math.abs(v) > 1e-9));
