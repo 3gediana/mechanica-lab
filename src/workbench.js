@@ -117,6 +117,7 @@ function autosave() {
 
 // ============ 文档变更主通道 ============
 let historyBatchDepth = 0;   // Agent 建场批次：中间 commit 跳过入栈，结束时合并压一个终态快照（单 undo 单元）
+let rebuildSuspend = 0;      // Agent 建场批内挂起全量重建：N 实体 N 次 Rapier 世界重建 → 批末一次（PER-5）
 
 function commitChange(label) {
   if (historyBatchDepth > 0) { autosave(); return; }
@@ -134,6 +135,7 @@ function endHistoryBatch(label) {
 }
 
 function rebuildAll(rerenderInspector = true) {
+  if (rebuildSuspend > 0) return;   // 批内挂起：suspendRebuild 收尾统一重建一次
   runtime.rebuild(doc);
   viewport.markDirty();   // 全量重建=视觉必然变化（静止帧跳渲染必须感知）
   rotationBase = null; momentumBase = null; astroBase = null;   // 基准必须在初始态重采
@@ -148,9 +150,13 @@ function rebuildAll(rerenderInspector = true) {
 }
 
 function applyDoc(doc0, label) {   // 整文档替换（预置/打开/新建/撤销重做）——运行态一并终结
+  const hadAppliedPlan = agentPlanApplied;
   doc = doc0;
   mode = 'edit';
   paused = false;
+  // 已建场的解析计划随场景切换作废（防拿旧 plan 对新场景生成解释）；
+  // 「未应用」的 plan 保留——解析→换空场景→建场是合法流程（p9 用例锁定）
+  if (hadAppliedPlan) { resetAgentPanel(); toast('已切换场景，原解析建场结果已清空'); }
   if (viewport) viewport.setGizmoEnabled(true);
   rebuildAll();
   updateSimbarStatic();
@@ -1976,6 +1982,7 @@ function tick() {
 // 链路：上传/预览 → POST /api/parse-question（key 在服务端）→ normalizeParse 校验 →
 // 用户查看/修正（全部可编辑，修改记录进 doc.meta.corrections）→ 确认后经 window.MECH 白名单建实体。
 let agentOps = [];       // Agent 建场操作明细 [{op, target, ok}]
+let agentPlanApplied = false;   // 当前 plan 是否已建场（换场景作废依据，AG-46）
 let agentImageDataUrl = null;
 let agentPlan = null;
 let agentCorrections = [];
@@ -2204,8 +2211,12 @@ function setParseStatus(msg, isErr = false, busy = false) {
   const el = $('parseStatus');
   el.textContent = msg;
   el.style.color = isErr ? 'var(--danger)' : 'var(--dim)';
+  parseBusy = busy;   // 解析互斥（AG-72）：图片/文字/fixture 三通道任一进行中，其余禁点（防双计费）
   $('btnParse').disabled = busy;
+  $('btnParseText').disabled = busy;
+  $('btnFixtureParse').disabled = busy;
 }
+let parseBusy = false;
 
 // 服务端解析结果采纳（图片/文字通道共用）：normalize → 渲染 → 变更预览
 function adoptServerParse(out) {
@@ -2217,14 +2228,37 @@ function adoptServerParse(out) {
     return false;
   }
   agentPlan = n.plan;
+  agentPlanApplied = false;
   agentCorrections = [];
-  renderParseResult(n.errors);
+  // 低置信警示（AG-39）：模型自报置信度低时明确提示逐项核对，不静默放行
+  const warnings = [...n.errors];
+  if (n.plan.confidence < 0.35) {
+    warnings.push(`模型总体置信度低（${(n.plan.confidence * 100).toFixed(0)}%），请逐项核对题给数值后再建场`);
+  }
+  renderParseResult(warnings);
   setAgentStage('parsed', '解析完成，检查/修正后创建实体');
   setParseStatus('解析完成。请检查/修正下方各项后再创建实体');
   return true;
 }
 
+// fetch + 100s 超时（AG-38）：浏览器默认超时远长于服务端 90s，AbortController 收口
+async function fetchParse(url, body) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 100000);
+  try {
+    return await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function parseQuestion() {
+  if (parseBusy) return;
   if (!agentImageDataUrl) { setParseStatus('请先上传或拍照题目图片', true); return; }
   const send = croppedCanvas();
   const dataUrl = send ? send.toDataURL('image/jpeg', 0.85) : agentImageDataUrl;
@@ -2232,31 +2266,26 @@ async function parseQuestion() {
   setAgentStage('parsing', '正在解析题目…');
   setParseStatus(`正在解析${tag}（step-5-preview 视觉模型）…`, false, true);
   try {
-    const resp = await fetch('/api/parse-question', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image: dataUrl }),
-    });
+    const resp = await fetchParse('/api/parse-question', { image: dataUrl });
     const out = await resp.json();
     if (!out.ok) { setAgentStage('error', '解析失败'); setParseStatus('解析失败：' + out.error + '（可重试，或用下方示例数据）', true); return; }
     adoptServerParse(out);
   } catch (e) {
-    setParseStatus('解析请求失败（网络或服务不可用）。可重试，或用下方示例数据', true);
+    setParseStatus(e && e.name === 'AbortError'
+      ? '解析超时（100s），可重试或换一张更清晰的图'
+      : '解析请求失败（网络或服务不可用）。可重试，或用下方示例数据', true);
   }
 }
 
 // 文字要求通道（混合搭建）：文字 → 真实模型解析 → 与图片通道同一条评审/预览/建场链路
 async function parseTextQuestion() {
+  if (parseBusy) return;
   const text = $('agentTextReq').value.trim();
   if (!text) { setParseStatus('请先输入题目或搭建要求的文字', true); return; }
   setAgentStage('parsing', '正在解析文字要求…');
   setParseStatus('正在解析文字要求（step-5-preview）…', false, true);
   try {
-    const resp = await fetch('/api/parse-text', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
-    });
+    const resp = await fetchParse('/api/parse-text', { text });
     const out = await resp.json();
     if (!out.ok) { setAgentStage('error', '解析失败'); setParseStatus('解析失败：' + out.error + '（可重试）', true); return; }
     if (adoptServerParse(out)) {
@@ -2264,11 +2293,13 @@ async function parseTextQuestion() {
       setParseStatus('文字要求解析完成（真实模型）。请检查/修正/勾选变更后再创建实体');
     }
   } catch (e) {
-    setParseStatus('解析请求失败（网络或服务不可用）。可重试', true);
+    setParseStatus(e && e.name === 'AbortError'
+      ? '解析超时（100s），可重试或精简要求描述'
+      : '解析请求失败（网络或服务不可用）。可重试', true);
   }
 }
 
-async function loadFixtureParse() { loadFixtureData('incline'); }
+async function loadFixtureParse() { if (parseBusy) return; loadFixtureData('incline'); }
 
 async function loadFixtureData(name) {
   try {
@@ -2286,6 +2317,7 @@ function adoptParse(raw, statusLine) {
   const n = normalizeParse(raw);
   if (!n.ok) { setParseStatus('解析结果无效：' + n.errors.join('; '), true); return null; }
   agentPlan = n.plan;
+  agentPlanApplied = false;
   agentCorrections = [];
   renderParseResult(n.errors);
   setAgentStage('parsed', '解析完成，检查/修正后创建实体');
@@ -2550,9 +2582,12 @@ function applyAgentPlan() {
   const wasEmpty = doc.entities.length === 0;
   let batchReused = 0, batchCreated = 0;
   beginHistoryBatch();
+  rebuildSuspend++;   // 批内 N 次 addComponent 不再各自重建 Rapier 世界，收尾一次（PER-5）
   try {
     applyAgentPlanInner(M, (r, c) => { batchReused = r; batchCreated = c; });
   } finally {
+    rebuildSuspend--;
+    rebuildAll();
     endHistoryBatch(wasEmpty ? 'Agent 按解析建场' : `Agent 混合建场（更新 ${batchReused}+新增 ${batchCreated}）`);
   }
 }
@@ -2678,6 +2713,7 @@ function applyAgentPlanInner(M, reportCounts) {
     else agentOps.push({ op: '连接 ' + at.type, target: ea.name + ' 与 ' + eb.name, ok: false });
   }
   toast(`已按解析创建 ${created.length} 个实体${agentPlan.fixture ? '（示例数据）' : ''}`);
+  agentPlanApplied = true;
   setAgentStage('built', `已建场 ${created.length} 实体，可运行并生成解释`);
   // 建场成功即开放"运行并生成解释"（解释体在运行后填充）
   $('explainGrp').style.display = 'block';
@@ -2691,6 +2727,7 @@ function resetAgentPanel() {
   agentCrop = null;
   cropMode = false;
   agentPlan = null;
+  agentPlanApplied = false;
   agentCorrections = [];
   agentChanges = [];
   agentExplain = null;

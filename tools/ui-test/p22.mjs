@@ -79,7 +79,8 @@ try {
 
   // ==== D. 运动模式回归：切回后速率/高度照常 ====
   await page.click('#curveTabMotion');
-  await page.waitForTimeout(300);
+  // 固定 300ms 在负载下可能只采到 1 个样（采样节流 0.15s）：等待重采到位
+  await page.waitForFunction(() => window.MECH.curveState().samples >= 2, null, { timeout: 5000 });
   const cm = await page.evaluate(() => window.MECH.curveState());
   check('切回运动模式重采', cm.mode === 'motion' && cm.samples >= 2, `mode=${cm.mode} n=${cm.samples}`);
   check('运动图例恢复(含速率/高度)', await page.evaluate(() => {

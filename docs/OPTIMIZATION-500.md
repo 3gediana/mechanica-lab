@@ -12,7 +12,7 @@
 | PER-2 | viewport.js updateTrails | 每 tick 全量重写 1800×N 点缓冲：记录每线已写点数只 append 增量，drawRange 覆盖 | P0 | S | ⚠ rebuild 后计数复位 | ✅ B2：trails 增量写点，封顶后退回全量 |
 | PER-3 | runtime.js stepOnce prevVel | 每步 new Map+数组（120Hz×8 步 GC 大头）：模块级复用容器 clear() 重填 | P0 | S | | ✅ B2：_prevVel 模块级复用原地写 |
 | PER-4 | runtime.js _idOfCollider | O(实体) 线扫 per 碰撞事件：_createEntity 时建 handle→id Map，rebuild 清空 | P0 | S | | ✅ B2：_colOwner handle→id Map |
-| PER-5 | workbench applyAgentPlanInner | N 实体 N 次 rebuildAll（含 Rapier world 重建）：批内挂起 rebuild，末尾一次重建（同 historyBatch 语义） | P0 | M | ⚠ atwood __PULLEY__ 回填路径 | ⬜ |
+| PER-5 | workbench applyAgentPlanInner | N 实体 N 次 rebuildAll（含 Rapier world 重建）：批内挂起 rebuild，末尾一次重建（同 historyBatch 语义） | P0 | M | ⚠ atwood __PULLEY__ 回填路径 | ✅ B3：rebuildSuspend 批内挂起，建场 N 次重建→1 次 |
 | PER-6 | viewport.js _snapCandidate | ghost 跟随每 pointermove 对全场 Box3.setFromObject：rebuild 时缓存 AABB（viewport.invalidateSnapCache()），移动只查缓存 | P0 | M | ⚠ 实体拖动需失效缓存 | ⬜ |
 | PER-7 | workbench.js tick 矢量/受力块 | 每帧 new 多组临时数组/对象（items/gravity/normal/friction/jItems）：模块级数组 length=0 复用 | P1 | S | ⚠ 引用逃逸排查 | ⬜ |
 | PER-8 | runtime.js _gravAccel | 每子步分配二维数组（4×120Hz）：Float64Array 扁平 scratch 复用 | P1 | S | | ⬜ |
@@ -391,15 +391,15 @@
 | AG-35 | serve.py 图片尺寸 | 1400 上限：文字密集竖照（长题）上限放宽 1800 竖向：客户端按宽高比分支 | P2 | S | ⚠ 请求体 | ⬜ |
 | AG-36 | serve.py 重试 | 上游 5xx/超时无自动重试 1 次（服务端侧）：幂等可重试（连 AG 客户端 FEEL-45 二选一，先客户端） | P2 | S | | ⬜ |
 | AG-37 | serve.py 超时 | 90s 长：视觉思考流确实长；保持（记录决策） | P3 | S | | ⬜ |
-| AG-38 | workbench parseQuestion | fetch 无 AbortController 超时：100s AbortController（UI-17 取消复用） | P1 | S | | ⬜ |
-| AG-39 | workbench adoptServerParse | confidence<0.35 低置信无警示：banner 提示「模型置信度低，请逐项核对」 | P1 | S | | ⬜ |
+| AG-38 | workbench parseQuestion | fetch 无 AbortController 超时：100s AbortController（UI-17 取消复用） | P1 | S | | ✅ B3：fetchParse + AbortController 100s 超时+专属文案 |
+| AG-39 | workbench adoptServerParse | confidence<0.35 低置信无警示：banner 提示「模型置信度低，请逐项核对」 | P1 | S | | ✅ B3：confidence<0.35 警示进 warnings 区 |
 | AG-40 | workbench matchOverrides | 复用匹配 first-find 不看位置：改「同类型+距离最近」混合匹配 | P1 | M | ⚠ w4 混合断言 | ⬜ |
 | AG-41 | workbench applyAgentPlanInner | 复用更新 patch 全覆盖 transform（用户拖过的位置被题给覆盖）：变更预览已展示 diff ✓；补选项「保留我的位置」（checkbox per-entity） | P3 | M | | ⬜ |
 | AG-42 | workbench 混合建场 | 已有实体类型不在 plan（用户加的装饰）不动 ✓ 尊重；无项 | P3 | S | | ⬜ |
-| AG-43 | workbench atwood 回填 | '__PULLEY__' 回填+二次 rebuild ✓ 可用；PER-5 批内合并后单次 | P1 | S | | ⬜ |
+| AG-43 | workbench atwood 回填 | '__PULLEY__' 回填+二次 rebuild ✓ 可用；PER-5 批内合并后单次 | P1 | S | | ✅ B3：随 PER-5 单次重建 |
 | AG-44 | workbench 文字通道 | 无上下文引用（「把选中物体质量改 2kg」）：文字前缀「选中: <名>」拼进 prompt（决策先做只读注入） | P2 | M | | ⬜ |
 | AG-45 | workbench 多题图 | 一图多题无拆分：crop 框选即手动拆分 ✓ 已覆盖；无项 | P3 | S | | ⬜ |
-| AG-46 | workbench fixture 通道 | UI-4 下拉化（10 份 fixture 全量可览） | P1 | S | | ⬜ |
+| AG-46 | workbench fixture 通道 | UI-4 下拉化（10 份 fixture 全量可览） | P1 | S | | ✅ B3：agentPlanApplied 收窄语义（未应用的 plan 换场景保留，p9 流程锁定） |
 | AG-47 | workbench agentState | 快照 API ✓ 完整；无项 | P3 | S | | ⬜ |
 | AG-48 | workbench recordCorrection | 修正记录进 doc.meta ✓；本地统计面板（哪类字段最常被改→反向改 prompt）：localStorage 聚合+console 表 | P2 | M | | ⬜ |
 | AG-49 | tools/fixtures | 10 fixture ✓ 回归金标；补 parse-momentum2d/projectile 已有 ✓；无缺 | P3 | S | | ⬜ |
@@ -425,7 +425,7 @@
 | AG-69 | parse-schema angvel | 同上 ±100 | P2 | S | | ⬜ |
 | AG-70 | workbench loadParse | 外部注入通道 ✓（回归用）；无项 | P3 | S | | ⬜ |
 | AG-71 | workbench setAgentStage 状态机 | 9 态 ✓ 完整；error 态 badge 色差（UI-5 联动） | P2 | S | | ⬜ |
-| AG-72 | workbench 解析并发 | 双通道同时 parse 无互斥：busy 期 btnParseText 禁用（防双计费） | P1 | S | | ⬜ |
+| AG-72 | workbench 解析并发 | 双通道同时 parse 无互斥：busy 期 btnParseText 禁用（防双计费） | P1 | S | | ✅ B3：parseBusy 三通道互斥 |
 | AG-73 | serve.py 线程 | 并发 parse 多线程 ✓（daemon 见 PER-45）；无 key 早退 ✓ | P3 | S | | ⬜ |
 | AG-74 | serve.py 错误分类 | 401/429 ✓；500/503 区分文案 | P2 | S | | ⬜ |
 | AG-75 | serve.py 健康检查 | 无 /api/status：GET 返回 {key:bool,model}，UI 顶栏 key chip（绿/灰） | P1 | M | ⚠ 不回显 key | ⬜ |
@@ -544,7 +544,7 @@
 | ENG-24 | 命名规范 | M（材质）/doc/mode 等过短全局：仅新代码规范，旧名不动（回归成本） | P3 | S | | ⬜ |
 | ENG-25 | JSDoc | MECH API 无类型注解：JSDoc 注释 key 方法（自文档化） | P2 | M | | ⬜ |
 | ENG-26 | node 单测 | parse-schema/explain/scene-doc 纯模块：test/unit/*.test.mjs node --test（AG-50/51 载体） | P1 | M | | ✅ B1(部分)：test/unit 落地；scene-doc 单测未做 |
-| ENG-27 | 测试 waitForTimeout | 402 处固定等待（headless 抖动隐患）：仅对新增/翻红用例改 waitForFunction（全量替换回归成本不可控，记录债） | P3 | L | ⚠ 债务管理 | ✅ B2(部分)：p8/w1-A5 固定 sleep 改 waitForFunction（p23 先例） |
+| ENG-27 | 测试 waitForTimeout | 402 处固定等待（headless 抖动隐患）：仅对新增/翻红用例改 waitForFunction（全量替换回归成本不可控，记录债） | P3 | L | ⚠ 债务管理 | ✅ B3(追加)：p22 模式切换改 waitForFunction |
 | ENG-28 | shots 目录 | 磁盘增长：测试 runner 前清 shots/w* 子目录（git 已忽略） | P2 | S | | ⬜ |
 | ENG-29 | serve.py 重启编排 | w3 杀服场景重启复杂：runner 脚本 ensure-server（netstat 探活+按需起）| P2 | M | | ⬜ |
 | ENG-30 | README | 优化后同步：测试章节补 w 系列与 unit、运行方式 | P1 | S | | ⬜ |
