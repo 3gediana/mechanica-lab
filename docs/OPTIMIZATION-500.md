@@ -354,13 +354,13 @@
 
 | # | 位置 | 问题 → 改法 | P | 量 | 风险 | 状态 |
 |---|---|---|---|---|---|---|
-| AG-1 | explain.js explainProjectile | 摘要把实测高度印进理论槽（H = ...= ${Hmeasured}）：改 Htheory（文案 bug） | P0 | S | | ⬜ |
-| AG-2 | explain.js explainMomentum | 恢复系数合成 ternary 逻辑错（min=0 时强制 e=0，Rapier 实为平均）：e 恒取平均 | P0 | S | ⚠ 理论值变化（0/0.8 组合场景） | ⬜ |
-| AG-3 | explain.js explainHinge/Atwood | g=9.81 硬编码：改 doc.gravity（月球场景错误） | P0 | S | | ⬜ |
-| AG-4 | workbench updateAtwoodCons/atwoodInfo | g=9.81 硬编码同上：统一 Math.abs(doc.gravity) | P0 | S | | ⬜ |
-| AG-5 | explain.js explainAstro | 中心体取 plan.entities[0]（模型顺序不可信）：取 doc 中质量最大 celestial | P0 | S | | ⬜ |
-| AG-6 | parse-schema ballOnRamp | 球半径硬编 0.15（题给 0.5 半球沉坡）：用实际 given.radius | P0 | S | | ⬜ |
-| AG-7 | workbench runAndExplain | astro 解释依赖 trails 采样（周期/偏心率），未开轨迹时 null→判 fail：isAstro && !trailsOn 自动 setTrails(true) | P0 | S | | ⬜ |
+| AG-1 | explain.js explainProjectile | 摘要把实测高度印进理论槽（H = ...= ${Hmeasured}）：改 Htheory（文案 bug） | P0 | S | | ✅ B1：摘要理论槽位改 Htheory |
+| AG-2 | explain.js explainMomentum | 恢复系数合成 ternary 逻辑错（min=0 时强制 e=0，Rapier 实为平均）：e 恒取平均 | P0 | S | ⚠ 理论值变化（0/0.8 组合场景） | ✅ B1：node 实测 Rapier=平均后改恒取平均 |
+| AG-3 | explain.js explainHinge/Atwood | g=9.81 硬编码：改 doc.gravity（月球场景错误） | P0 | S | | ✅ B1：hinge/atwood 用场景重力 |
+| AG-4 | workbench updateAtwoodCons/atwoodInfo | g=9.81 硬编码同上：统一 Math.abs(doc.gravity) | P0 | S | | ✅ B1：updateAtwoodCons/atwoodInfo 用 doc.gravity 并随结果带 g |
+| AG-5 | explain.js explainAstro | 中心体取 plan.entities[0]（模型顺序不可信）：取 doc 中质量最大 celestial | P0 | S | | ✅ B1：中心质量取最大者（含单测锚） |
+| AG-6 | parse-schema ballOnRamp | 球半径硬编 0.15（题给 0.5 半球沉坡）：用实际 given.radius | P0 | S | | ✅ B1：ballOnRamp 半径参数化（单测覆盖） |
+| AG-7 | workbench runAndExplain | astro 解释依赖 trails 采样（周期/偏心率），未开轨迹时 null→判 fail：isAstro && !trailsOn 自动 setTrails(true) | P0 | S | | ✅ B1：astro 解释自动开轨迹 |
 | AG-8 | workbench readQuestionImage | EXIF 方向不处理（手机横拍图歪）：createImageBitmap(blob,{imageOrientation:'from-image'})，失败回退 Image | P1 | M | | ⬜ |
 | AG-9 | parse-schema normalizeParse | 未知 given 键静默丢弃：收集进 plan.uncertain 展示（透明度） | P1 | S | | ⬜ |
 | AG-10 | parse-schema gravity | 越界 gravity 静默落默认 9.81：errors 加一条提示 | P1 | S | | ⬜ |
@@ -382,7 +382,7 @@
 | AG-26 | explain.js explainSpring | 峰间隔去毛刺阈值 5 采样固定：k 大周期短漏检：阈值=max(3, T_est 采样数/8) | P2 | M | | ⬜ |
 | AG-27 | explain.js explainSpring | Ttheory 只用球质量：注明理想弹簧假设（文案）✓ 已有；补悬挂质量校正决策不做 | P3 | S | | ⬜ |
 | AG-28 | explain.js explainAtwood | aFit=2d/t² 假设静止起跑：题给初速时三点二次拟合 | P2 | M | | ⬜ |
-| AG-29 | workbench atwoodInfo | heavyDrop 死行（×0）：删除 | P0 | S | | ⬜ |
+| AG-29 | workbench atwoodInfo | heavyDrop 死行（×0）：删除 | P0 | S | | ✅ B1：删 heavyDrop 死行 |
 | AG-30 | serve.py PARSE_PROMPT | 无少样本示例：附 1 个紧凑示例（斜面 JSON 单行）提升一次通过率 | P1 | M | ⚠ 输出风格漂移需 fixture 回归 | ⬜ |
 | AG-31 | serve.py temperature | 0.2 固定：实验 0.1（结构化输出更稳）真实抽查对比后定 | P2 | S | ⚠ 调用预算 | ⬜ |
 | AG-32 | serve.py prompt 实体数 | 无上限：补「实体不超过 12 个」防跑题长输出 | P1 | S | | ⬜ |
@@ -403,12 +403,12 @@
 | AG-47 | workbench agentState | 快照 API ✓ 完整；无项 | P3 | S | | ⬜ |
 | AG-48 | workbench recordCorrection | 修正记录进 doc.meta ✓；本地统计面板（哪类字段最常被改→反向改 prompt）：localStorage 聚合+console 表 | P2 | M | | ⬜ |
 | AG-49 | tools/fixtures | 10 fixture ✓ 回归金标；补 parse-momentum2d/projectile 已有 ✓；无缺 | P3 | S | | ⬜ |
-| AG-50 | tools/ui-test | 无 normalizeParse 纯函数单测：node --test 直跑 parse-schema（无浏览器，快） | P1 | M | | ⬜ |
-| AG-51 | explain.js | 纯函数无单测：node --test 覆盖 8 分支理论值（造 series/reports 假数据） | P1 | M | | ⬜ |
+| AG-50 | tools/ui-test | 无 normalizeParse 纯函数单测：node --test 直跑 parse-schema（无浏览器，快） | P1 | M | | ✅ B1：23 项 node --test（金标+防御+布局） |
+| AG-51 | explain.js | 纯函数无单测：node --test 覆盖 8 分支理论值（造 series/reports 假数据） | P1 | M | | ✅ B1：8 分支合成轨迹单测（含 g=10/月球锚） |
 | AG-52 | workbench runAndExplain 选球 | first sphere 选中解释对象：优先 measured:true | P2 | S | | ⬜ |
 | AG-53 | workbench explain 分派 | 优先级 hinge>spring>projectile>rotation>atwood>astro>incline>momentum ✓ 明确；文档化注释 | P3 | S | | ⬜ |
 | AG-54 | explain.js explainIncline | effFriction 平均假设与 Rapier 默认一致 ✓；无项 | P3 | S | | ⬜ |
-| AG-55 | explain.js hinge debug | console.log 残留 2 处：删除 | P0 | S | | ⬜ |
+| AG-55 | explain.js hinge debug | console.log 残留 2 处：删除 | P0 | S | | ✅ B1：删 hinge-dbg 两处 |
 | AG-56 | explain.js explainHinge | L 取最长维启发式：建场铰链杆 sx=长 ✓ 一致；无项 | P3 | S | | ⬜ |
 | AG-57 | explain.js explainRotation | 理论 ω 仅参考 L 守恒门控 ✓ 注释明确；无项 | P3 | S | | ⬜ |
 | AG-58 | explain.js explainAstro | pass 三条件 ✓；Ttheory null 时（trails 短）判 fail：needT 11s 已保 ~2 周期；边界仍补采样中态文案 | P2 | S | | ⬜ |
@@ -521,13 +521,13 @@
 | ENG-1 | viewport.js | setHighlights 定义两次（L464/L778 重复体）：删一处 | P0 | S | | ⬜ |
 | ENG-2 | viewport.js setPersp | 死赋值/无操作行（controls.object 双写、target.copy(target)）：清理 | P0 | S | | ⬜ |
 | ENG-3 | viewport.js setProjection/setPersp/toggleProjection | 三函数逻辑重叠（仅 toggleProjection 被用）：保留 toggle+resize 修复，其余删或合并 | P0 | S | | ⬜ |
-| ENG-4 | workbench.js setTensions | 死函数（无调用方）：删除 | P0 | S | | ⬜ |
-| ENG-5 | parse-schema.js | 注释「抛体布局」重复两行+hasSpringAttach 未用变量：清理 | P0 | S | | ⬜ |
+| ENG-4 | workbench.js setTensions | 死函数（无调用方）：删除 | P0 | S | | ✅ B1：删死函数 setTensions |
+| ENG-5 | parse-schema.js | 注释「抛体布局」重复两行+hasSpringAttach 未用变量：清理 | P0 | S | | ✅ B1：删重复注释/未用变量 |
 | ENG-6 | workbench.js M 命名 | applyAgentPlanInner 内 const M=window.MECH 遮蔽外层材质 M：重命名 MECHApi | P1 | S | | ⬜ |
 | ENG-7 | workbench.js renderExplanation | renderMomentum2DExplain 声明嵌在函数体中段（早退 return 之后，靠 hoisting）：移到顶层 | P1 | S | | ⬜ |
-| ENG-8 | check.py | 只查 p0-p14 存在：扩到 p0-p31+w1-w7+OPT 文档 | P1 | S | | ⬜ |
-| ENG-9 | check.py | 未扫 tools/ui-test 泄漏：SECRET_PATTERNS 扫测试目录 | P1 | S | | ⬜ |
-| ENG-10 | check.py | 材质键契约（MAT-59）：MATERIAL_OPTIONS 与 materials.js 返回键 diff | P1 | S | | ⬜ |
+| ENG-8 | check.py | 只查 p0-p14 存在：扩到 p0-p31+w1-w7+OPT 文档 | P1 | S | | ✅ B1：存在性扩到 p0-p31+w1-w7+docs |
+| ENG-9 | check.py | 未扫 tools/ui-test 泄漏：SECRET_PATTERNS 扫测试目录 | P1 | S | | ✅ B1：测试目录扫密值模式（允许文件名编排） |
+| ENG-10 | check.py | 材质键契约（MAT-59）：MATERIAL_OPTIONS 与 materials.js 返回键 diff | P1 | S | | ✅ B1：材质键契约检查 |
 | ENG-11 | tools/ui-test | helper 重复（goto/shot/ctx 每份复制）：抽 lib.mjs 共享（不动现有绿测，仅新测使用） | P2 | M | ⚠ 回归面大 | ⬜ |
 | ENG-12 | tools/ui-test | 端口硬编 8721：MECH_URL env 读取（默认 8721） | P2 | S | | ⬜ |
 | ENG-13 | serve.py | daemon_threads 未设：ThreadingHTTPServer(..., daemon_threads=True)（Ctrl+C 干净退出） | P1 | S | | ⬜ |
@@ -543,7 +543,7 @@
 | ENG-23 | newId | Date36+seq ✓；无项 | P3 | S | | ⬜ |
 | ENG-24 | 命名规范 | M（材质）/doc/mode 等过短全局：仅新代码规范，旧名不动（回归成本） | P3 | S | | ⬜ |
 | ENG-25 | JSDoc | MECH API 无类型注解：JSDoc 注释 key 方法（自文档化） | P2 | M | | ⬜ |
-| ENG-26 | node 单测 | parse-schema/explain/scene-doc 纯模块：test/unit/*.test.mjs node --test（AG-50/51 载体） | P1 | M | | ⬜ |
+| ENG-26 | node 单测 | parse-schema/explain/scene-doc 纯模块：test/unit/*.test.mjs node --test（AG-50/51 载体） | P1 | M | | ✅ B1(部分)：test/unit 落地；scene-doc 单测未做 |
 | ENG-27 | 测试 waitForTimeout | 402 处固定等待（headless 抖动隐患）：仅对新增/翻红用例改 waitForFunction（全量替换回归成本不可控，记录债） | P3 | L | ⚠ 债务管理 | ⬜ |
 | ENG-28 | shots 目录 | 磁盘增长：测试 runner 前清 shots/w* 子目录（git 已忽略） | P2 | S | | ⬜ |
 | ENG-29 | serve.py 重启编排 | w3 杀服场景重启复杂：runner 脚本 ensure-server（netstat 探活+按需起）| P2 | M | | ⬜ |
@@ -554,7 +554,7 @@
 | ENG-34 | vendor 升级路径 | r186/r0.21 pin：README vendor 章节（升级 checklist：TransformControls getHelper 等） | P2 | S | | ⬜ |
 | ENG-35 | gen_track.py | 再生成轨道说明：README 工具节 | P3 | S | | ⬜ |
 | ENG-36 | classic.html | legacy 冻结声明 ✓ README；无项 | P3 | S | | ⬜ |
-| ENG-37 | console.log 清扫 | explain.js 2 处+全局 grep：生产路径零 console（warn 保留） | P0 | S | | ⬜ |
+| ENG-37 | console.log 清扫 | explain.js 2 处+全局 grep：生产路径零 console（warn 保留） | P0 | S | | ✅ B1：console.log 清零（warn 保留） |
 | ENG-38 | CSS 冗余 | 未用选择器审计（.tri input width:0 是坑修复必需保留）：仅删确认死规则 | P3 | S | | ⬜ |
 | ENG-39 | 内联样式迁移 | UI-67/68/69 批量迁 CSS 类（50+ 处 cssText）：分批 | P2 | M | | ⬜ |
 | ENG-40 | workbench 全局态 | 30+ 模块级 let：状态对象收拢（state.）P3 决策（可读性 vs churn） | P3 | L | | ⬜ |
@@ -580,7 +580,7 @@
 | ENG-60 | 文档交叉引用 | README↔AUDIT-MATRIX↔本台账链接互链 | P1 | S | | ⬜ |
 | ENG-61 | 测试截图断言 | w 系列截图人工核验流程说明（AUDIT-MATRIX 已有）✓；无项 | P3 | S | | ⬜ |
 | ENG-62 | unit 测试进 check.py | check.py 挂 node --test 聚合（一键全绿入口） | P2 | S | | ⬜ |
-| ENG-63 | runner 汇总 | 批次回归结果落盘 tools/ui-test/last-run.txt（时间/套件/断言数） | P2 | S | | ⬜ |
+| ENG-63 | runner 汇总 | 批次回归结果落盘 tools/ui-test/last-run.txt（时间/套件/断言数） | P2 | S | | ✅ B1(部分)：run-all.mjs 落地；last-run 机制启用 |
 | ENG-64 | 错误消息规范 | errbar/toast/parseStatus 三通道语义（致命/操作/流程）文档化注释 | P2 | S | | ⬜ |
 | ENG-65 | workbench bindUI 体量 | bindUI 90 行 ✓ 可读；无项 | P3 | S | | ⬜ |
 | ENG-66 | 重复 G 检查 | _collectGravitating G falsy 早退 ✓（G=0 教学无引力场景退化警告 P3） | P3 | S | | ⬜ |

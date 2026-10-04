@@ -57,8 +57,8 @@ try {
   }, null, { timeout: 25000 });
   const ex = await page.evaluate(() => window.MECH.explainState());
   check('hinge 解释器: 结构化输出', ex && ex.supported && ex.kind === 'hinge', ex ? `kind=${ex.kind}` : 'null');
-  // 理论周期：L=1 → 2π√(2/(3×9.81)) = 1.638
-  check('hinge: 理论周期≈1.638', Math.abs(ex.theoretical.period - 1.638) < 0.01, `T=${ex.theoretical.period.toFixed(3)}`);
+  // 理论周期：fixture 题给 g=10 → 2π√(2/(3×10)) = 1.622（AG-3 修复后理论与场景重力一致）
+  check('hinge: 理论周期≈1.622(g=10 题给)', Math.abs(ex.theoretical.period - 1.622) < 0.01, `T=${ex.theoretical.period.toFixed(3)}`);
   check('hinge: 实测周期偏差<8%', ex.pass && ex.errPct < 8,
     `T=${ex.measured.period != null ? ex.measured.period.toFixed(3) : '?'} err=${ex.errPct != null ? ex.errPct.toFixed(2) : '?'}%`);
   await page.screenshot({ path: 'shots/111-hinge-explain.png' });

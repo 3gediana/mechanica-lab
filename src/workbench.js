@@ -1295,9 +1295,6 @@ function posBtoArray(id) {
   const b = runtime.binds.get(id);
   return b && b.mesh ? b.mesh.position.toArray() : null;
 }
-function setTensions(on) {
-  viewport.setTensionArrows(on);
-}
 function setCurves(on) {
   curvesOn = on;
   $('curvePanel').classList.toggle('on', on);
@@ -1333,7 +1330,7 @@ function setCons(on) {
 function updateAtwoodCons() {
   const a = atwoodInfo();
   if (!a) return;
-  const g = 9.81;
+  const g = Math.abs(doc.gravity || -9.81);
   // 位移二次拟合在初始暂态期不稳定（t<1.2s），显示采样中
   if (a.simT < 1.2) {
     ['cwM', 'cwT', 'cwAT', 'cwAM'].forEach((id) => { const el = $(id); if (el) el.textContent = '采样中'; });
@@ -1527,16 +1524,16 @@ function atwoodInfo() {
   const pair = pairs[0];
   const [a, b] = pair.balls;
   const pa = a.body.translation(), pb = b.body.translation();
-  const va = a.body.linvel();
-  // 重侧 = 初始较高者下落；取左侧球位移方向按 m 判定
   const m1 = a.m, m2 = b.m;
-  const heavyDrop = m1 > m2 ? (pair.C - (pa.y + pb.y)) * 0 : 0;   // 占位（见下）
   // 位移：重侧下降量 d = (y0_重 − y_重)（下落为正）
   const y0Heavy = m1 > m2 ? a.y0 : b.y0;
   const yHeavyNow = m1 > m2 ? pa.y : pb.y;
   const d = Math.max(y0Heavy - yHeavyNow, 1e-6);
   const aFit = 2 * d / Math.max(runtime.simT * runtime.simT, 1e-6);
-  return { m1, m2, aMeasured: +aFit.toFixed(4), drop: +d.toFixed(4), simT: runtime.simT, heavyIsLeft: m1 > m2 };
+  return {
+    m1, m2, aMeasured: +aFit.toFixed(4), drop: +d.toFixed(4),
+    g: Math.abs(doc.gravity || -9.81), simT: runtime.simT, heavyIsLeft: m1 > m2,
+  };
 }
 
 function astroWithDrift() {
@@ -2709,7 +2706,7 @@ async function runAndExplain() {
   const u0 = ball.physics.linvel[0];
   // 运行前预采守恒基准（初始态），避免首采落在演化中
   if (isRotation) rotationWithDrift();
-  if (isAstro) astroWithDrift();
+  if (isAstro) { astroWithDrift(); if (!trailsOn) setTrails(true); }   // 周期/偏心率采样依赖轨迹数据
   if (isMomentum) { const lv = runtime.systemTotals(); if (!momentumBase || momentumBase.epoch !== runtime.epoch) momentumBase = { epoch: runtime.epoch, KE: lv.ke }; }
   runtime.startRecording(ball.id);
   play();

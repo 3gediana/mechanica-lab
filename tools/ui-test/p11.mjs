@@ -61,8 +61,8 @@ try {
   }, null, { timeout: 25000 });
   const ex = await page.evaluate(() => window.MECH.explainState());
   check('atwood 解释器: 结构化输出', ex && ex.supported && ex.kind === 'atwood', ex ? `kind=${ex.kind}` : 'null');
-  check('atwood: a 理论≈0.892', Math.abs(ex.theoretical.a - 0.892) < 0.01, `a=${ex.theoretical.a.toFixed(3)}`);
-  check('atwood: 张力 T≈10.70', Math.abs(ex.theoretical.tension - 10.70) < 0.05, `T=${ex.theoretical.tension.toFixed(3)}`);
+  check('atwood: a 理论≈0.909(g=10 题给)', Math.abs(ex.theoretical.a - 0.909) < 0.01, `a=${ex.theoretical.a.toFixed(3)}`);
+  check('atwood: 张力 T≈10.909(g=10 题给)', Math.abs(ex.theoretical.tension - 10.909) < 0.05, `T=${ex.theoretical.tension.toFixed(3)}`);
   check('atwood: 实测加速度偏差<20%(短时拟合)', ex.errPct < 20, `err=${ex.errPct.toFixed(2)}%`);
   await page.screenshot({ path: 'shots/101-atwood-explain.png' });
 

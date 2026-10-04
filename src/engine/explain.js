@@ -57,7 +57,7 @@ function explainProjectile(plan, doc, series) {
 
   const summary = [
     `抛体运动（初速 vx=${vx.toFixed(2)}, vy=${vy0.toFixed(2)} m/s，起点高 ${h0.toFixed(2)} m）：`,
-    `理论最大高度 H = h0 + vy0²/(2g) = ${Hmeasured.toFixed(3)} m，理论射程 R = vx·t_land = ${Rtheory.toFixed(3)} m。`,
+    `理论最大高度 H = h0 + vy0²/(2g) = ${Htheory.toFixed(3)} m，理论射程 R = vx·t_land = ${Rtheory.toFixed(3)} m。`,
     `模拟实测最大高度 ${Hmeasured.toFixed(3)} m、落点 x = ${xLand != null ? xLand.toFixed(3) : '?'} m，射程偏差 ${errPct != null ? errPct.toFixed(2) + '%' : '?'}`,
     pass ? '——抛体运动学（水平匀速 + 竖直自由落体的合成）得到验证。' : '。',
   ].join('');
@@ -80,7 +80,7 @@ function explainHinge(plan, doc, series) {
   const rod = jdef ? doc.entities.find((e) => e.id === jdef.joints[0].target) : null;   // 摆杆 = joint 的从动体
   if (!rod) return { supported: false, reason: '铰链解释需要摆杆实体', summary: telemetrySummary(series) };
   const L = Math.max(rod.params.sx, rod.params.sy, rod.params.sz);   // 杆长（最长维）
-  const g = 9.81;
+  const g = Math.abs(doc.gravity || -9.81);
   const Ttheory = 2 * Math.PI * Math.sqrt(2 * L / (3 * g));  // 细杆绕端点
 
   // 实测周期：rotz 序列解 wrap（连续化）+ 3 点滑动平均后，相对摆动中点
@@ -105,12 +105,10 @@ function explainHinge(plan, doc, series) {
   for (let i = 1; i < rs.length; i++) {
     if (rs[i - 1] < mid && rs[i] >= mid) ups.push(i);
   }
-  console.log('[hinge-dbg] rs=' + rs.map((v) => v.toFixed(2)).join(','));
   let Tmeasured = null;
   if (ups.length >= 2) {
     const dt = (series[series.length - 1].t - series[0].t) / (series.length - 1);
     Tmeasured = (ups[ups.length - 1] - ups[0]) * dt / (ups.length - 1);
-    console.log('[hinge-dbg] ups n=' + ups.length + ' T=' + Tmeasured.toFixed(3));
   }
   const errPct = Tmeasured != null ? Math.abs(Tmeasured - Ttheory) / Ttheory * 100 : null;
   const pass = errPct != null && errPct < 8;
@@ -141,7 +139,7 @@ function explainHinge(plan, doc, series) {
 // ---------- 阿特伍德机：a=(m1−m2)g/(m1+m2)、张力 T=2m1m2g/(m1+m2) ----------
 // atwood = workbench atwoodInfo() 结果 {m1, m2, aMeasured, y1, y2, simT}
 function explainAtwood(plan, atwood) {
-  const g = 9.81;
+  const g = atwood.g ?? 9.81;   // 场景重力（atwoodInfo 传入；默认地球）
   const { m1, m2, aMeasured } = atwood;
   const aTheory = (m1 - m2) * g / (m1 + m2);
   const T = 2 * m1 * m2 * g / (m1 + m2);
@@ -257,10 +255,10 @@ function explainRotation(plan, doc, rot) {
 // astro = workbench astroInfo() 结果 {E, KE, PE, Lz, ecc, period, rmin, rmax, simT}
 function explainAstro(plan, astro) {
   const G = astro.G;
-  const center = plan.entities.find((e) => e.type === 'celestial');
-  const sat = plan.entities.filter((x) => x.type === 'celestial')[1];
+  // 中心质量取解析实体中质量最大者（模型输出顺序不可信，[0] 不一定是中心天体）
+  const cels = plan.entities.filter((e) => e.type === 'celestial');
+  const center = cels.reduce((a, b) => ((b.given.mass ?? 0) > (a.given.mass ?? 0) ? b : a), cels[0]);
   const M = center ? (center.given.mass ?? 100) : 100;
-  const r0 = sat ? (sat.given.radius != null ? null : null) : null;   // 半径是渲染尺寸，不用
   // 圆轨道理论用轨道半径（实测 rmax/rmin 的中点近似半长轴）
   const a = astro.rmin != null && astro.rmax != null ? (astro.rmin + astro.rmax) / 2 : null;
   const Ttheory = a != null ? 2 * Math.PI * Math.sqrt(a * a * a / (G * M)) : null;
@@ -385,8 +383,8 @@ function explainMomentum(plan, doc, reports) {
   if (!pv1 || !pv2) return { supported: false, reason: '碰撞报告缺少碰后速度', summary: telemetrySummary([]) };
 
   const m1 = b1.physics.mass, m2 = b2.physics.mass;
-  const e = Math.min(b1.physics.restitution, b2.physics.restitution) * 2 > 0
-    ? (b1.physics.restitution + b2.physics.restitution) / 2 : 0;   // Rapier 默认取平均
+  // Rapier 默认合成规则=平均（node 实测 e=0/0.8 组合按 0.4 碰撞），一侧为 0 也取平均而非 0
+  const e = (b1.physics.restitution + b2.physics.restitution) / 2;
   const M = m1 + m2;
 
   // 一维（x 轴）理论

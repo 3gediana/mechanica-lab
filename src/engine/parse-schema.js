@@ -285,9 +285,7 @@ function rotationLayout(plan) {
 export function planToOverrides(plan) {
   if (plan.kind === 'rotation') return rotationLayout(plan);
   if (plan.kind === 'hinge') return hingeLayout(plan);
-  const hasSpringAttach = (plan.attaches || []).some((a) => a.type === 'spring');
   if (plan.kind === 'atwood' || plan.entities.some((e) => e.type === 'pulley')) return atwoodLayout(plan);
-  // 抛体布局：单球带斜向初速（无斜面）→ 球 + 地面板（抛物线落到地面）
   const ramp = plan.entities.find((e) => e.type === 'ramp');
   // 抛体布局：单球带斜向初速（无斜面）→ 球 + 地面板（抛物线落到地面）
   const projBalls = plan.entities.filter((e) => (e.type === 'sphere') && (e.given.velocity || []).some((v) => Math.abs(v) > 1e-9));
@@ -379,7 +377,7 @@ export function planToOverrides(plan) {
         o.physics.friction = 0;
         o.physics.gravityScale = 0;
       } else {
-        o.transform = { pos: ballOnRamp(rampGeom), rot: [0, 0, 0] };
+        o.transform = { pos: ballOnRamp(rampGeom, o.params.radius), rot: [0, 0, 0] };
       }
       if (e.given.velocity) o.physics.linvel = e.given.velocity;
     } else if (e.type === 'box') {
@@ -462,10 +460,9 @@ export function planToOverrides(plan) {
   return out;
 }
 
-// 球心位置：高墙在 -x，球心距墙留出半径+间隙，置于坡面近顶端
-function ballOnRamp(rampGeom) {
+// 球心位置：高墙在 -x，球心距墙留出半径+间隙，置于坡面近顶端（r = 实际题给/默认球半径）
+function ballOnRamp(rampGeom, r = 0.15) {
   if (!rampGeom) return [0, 0.5, 0];
-  const r = 0.15;
   const xl = -rampGeom.base / 2 + r + 0.01;
   const surfLocal = rampGeom.height * (1 - (xl + rampGeom.base / 2) / rampGeom.base);
   const yOff = r / Math.cos(rampGeom.angleDeg * Math.PI / 180);
