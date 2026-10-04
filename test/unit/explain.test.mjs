@@ -113,11 +113,11 @@ test('弹簧振子：峰值间隔法测周期', () => {
 });
 
 // ---------- 天体：中心质量取最大者而非输出顺序（AG-5 回归锚） ----------
-test('天体：卫星排第一时中心质量仍取 100', () => {
-  const a = 4.0, G = 1, M = 100;
-  const T = 2 * Math.PI * Math.sqrt(a * a * a / (G * M));
+test('天体：两体开普勒用总质量 G(m1+m2)，卫星排第一不误取', () => {
+  const a = 4.0, G = 1, M = 100, m = 1;
+  const T = 2 * Math.PI * Math.sqrt(a * a * a / (G * (M + m)));   // AB-18：周期由系统总质量决定
   const plan = { observations: [], entities: [
-    { type: 'celestial', given: { mass: 1, radius: 0.15 } },      // 卫星在前（顺序陷阱）
+    { type: 'celestial', given: { mass: m, radius: 0.15 } },      // 卫星在前（顺序陷阱）
     { type: 'celestial', given: { mass: M } },
   ] };
   const astro = { G, E: -12.5, KE: 12.5, PE: -25, Lz: 20, ecc: 0.01, period: T * 0.999, rmin: 3.99, rmax: 4.01, driftE: 0.01, driftL: 0.01, simT: 12 };
@@ -146,4 +146,90 @@ test('空场景：不支持题型降级而非编造', () => {
   const r = explainRun({ observations: [] }, mk(), []);
   assert.equal(r.supported, false);
   assert.ok(r.reason.length > 0);
+});
+
+// ---------- R3-B1 分派修复锚（AB-13/14/18/11/5/8） ----------
+test('伽利略同落：两球同高一平抛一静止 → galileo 分支且 t=√(2h/g)', () => {
+  const g = G0, h0 = 1.2, vx = 2;
+  const fallH = h0 + 0.15 - 0.1 - 0.15;      // 球心起 y=1.35，落点=地面顶 0.1+球半径 0.15
+  const tLand = Math.sqrt(2 * fallH / g);
+  const doc = mk({ entities: [
+    { id: 'a', type: 'sphere', physics: { body: 'dynamic', mass: 1, linvel: [vx, 0, 0], restitution: 0.05 }, transform: { pos: [0, h0 + 0.15, 0.3] }, params: { radius: 0.15 } },
+    { id: 'b', type: 'sphere', physics: { body: 'dynamic', mass: 1, linvel: [0, 0, 0], restitution: 0.05 }, transform: { pos: [0, h0 + 0.15, -0.3] }, params: { radius: 0.15 } },
+    { id: 'g', type: 'ground', physics: { body: 'fixed' }, transform: { pos: [0, 0, 0] }, params: { sy: 0.2 } },
+  ] });
+  const series = [];
+  for (let t = 0; t <= tLand + 0.2; t += 1 / 60) {
+    series.push({ t, pos: [vx * t, h0 + 0.15 - 0.5 * g * t * t, 0.3], speed: 1, vel: [vx, -g * t, 0] });
+  }
+  const r = explainRun({ observations: [] }, doc, series);
+  assert.equal(r.kind, 'galileo');
+  assert.ok(Math.abs(r.theoretical.tLand - tLand) < 1e-9);
+  assert.ok(r.pass, `err=${r.errPct && r.errPct.toFixed(2)}`);
+});
+
+test('子弹打木块：球+块 e≈0 → inelastic 分支共速 v′=mv/(m+M)', () => {
+  const m = 0.05, M2 = 1, u = 15;
+  const vC = m * u / (m + M2);
+  const doc = mk({ entities: [
+    { id: 'p', type: 'sphere', physics: { body: 'dynamic', mass: m, linvel: [u, 0, 0], restitution: 0 }, transform: { pos: [0, 0.5, 0] }, params: { radius: 0.03 } },
+    { id: 'w', type: 'box', physics: { body: 'dynamic', mass: M2, linvel: [0, 0, 0], restitution: 0 }, transform: { pos: [2, 0.5, 0] }, params: { sx: 0.4, sy: 0.3, sz: 0.3 } },
+    { id: 'g', type: 'ground', physics: { body: 'fixed' }, transform: { pos: [0, 0, 0] }, params: { sy: 0.2 } },
+  ] });
+  const reports = [{ t: 0.5, pBefore: [m * u, 0, 0], keBefore: 0.5 * m * u * u, pAfter: [m * u, 0, 0], keAfter: 0.5 * (m + M2) * vC * vC,
+    preVels: { p: [u, 0, 0], w: [0, 0, 0] }, postVels: { p: [vC, 0, 0], w: [vC, 0, 0] } }];
+  const r = explainRun({ observations: [] }, doc, [], reports);
+  assert.equal(r.kind, 'inelastic');
+  assert.ok(Math.abs(r.theoretical.vCommon - vC) < 1e-9);
+  assert.ok(r.pass, `err=${r.errPct && r.errPct.toFixed(2)}`);
+});
+
+test('一维对撞：理论用 preVels 真实碰前速度（静止释放后碰，文档初速 0）', () => {
+  const m1 = 2, m2 = 1, u1 = 1.5, u2 = 0;   // u1 来自碰前瞬间（摆落后撞击），文档 linvel=0
+  const e = 0.4;
+  const v1t = (m1 * u1 + m2 * u2 + e * m2 * (u2 - u1)) / (m1 + m2);
+  const doc = mk({ entities: [
+    { id: 'a', type: 'sphere', physics: { body: 'dynamic', mass: m1, linvel: [0, 0, 0], restitution: 0 }, transform: { pos: [0, 0.15, 0] }, params: { radius: 0.15 } },
+    { id: 'b', type: 'sphere', physics: { body: 'dynamic', mass: m2, linvel: [0, 0, 0], restitution: 0.8 }, transform: { pos: [1.6, 0.15, 0] }, params: { radius: 0.15 } },
+  ] });
+  const reports = [{ t: 1, pBefore: [m1 * u1, 0, 0], keBefore: 0, pAfter: [m1 * u1, 0, 0], keAfter: 0,
+    preVels: { a: [u1, 0, 0], b: [u2, 0, 0] }, postVels: { a: [v1t, 0, 0], b: [(m1 * u1 - m1 * v1t) / m2, 0, 0] } }];
+  const r = explainRun({ observations: [] }, doc, [], reports);
+  assert.equal(r.kind, 'momentum-1d');
+  assert.ok(Math.abs(r.pairs[0].vTheory - v1t) < 1e-9, `theory=${r.pairs[0].vTheory} 期望=${v1t}（若用文档初速 0 会得 0）`);
+});
+
+test('二维斜碰：单球撞地的报告不得入选（双变过滤）', () => {
+  const doc = mk({ entities: [
+    { id: 'a', type: 'sphere', physics: { body: 'dynamic', mass: 1, linvel: [2, 0, 0], restitution: 0.05 }, transform: { pos: [0, 2, 0.3] }, params: { radius: 0.15 } },
+    { id: 'b', type: 'sphere', physics: { body: 'dynamic', mass: 1, linvel: [0, 0, 0], restitution: 0.05 }, transform: { pos: [1, 2, -0.3] }, params: { radius: 0.15 } },
+    { id: 'g', type: 'ground', physics: { body: 'fixed' }, transform: { pos: [0, 0, 0] }, params: { sy: 0.2 } },
+  ] });
+  // 只有球 a 撞地减速（b 不动）——此前会被 momentum2D 当成「斜碰」输出误导性通过
+  const reports = [{ t: 0.64, pBefore: [2, 0, 0], keBefore: 2, pAfter: [1.9, 0, 0], keAfter: 1.8,
+    preVels: { a: [2, -6, 0], b: [0, 0, 0] }, postVels: { a: [1.9, 0.1, 0], b: [0, 0, 0] } }];
+  const g0 = G0, fallH = 2 - 0.1 - 0.15;
+  const series = [];
+  for (let t = 0; t <= Math.sqrt(2 * fallH / g0) + 0.1; t += 1 / 60) {
+    series.push({ t, pos: [2 * t, 2 - 0.5 * g0 * t * t, 0.3], speed: 1, vel: [2, -g0 * t, 0] });
+  }
+  const r = explainRun({ observations: [] }, doc, series, reports);
+  assert.equal(r.kind, 'galileo');   // 双变过滤后落回 galileo 分支（两球同高一平抛一静止）
+});
+
+test('竖直弹簧振子：峰检测沿主振动轴（y）而非 x（AB-5）', () => {
+  const m = 1, k = 20, T = 2 * Math.PI * Math.sqrt(m / k);
+  const doc = mk({ entities: [
+    { id: 'a', type: 'box', physics: { body: 'fixed' }, transform: { pos: [0, 3, 0] }, params: { sx: 0.3, sy: 0.3, sz: 0.3 } },
+    { id: 'b', type: 'sphere', physics: { body: 'dynamic', mass: m, linvel: [0, 0, 0], restitution: 0 }, transform: { pos: [0, 2, 0] }, params: { radius: 0.15 } },
+    { id: 's', type: 'spring', params: { stiffness: k, restLength: 0.8, damping: 0 }, attach: ['a', 'b'] },
+  ] });
+  const series = [];
+  const A = 0.3, y0 = 2.0;
+  for (let t = 0; t <= 3 * T; t += T / 60) {
+    series.push({ t, pos: [0, y0 + A * Math.cos(Math.sqrt(k / m) * t), 0], speed: 1, vel: [0, 0, 0] });
+  }
+  const r = explainRun({ observations: [] }, doc, series);
+  assert.equal(r.kind, 'spring');
+  assert.ok(r.measured.period && Math.abs(r.measured.period - T) / T < 0.05, `T=${r.measured.period} 期望≈${T.toFixed(3)}`);
 });

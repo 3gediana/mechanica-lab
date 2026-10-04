@@ -484,6 +484,14 @@ export class Runtime {
         const v = b.body.linvel();
         postVels[id] = [v.x, v.y, v.z];
       }
+      // 分体碰前速度（_prevVel 在本步 step 前刷新——恰好是碰撞前瞬时；AB-13：
+      // 解释器理论值改用真实碰前速度，静止释放后才碰的场景不再拿文档初速算出 0/0）
+      const preVels = {};
+      for (const [id, b] of this.binds) {
+        if (!b.body) continue;
+        const pv = _prevVel.get(id);
+        if (pv) preVels[id] = [pv[0], pv[1], pv[2]];
+      }
       // 碰撞位置：本次新事件两碰撞体的中点（视口碰撞时刻标记用）
       const lastEvt = this.collisions[this.collisions.length - 1];
       let pos = null;
@@ -491,7 +499,7 @@ export class Runtime {
       if (ca && ca.mesh && cb && cb.mesh) {
         pos = [(ca.mesh.position.x + cb.mesh.position.x) / 2, (ca.mesh.position.y + cb.mesh.position.y) / 2, (ca.mesh.position.z + cb.mesh.position.z) / 2];
       }
-      this.collisionReports.push({ t: this.simT, pBefore: pre.p, keBefore: pre.ke, pAfter: post.p, keAfter: post.ke, postVels, pos });
+      this.collisionReports.push({ t: this.simT, pBefore: pre.p, keBefore: pre.ke, pAfter: post.p, keAfter: post.ke, postVels, preVels, pos });
       if (this.collisionReports.length > 50) this.collisionReports.shift();
     }
     // 滚动阻力（教学模型）：滚阻矩 τ = μr·N·r 与转动惯量耦合（α = τ/I），

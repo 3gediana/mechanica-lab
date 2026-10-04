@@ -7,17 +7,34 @@ const FIXED_EXIT_TOL = 0.015; // 球心越过斜面底边的判定余量 m（小
 // plan: normalizeParse 产物；doc: 场景文档；series: [{t,pos,speed,vel}]；reports: 碰撞报告；astro: 天体遥测
 export function explainRun(plan, doc, series, reports = [], astro = null, rotation = null, atwood = null) {
   const hasRamp = doc.entities.some((e) => e.type === 'ramp');
-  const hasGrav = doc.entities.some((e) => e.physics.gravitating);
+  const hasGrav = doc.entities.some((e) => e.physics && e.physics.gravitating);
   const hasSpring = doc.entities.some((e) => e.type === 'spring');
   const hasHinge = doc.entities.some((e) => e.joints && e.joints.some((j) => j.type === 'revolute'));
   const spheres = doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
+  const dynBodies = doc.entities.filter((e) => e.physics && e.physics.body === 'dynamic');
   if (hasHinge && series.length > 10 && series[0].rotz !== undefined) return explainHinge(plan, doc, series);
   if (hasSpring && series.length > 10) return explainSpring(plan, doc, series);
-  // 抛体：单球带初速 + 地面（无斜面/弹簧/引力），理论射程与最大高度 vs 实测
+  // 抛体：单球带初速 + 地面（无斜面/弹簧/引力）且无其它动态体（AB-11：子弹打木块等
+  // 「球+块」场景曾误入抛体分支拿 15m/s 算「射程」——条件收窄到真单球场景）
   const projBalls = doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
   const hasGround = doc.entities.some((e) => e.type === 'ground');
-  if (!hasRamp && !hasSpring && !hasGrav && projBalls.length === 1 && hasGround) {
+  const onlyBall = projBalls.length === 1 && dynBodies.length === 1;
+  if (!hasRamp && !hasSpring && !hasGrav && onlyBall && hasGround) {
     return explainProjectile(plan, doc, series);
+  }
+  // 伽利略平抛同落（AB-8）：两动态球同高、都无竖直初速、恰一带水平初速、双球空中起始
+  // + 地面——此前被误派二维斜碰分支输出「斜碰验证」（错误教学内容）。
+  // 「双球离地 >0.3m」是与一维对撞场景的分界：对撞球贴地面滚（y≈半径），平抛球从高处落下
+  if (!hasRamp && !hasSpring && !hasGrav && spheres.length === 2 && dynBodies.length === 2 && hasGround
+    && spheres.every((b) => Math.abs(b.physics.linvel[1]) < 1e-6)
+    && spheres.filter((b) => Math.abs(b.physics.linvel[0]) > 0.5).length === 1
+    && spheres.every((b) => b.transform.pos[1] > 0.3)) {
+    return explainGalileo(plan, doc, series, spheres);
+  }
+  // 完全非弹性对撞（AB-11 后半）：球+块（或球+球）e≈0 → 共速 v'=mv/(m+M)（子弹打木块类）
+  if (!hasRamp && !hasGrav && dynBodies.length === 2 && reports.length
+    && dynBodies.every((b) => (b.physics.restitution || 0) < 0.05)) {
+    return explainInelastic(plan, doc, reports, dynBodies);
   }
   if (doc.kind === 'rotation' && rotation) return explainRotation(plan, doc, rotation);
   if (atwood) return explainAtwood(plan, atwood);
@@ -39,16 +56,21 @@ function explainProjectile(plan, doc, series) {
   const v0 = ball.physics.linvel;
   const vx = v0[0], vy0 = v0[1];
   const h0 = series[0].pos[1];
+  // 落地阈值 = 球半径 + 地面顶面（AB-8 关联：0.16 硬编码假设了半径 0.15 的球与 y=0 地面）
+  const groundE = doc.entities.find((e) => e.type === 'ground');
+  const gTop = groundE && groundE.transform && groundE.transform.pos
+    ? groundE.transform.pos[1] + (groundE.params.sy || 0.2) / 2 : 0;
+  const yFloor = gTop + (ball.params.radius || 0.15) + 0.01;
   // 理论（运动学）：最大高度 H = h0 + vy0²/(2g)（vy0>0 上抛分量）；落地时刻 t_land = (vy0 + √(vy0²+2g·h0))/g
   const Htheory = h0 + (vy0 > 0 ? vy0 * vy0 / (2 * g) : 0);
   const tFlight = (vy0 + Math.sqrt(vy0 * vy0 + 2 * g * h0)) / g;
   const Rtheory = vx * tFlight;
 
-  // 实测：轨迹最大高度 + 落地（y 首次低于起始 0.05 后的 x 极值）
+  // 实测：轨迹最大高度 + 落地（y 首次低于落点阈值后的 x 极值）
   let Hmeasured = -Infinity, xLand = null;
   for (const p of series) {
     if (p.pos[1] > Hmeasured) Hmeasured = p.pos[1];
-    if (p.pos[1] <= 0.16 && xLand === null && p.t > 0.2) { xLand = p.pos[0]; break; }
+    if (p.pos[1] <= yFloor && xLand === null && p.t > 0.2) { xLand = p.pos[0]; break; }
   }
   if (xLand === null) xLand = series[series.length - 1].pos[0];
   const Rmeasured = xLand - series[0].pos[0];
@@ -69,6 +91,87 @@ function explainProjectile(plan, doc, series) {
     observation: plan.observations[0] || '射程与最大高度',
     theoretical: { range: Rtheory, maxHeight: Htheory, formula: 'R = vx·t_land, H = h0 + vy0²/(2g)' },
     measured: { range: Rmeasured, maxHeight: Hmeasured },
+    errPct, pass,
+    summary,
+  };
+}
+
+// ---------- 伽利略平抛同落：t=√(2h/g) 与水平初速无关（AB-8 新分支） ----------
+// series 为带水平初速那只球的轨迹；同落结论用「实测落地时刻 vs 自由落体理论」验证，
+// 两球同高由 checks 呈现（另一球无水平初速，落地时刻理论相同）。
+function explainGalileo(plan, doc, series) {
+  const balls = doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
+  const groundE = doc.entities.find((e) => e.type === 'ground');
+  if (series.length < 5 || balls.length !== 2 || !groundE) {
+    return { supported: false, reason: '平抛同落解释需要两球+地面+运行轨迹', summary: telemetrySummary(series) };
+  }
+  const groundTop = groundE.transform.pos[1] + (groundE.params.sy || 0.2) / 2;
+  const g = Math.abs(doc.gravity || -9.81);
+  const mover = balls.find((b) => Math.abs(b.physics.linvel[0]) > 0.5) || balls[0];
+  const dropper = balls.find((b) => b !== mover) || balls[0];
+  const vx = mover.physics.linvel[0];
+  const r = mover.params.radius || 0.15;
+  const h0 = series[0].pos[1] - groundTop - r;                    // 球心相对落点的下落高度
+  const tTheory = Math.sqrt(2 * Math.max(h0, 1e-6) / g);          // 自由落体（与 vx 无关）
+  const xTheory = vx * tTheory;
+  const thr = groundTop + r + 0.01;
+  const land = series.find((p) => p.pos[1] <= thr && p.t > 0.05);
+  const tMeasured = land ? land.t : null;
+  const xMeasured = land ? land.pos[0] - series[0].pos[0] : null;
+  const errPct = tMeasured != null ? Math.abs(tMeasured - tTheory) / tTheory * 100 : null;
+  const pass = errPct != null && errPct < 8;
+  const summary = [
+    `平抛与自由落体同时落地（伽利略）：抛出球 vx=${vx.toFixed(2)} m/s，下落高度 h=${h0.toFixed(3)} m。`,
+    `竖直方向是自由落体：理论落地时刻 t=√(2h/g)=${tTheory.toFixed(3)} s，与 vx 无关——同高的静止球同一时刻落地。`,
+    `模拟实测（抛出球触地）t=${tMeasured != null ? tMeasured.toFixed(3) + ' s' : '未捕获'}，偏差 ${errPct != null ? errPct.toFixed(2) + '%' : '?'}；`,
+    `水平位移实测 ${xMeasured != null ? xMeasured.toFixed(3) : '?'} m（理论 x=vx·t=${xTheory.toFixed(3)} m）。`,
+    pass ? '水平匀速+竖直自由落体的独立性得到验证。' : '偏差偏大，建议检查初速与地面高度设置。',
+  ].join('');
+  return {
+    supported: true,
+    kind: 'galileo',
+    simT: series[series.length - 1].t,
+    observation: plan.observations[0] || '平抛与自由落体同时落地',
+    theoretical: { tLand: tTheory, xRange: xTheory, formula: 't = √(2h/g)（与 vx 无关）' },
+    measured: { tLand: tMeasured, xRange: xMeasured },
+    errPct, pass,
+    checks: [{ text: '两球同高释放', ok: Math.abs(mover.transform.pos[1] - dropper.transform.pos[1]) < 1e-6 }],
+    summary,
+  };
+}
+
+// ---------- 完全非弹性对撞（子弹打木块类）：共速 v'=Σmv/Σm + ΔKE 损失（AB-11 后半） ----------
+function explainInelastic(plan, doc, reports, bodies) {
+  const [b1, b2] = bodies;
+  const rep = reports.find((r) => r.postVels && r.postVels[b1.id] && r.postVels[b2.id]
+    && Math.abs(r.postVels[b1.id][0] - ((r.preVels && r.preVels[b1.id]) ? r.preVels[b1.id][0] : b1.physics.linvel[0])) > 0.3);
+  if (!rep) return { supported: false, reason: '未捕捉到碰撞（初速不足或未命中木块）', summary: telemetrySummary([]) };
+  const m1 = b1.physics.mass, m2 = b2.physics.mass;
+  const u1 = (rep.preVels && rep.preVels[b1.id]) ? rep.preVels[b1.id][0] : b1.physics.linvel[0];
+  const u2 = (rep.preVels && rep.preVels[b2.id]) ? rep.preVels[b2.id][0] : b2.physics.linvel[0];
+  const p0 = m1 * u1 + m2 * u2;
+  const vCommon = p0 / (m1 + m2);                                  // 完全非弹性：碰后共速
+  const keBefore = 0.5 * m1 * u1 * u1 + 0.5 * m2 * u2 * u2;
+  const keAfterTheory = 0.5 * (m1 + m2) * vCommon * vCommon;
+  const lossPct = (1 - keAfterTheory / Math.max(keBefore, 1e-9)) * 100;   // = μ/(m1+m2)·100%（一维）
+  const w1 = rep.postVels[b1.id][0], w2 = rep.postVels[b2.id][0];
+  const wAvg = (w1 + w2) / 2;
+  const errPct = Math.abs(wAvg - vCommon) / Math.max(Math.abs(vCommon), 1e-9) * 100;
+  const pass = errPct < 8;
+  const summary = [
+    `完全非弹性碰撞（子弹打木块，e≈0）：m1=${m1} kg 以 ${u1.toFixed(2)} m/s 撞 m2=${m2} kg（碰前 ${u2.toFixed(2)} m/s）。`,
+    `动量守恒 m1u1+m2u2=(m1+m2)v′ → 理论共速 v′=${vCommon.toFixed(3)} m/s；`,
+    `模拟实测碰后两体 ${w1.toFixed(3)} / ${w2.toFixed(3)} m/s（应相等且= v′），偏差 ${errPct.toFixed(2)}%。`,
+    `动能损失 ΔKE=½μv²：碰前 ${keBefore.toFixed(3)} J → 碰后 ${keAfterTheory.toFixed(3)} J（损失 ${lossPct.toFixed(1)}% 转为内能）——动量守恒而动能不守恒。`,
+    pass ? '完全非弹性碰撞的动量守恒与共速结论得到验证。' : '偏差偏大，建议检查恢复系数设置（两侧应均为 0）。',
+  ].join('');
+  return {
+    supported: true,
+    kind: 'inelastic',
+    simT: rep.t,
+    observation: plan.observations[0] || '碰后共速与动能损失',
+    theoretical: { vCommon, keBefore, keAfter: keAfterTheory, lossPct, formula: 'v′ = (m1u1+m2u2)/(m1+m2)' },
+    measured: { v1: w1, v2: w2 },
     errPct, pass,
     summary,
   };
@@ -174,8 +277,15 @@ function explainSpring(plan, doc, series) {
   const k = spring.params.stiffness;
   const Ttheory = 2 * Math.PI * Math.sqrt(m / k);
 
-  // 实测周期：振子 x 序列的相邻峰值间隔（峰检测：差分符号翻转点）
-  const xs = series.map((p) => p.pos[0]);
+  // 实测周期：振子沿主导振动轴的序列峰间隔（AB-5：竖直弹簧振子 pos[0] 近似不动，
+  // 峰检测只看 x 轴时峰数 0 → 取三轴方差最大的轴为振动主轴）
+  const dims = [0, 1, 2].map((d) => {
+    const a = series.map((p) => p.pos[d]);
+    const mean = a.reduce((x, y) => x + y, 0) / a.length;
+    return a.reduce((v, x) => v + (x - mean) * (x - mean), 0);
+  });
+  const axis = dims.indexOf(Math.max(...dims));
+  const xs = series.map((p) => p.pos[axis]);
   const peaks = [];
   for (let i = 1; i < xs.length - 1; i++) {
     if (xs[i] > xs[i - 1] && xs[i] >= xs[i + 1] && xs[i] - xs[i - 1] > 1e-4) {
@@ -255,13 +365,15 @@ function explainRotation(plan, doc, rot) {
 // astro = workbench astroInfo() 结果 {E, KE, PE, Lz, ecc, period, rmin, rmax, simT}
 function explainAstro(plan, astro) {
   const G = astro.G;
-  // 中心质量取解析实体中质量最大者（模型输出顺序不可信，[0] 不一定是中心天体）
+  // 中心质量取解析实体中质量最大者（模型输出顺序不可信，[0] 不一定是中心天体）；
+  // 两体开普勒（AB-18）：双星等质量系统周期由 G(m1+m2) 决定——用 G·M_center 会差 29%
   const cels = plan.entities.filter((e) => e.type === 'celestial');
   const center = cels.reduce((a, b) => ((b.given.mass ?? 0) > (a.given.mass ?? 0) ? b : a), cels[0]);
   const M = center ? (center.given.mass ?? 100) : 100;
+  const mSum = cels.length >= 2 ? cels.reduce((s, c) => s + (c.given.mass ?? 0), 0) : M;
   // 圆轨道理论用轨道半径（实测 rmax/rmin 的中点近似半长轴）
   const a = astro.rmin != null && astro.rmax != null ? (astro.rmin + astro.rmax) / 2 : null;
-  const Ttheory = a != null ? 2 * Math.PI * Math.sqrt(a * a * a / (G * M)) : null;
+  const Ttheory = a != null ? 2 * Math.PI * Math.sqrt(a * a * a / (G * mSum)) : null;
   const vcirc = a != null ? Math.sqrt(G * M / a) : null;
   const driftOk = astro.driftE < 2 && astro.driftL < 2;
   const eccOk = astro.ecc != null && astro.ecc < 0.1;
@@ -374,24 +486,29 @@ function explainMomentum(plan, doc, reports) {
   const is2D = Math.abs(b1.physics.linvel[2]) > 1e-6 || Math.abs(b2.physics.linvel[2]) > 1e-6
     || Math.abs(b1.transform.pos[2] - b2.transform.pos[2]) > 1e-6;
   if (is2D) return explainMomentum2D(plan, doc, reports, b1, b2);
-  // 取第一份"球 A 速度相对初速发生显著变化"的碰撞报告（跳过出生触地等初始接触）
-  const rep = reports.find((r) => r.postVels && r.postVels[b1.id]
-    && Math.abs(r.postVels[b1.id][0] - u1) > 0.05);
+  // 取第一份"两球速度都相对碰前显著变化"的碰撞报告（AB-13/14：跳过出生触地/单球撞地——
+  // 伽利略同落等场景曾把「球1 撞地」当成「两球斜碰」输出误导性通过）
+  const rep = reports.find((r) => r.postVels && r.postVels[b1.id] && r.postVels[b2.id]
+    && Math.abs(r.postVels[b1.id][0] - u1) > 0.05
+    && Math.abs(r.postVels[b2.id][0] - u2) > 0.01);
   if (!rep) return { supported: false, reason: '碰撞报告中未捕捉到球球碰撞（初速过小或未碰撞）', summary: telemetrySummary([]) };
   const postVels = rep.postVels;
   const pv1 = postVels[b1.id], pv2 = postVels[b2.id];
   if (!pv1 || !pv2) return { supported: false, reason: '碰撞报告缺少碰后速度', summary: telemetrySummary([]) };
 
   const m1 = b1.physics.mass, m2 = b2.physics.mass;
+  // 理论初速取真实碰前速度（AB-13：静止释放后才碰的场景拿文档初速算理论会得 0/0）
+  const u1r = (rep.preVels && rep.preVels[b1.id]) ? rep.preVels[b1.id][0] : u1;
+  const u2r = (rep.preVels && rep.preVels[b2.id]) ? rep.preVels[b2.id][0] : u2;
   // Rapier 默认合成规则=平均（node 实测 e=0/0.8 组合按 0.4 碰撞），一侧为 0 也取平均而非 0
   const e = (b1.physics.restitution + b2.physics.restitution) / 2;
   const M = m1 + m2;
 
   // 一维（x 轴）理论
-  const p0 = m1 * u1 + m2 * u2;
-  const v1t = (p0 + e * m2 * (u2 - u1)) / M;
-  const v2t = (p0 + e * m1 * (u1 - u2)) / M;
-  const keBefore = 0.5 * m1 * u1 * u1 + 0.5 * m2 * u2 * u2;
+  const p0 = m1 * u1r + m2 * u2r;
+  const v1t = (p0 + e * m2 * (u2r - u1r)) / M;
+  const v2t = (p0 + e * m1 * (u1r - u2r)) / M;
+  const keBefore = 0.5 * m1 * u1r * u1r + 0.5 * m2 * u2r * u2r;
   const keAfterTheory = 0.5 * m1 * v1t * v1t + 0.5 * m2 * v2t * v2t;
 
   // 实测（碰后 x 分量）
@@ -435,15 +552,19 @@ function explainMomentum(plan, doc, reports) {
 // 无外力 → 动量矢量守恒（x/z 分量分别校验）；e=0.8 法向动能损失但二维切向分量保持，
 // 整体 KE 损失小于一维同 e 值——门控动量矢量误差。
 function explainMomentum2D(plan, doc, reports, b1, b2) {
-  const u1v = b1.physics.linvel, u2v = b2.physics.linvel;
   const m1 = b1.physics.mass, m2 = b2.physics.mass;
   const e = (b1.physics.restitution + b2.physics.restitution) / 2;
-  // 取第一份球 A 速度显著变化的碰撞报告
-  const rep = reports.find((r) => r.postVels && r.postVels[b1.id]
-    && Math.hypot(r.postVels[b1.id][0] - u1v[0], r.postVels[b1.id][2] - u1v[2]) > 0.05);
+  // 两段式（AB-13/14）：先用文档初速选报告，要求两球速度都显著变化（排除单球撞地——
+  // 伽利略同落/竖直圆周等场景曾把「球撞地」当「两球斜碰」输出误导性通过）；
+  // 选中后再用报告里的真实碰前速度算理论（静止释放后才碰 ≠ 文档初速）
+  const rep = reports.find((r) => r.postVels && r.postVels[b1.id] && r.postVels[b2.id]
+    && Math.hypot(r.postVels[b1.id][0] - b1.physics.linvel[0], r.postVels[b1.id][2] - b1.physics.linvel[2]) > 0.05
+    && Math.hypot(r.postVels[b2.id][0] - b2.physics.linvel[0], r.postVels[b2.id][2] - b2.physics.linvel[2]) > 0.02);
   if (!rep) return { supported: false, reason: '碰撞报告中未捕捉到二维斜碰', summary: telemetrySummary([]) };
   const pv1 = rep.postVels[b1.id], pv2 = rep.postVels[b2.id];
   if (!pv1 || !pv2) return { supported: false, reason: '碰撞报告缺少碰后速度', summary: telemetrySummary([]) };
+  const u1v = (rep.preVels && rep.preVels[b1.id]) ? rep.preVels[b1.id] : b1.physics.linvel;
+  const u2v = (rep.preVels && rep.preVels[b2.id]) ? rep.preVels[b2.id] : b2.physics.linvel;
 
   // 动量矢量守恒（x/z 分量）
   const p0x = m1 * u1v[0] + m2 * u2v[0], p0z = m1 * u1v[2] + m2 * u2v[2];
