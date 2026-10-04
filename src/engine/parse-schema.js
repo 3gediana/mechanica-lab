@@ -6,6 +6,11 @@ const TYPE_MAP = {
   celestial: 'celestial', planet: 'celestial', star: 'celestial', pulley: 'pulley', 滑轮: 'pulley',
   斜面: 'ramp', 球: 'sphere', 方块: 'box', 圆柱: 'cylinder', 地面: 'ground',
   天体: 'celestial', 行星: 'celestial', 恒星: 'celestial', 卫星: 'celestial',
+  // 中文别名兜底（AG-12）：模型偶发无视英文枚举直接输出中文类型，能消化的都收下
+  楔子: 'ramp', 楔块: 'ramp', 斜坡: 'ramp',
+  小球: 'sphere', 质点: 'sphere', 钢球: 'sphere',
+  滑块: 'box', 物块: 'box', 木块: 'box', 木板: 'box', 细杆: 'box', 摆杆: 'box',
+  圆盘: 'cylinder', 转盘: 'cylinder',
 };
 
 const RANGES = {
@@ -26,10 +31,12 @@ export function normalizeParse(raw) {
   const errors = [];
   if (!raw || typeof raw !== 'object') return { ok: false, errors: ['解析结果不是对象'] };
   const entities = [];
+  const droppedNotes = [];
   for (const e of (Array.isArray(raw.entities) ? raw.entities : [])) {
     const type = TYPE_MAP[e.type];
     if (!type) { errors.push(`未知实体类型: ${e.type}（已跳过）`); continue; }
     const given = {};
+    const dropped = [];
     for (const [k, v] of Object.entries(e.given || {})) {
       if (k === 'velocity') {
         const arr = Array.isArray(v) ? v.map((x) => Number(x)) : null;
@@ -46,11 +53,12 @@ export function normalizeParse(raw) {
         if (arr && arr.length === 3 && arr.every(Number.isFinite)) given.angvel = arr;
         continue;
       }
-      if (!(k in RANGES)) continue;                    // 未知键丢弃，不猜
+      if (!(k in RANGES)) { dropped.push(k); continue; }   // 未知键丢弃不猜，但让用户看见（AG-9）
       const n = num(v, RANGES[k]);
       if (n === null) errors.push(`${e.name || type}.${k} 值无效（${v}），已忽略`);
       else given[k] = n;
     }
+    if (dropped.length) droppedNotes.push(`${e.name || type}：字段 ${dropped.join('/')} 沙盘不支持，已忽略`);
     entities.push({ type, name: String(e.name || type).slice(0, 24), confidence: clamp01(e.confidence), given });
   }
   if (!entities.length) return { ok: false, errors: [...errors, '没有可用的实体'] };
@@ -99,6 +107,15 @@ export function normalizeParse(raw) {
     assumptions: strs(raw.assumptions),
     confidence: clamp01(raw.confidence) ?? 0.5,
   };
+  // 被丢弃字段的透明化（AG-9）：进 uncertain 让用户在评审界面看见，不静默吞
+  for (const note of droppedNotes) {
+    if (plan.uncertain.length >= 8) break;
+    if (!plan.uncertain.some((u) => u.includes('不支持'))) plan.uncertain.push(note);
+  }
+  // 越界/非数值 gravity 的显式提示（AG-10）：不再静默落默认
+  if (gravityRaw != null && plan.gravity === null) {
+    errors.push(`gravity 值无效（${gravityRaw}），已按默认 9.81 处理`);
+  }
   if (plan.gravity === null) { plan.gravity = 9.81; plan.gravityDefault = true; }
 
   // 光滑语义推断（零信任规范化层的确定性保证）：真实模型常把"光滑/不计摩擦"写进
@@ -315,9 +332,12 @@ export function planToOverrides(plan) {
     return pout;
   }
   let rampGeom = null;
+  const maxBallR = Math.max(0.15, ...plan.entities
+    .filter((e) => e.type === 'sphere')
+    .map((e) => e.given.radius ?? 0.15));
   if (ramp) {
     const g = ramp.given;
-    const width = g.width ?? 0.5;
+    const width = g.width ?? Math.max(0.5, +(2.2 * maxBallR).toFixed(3));   // AG-21 防大球侧翻
     if (g.angleDeg != null) {
       const Lslope = g.length ?? 2.0;                       // 坡面长（斜边）
       const th = g.angleDeg * Math.PI / 180;
@@ -349,7 +369,7 @@ export function planToOverrides(plan) {
       o.params = {
         length: +rampGeom.base.toFixed(4),
         height: +rampGeom.height.toFixed(4),
-        width: ramp.given.width ?? 0.5,
+        width: ramp.given.width ?? Math.max(0.5, +(2.2 * maxBallR).toFixed(3)),
       };
       o.transform = { pos: [0, 0.05, 0], rot: [0, 0, 0] };
       // 摩擦是成对属性：固定斜面也必须带上题目给的摩擦（缺省 0.4），否则 Rapier 取平均把光滑面变粗糙
@@ -381,9 +401,15 @@ export function planToOverrides(plan) {
       }
       if (e.given.velocity) o.physics.linvel = e.given.velocity;
     } else if (e.type === 'box') {
-      o.params = { sx: 0.3, sy: 0.3, sz: 0.3 };
+      // 题给尺寸透传（AG-18）：length/height/width → sx/sy/sz；只给一边时三边同值（正方块惯例）
+      const bl = e.given.length ?? e.given.width ?? e.given.height;
+      o.params = {
+        sx: e.given.length ?? bl ?? 0.3,
+        sy: e.given.height ?? bl ?? 0.3,
+        sz: e.given.width ?? bl ?? 0.3,
+      };
       o.physics = { mass: e.given.mass ?? 1, friction: e.given.friction ?? 0.4 };
-      o.transform = { pos: [0.6, 0.35, 0], rot: [0, 0, 0] };
+      o.transform = { pos: [0.6, (o.params.sy / 2) + 0.02, 0], rot: [0, 0, 0] };
       if (e.given.velocity) o.physics.linvel = e.given.velocity;
     } else if (e.type === 'pulley') {
       o.params = { radius: e.given.radius ?? 0.3 };
@@ -397,11 +423,11 @@ export function planToOverrides(plan) {
       };
       o.transform = { pos: e.given.position ?? [0, 0, 0], rot: [0, 0, 0] };
     } else if (e.type === 'cylinder') {
-      o.params = { radius: e.given.radius ?? 0.12, height: 0.3 };
+      o.params = { radius: e.given.radius ?? 0.12, height: e.given.height ?? 0.3 };   // AG-19
       o.physics = { mass: e.given.mass ?? 1 };
-      o.transform = { pos: [0, 0.2, 0.8], rot: [0, 0, 0] };
+      o.transform = { pos: [0, (o.params.height / 2) + 0.02, 0.8], rot: [0, 0, 0] };
     } else if (e.type === 'ground') {
-      o.params = { sx: 10, sy: 0.1, sz: 8 };
+      o.params = { sx: e.given.length ?? 10, sy: 0.1, sz: e.given.width ?? 8 };   // AG-20
       o.transform = { pos: [0, -0.05, 0], rot: [0, 0, 0] };
     }
     out.push(o);

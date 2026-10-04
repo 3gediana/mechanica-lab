@@ -148,3 +148,43 @@ test('atwood 布局：双球 onPulley 占位', () => {
   assert.equal(out[0].type, 'pulley');
   assert.ok(out.slice(1).every((o) => o.physics.onPulley === '__PULLEY__'));
 });
+
+// ---------- Round36 B8 追加：别名/透传/透明化 ----------
+test('中文类型别名被消化（AG-12）', () => {
+  const raw = { entities: [
+    { type: '斜坡', given: { angleDeg: 30 } }, { type: '小球', given: { mass: 1 } },
+    { type: '滑块', given: { mass: 2 } }, { type: '圆盘', given: { radius: 0.5 } }] };
+  const n = normalizeParse(raw);
+  assert.deepEqual(n.plan.entities.map((e) => e.type).sort(), ['box', 'cylinder', 'ramp', 'sphere']);
+});
+
+test('不支持字段进 uncertain 透明展示（AG-9）', () => {
+  const raw = { entities: [{ type: 'sphere', name: '球A', given: { mass: 1, 颜色: '红', 密度: 2 } }] };
+  const n = normalizeParse(raw);
+  assert.ok(n.plan.uncertain.some((u) => u.includes('球A') && u.includes('不支持')), n.plan.uncertain.join('|'));
+});
+
+test('gravity 非法值显式报错不静默（AG-10）', () => {
+  const raw = { entities: [{ type: 'sphere', given: { mass: 1 } }], gravity: 200 };
+  const n = normalizeParse(raw);
+  assert.equal(n.plan.gravity, 9.81);
+  assert.ok(n.errors.some((e) => e.includes('gravity 值无效')), n.errors.join('|'));
+});
+
+test('box 题给尺寸透传 sx/sy/sz（AG-18）', () => {
+  const raw = { entities: [{ type: 'box', given: { mass: 2, length: 0.5, width: 0.4, height: 0.2 } }] };
+  const out = planToOverrides(normalizeParse(raw).plan);
+  assert.deepEqual(out[0].params, { sx: 0.5, sy: 0.2, sz: 0.4 });
+  assert.ok(out[0].transform.pos[1] >= 0.1);   // 落地高度 = sy/2 + 余量
+  const raw1 = { entities: [{ type: 'box', given: { length: 0.6 } }] };   // 只给一边=正方块
+  const out1 = planToOverrides(normalizeParse(raw1).plan);
+  assert.deepEqual(out1[0].params, { sx: 0.6, sy: 0.6, sz: 0.6 });
+});
+
+test('坡宽随球半径放大（AG-21）', () => {
+  const raw = { questionType: '斜面', entities: [
+    { type: 'ramp', given: { angleDeg: 30, length: 2 } },
+    { type: 'sphere', given: { mass: 1, radius: 0.5 } }] };
+  const out = planToOverrides(normalizeParse(raw).plan);
+  assert.ok(out.find((o) => o.type === 'ramp').params.width >= 2.2 * 0.5 - 1e-6);
+});

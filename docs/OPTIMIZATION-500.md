@@ -301,7 +301,7 @@
 | FEEL-42 | workbench 裁剪 | 裁剪后无预览裁剪结果：cropHint 显示尺寸已有 ✓；补选区重置按钮已有 ✓ | P3 | S | | ⬜ |
 | FEEL-43 | workbench 拍照 | captureFrame ✓；无倒计时自拍（决策不做） | P3 | S | | ⬜ |
 | FEEL-44 | workbench 上传 | 大图降采样 1400 ✓；进度无（本地瞬时） | P3 | S | | ⬜ |
-| FEEL-45 | workbench 解析重试 | btnParse 可重复 ✓；失败自动重试 1 次（502 瞬时，间隔 1.5s，toast 告知） | P1 | M | ⚠ 双倍调用量预算 | ⬜ |
+| FEEL-45 | workbench 解析重试 | btnParse 可重复 ✓；失败自动重试 1 次（502 瞬时，间隔 1.5s，toast 告知） | P1 | M | ⚠ 双倍调用量预算 | ✅ B8：502 族自动重试一次（400/413/503 不重试） |
 | FEEL-46 | workbench agent 面板 | 场景切换后 plan 陈旧（可对错场景解释）：applyDoc 时 agentPlan 相关态复位+提示 | P0 | S | ⚠ w4 混合流程时序 | ⬜ |
 | FEEL-47 | workbench explain | 解释会 reset 重跑 ✓（数据新鲜）；重跑前 toast「将重置并运行 n 秒」 | P2 | S | | ⬜ |
 | FEEL-48 | workbench textReq | 解析后 textarea 保留 ✓（可改重解析）；无项 | P3 | S | | ⬜ |
@@ -362,19 +362,19 @@
 | AG-6 | parse-schema ballOnRamp | 球半径硬编 0.15（题给 0.5 半球沉坡）：用实际 given.radius | P0 | S | | ✅ B1：ballOnRamp 半径参数化（单测覆盖） |
 | AG-7 | workbench runAndExplain | astro 解释依赖 trails 采样（周期/偏心率），未开轨迹时 null→判 fail：isAstro && !trailsOn 自动 setTrails(true) | P0 | S | | ✅ B1：astro 解释自动开轨迹 |
 | AG-8 | workbench readQuestionImage | EXIF 方向不处理（手机横拍图歪）：createImageBitmap(blob,{imageOrientation:'from-image'})，失败回退 Image | P1 | M | | ⬜ |
-| AG-9 | parse-schema normalizeParse | 未知 given 键静默丢弃：收集进 plan.uncertain 展示（透明度） | P1 | S | | ⬜ |
-| AG-10 | parse-schema gravity | 越界 gravity 静默落默认 9.81：errors 加一条提示 | P1 | S | | ⬜ |
+| AG-9 | parse-schema normalizeParse | 未知 given 键静默丢弃：收集进 plan.uncertain 展示（透明度） | P1 | S | | ✅ B8：不支持字段进 uncertain 透明展示（单测锚） |
+| AG-10 | parse-schema gravity | 越界 gravity 静默落默认 9.81：errors 加一条提示 | P1 | S | | ✅ B8：gravity 非法值显式报错（单测锚） |
 | AG-11 | parse-schema ramp 过定 | angleDeg+length+height 同给时优先 angleDeg ✓ 但无提示：加 uncertain 提示 | P2 | S | | ⬜ |
-| AG-12 | parse-schema TYPE_MAP | 中文别名不足：补 斜坡/木板/台/圆盘/转盘/滑轮组/刚体/质点 | P1 | S | | ⬜ |
+| AG-12 | parse-schema TYPE_MAP | 中文别名不足：补 斜坡/木板/台/圆盘/转盘/滑轮组/刚体/质点 | P1 | S | | ✅ B8：TYPE_MAP 中文别名 13 个（单测锚） |
 | AG-13 | parse-schema atwoodLayout | 球 y 固定 1.0 忽略 given.position.y：尊重题给高度 | P2 | S | | ⬜ |
 | AG-14 | parse-schema hingeLayout | 初始摆角 0.4 固定：题给「拉开 θ 角」→ angvel 或位置推导 | P2 | M | | ⬜ |
 | AG-15 | parse-schema springLayout | 仅水平振子：竖直弹簧（挂吊）布局分支（gravityScale=1, 平衡位拉伸 mg/k） | P2 | L | | ⬜ |
 | AG-16 | parse-schema rotationLayout | r0=0.7 固定：题给初始半径（slider position）推导 | P2 | S | | ⬜ |
 | AG-17 | parse-schema 天体 G | plan.G 缺省按 1 推断速度：若质量量级真实（≤1e3）且无 G → uncertain 提示 G 可能未按教学缩放 | P2 | S | | ⬜ |
-| AG-18 | parse-schema box 尺寸 | 题给木块尺寸被忽略（0.3 立方固定）：RANGES+prompt 加 sx/sy/sz，layout 应用 | P1 | M | | ⬜ |
-| AG-19 | parse-schema cylinder 高 | given.height 有 range 但 layout 忽略：应用 | P1 | S | | ⬜ |
-| AG-20 | parse-schema ground 尺寸 | ground 固定 10×8：given.length/width 应用（抛体需 30 宽） | P1 | S | | ⬜ |
-| AG-21 | parse-schema ramp 宽 | 坡宽默认 0.5 vs 球半径大时侧翻跌落：width=max(0.5, 2.2×maxBallRadius) | P1 | S | | ⬜ |
+| AG-18 | parse-schema box 尺寸 | 题给木块尺寸被忽略（0.3 立方固定）：RANGES+prompt 加 sx/sy/sz，layout 应用 | P1 | M | | ✅ B8：box 尺寸透传 sx/sy/sz+落地高度按 sy/2（单测锚） |
+| AG-19 | parse-schema cylinder 高 | given.height 有 range 但 layout 忽略：应用 | P1 | S | | ✅ B8：cylinder 题给 height 生效 |
+| AG-20 | parse-schema ground 尺寸 | ground 固定 10×8：given.length/width 应用（抛体需 30 宽） | P1 | S | | ✅ B8：ground 题给 length/width 生效 |
+| AG-21 | parse-schema ramp 宽 | 坡宽默认 0.5 vs 球半径大时侧翻跌落：width=max(0.5, 2.2×maxBallRadius) | P1 | S | | ✅ B8：坡宽 ≥2.2×最大球半径（单测锚） |
 | AG-22 | parse-schema 对撞间距 | 1.6m 固定：按相对速度放大（v>3 时间距 2.4）防 needT 截断 | P2 | S | | ⬜ |
 | AG-23 | explain.js explainProjectile | 落地阈值 y≤0.16 硬编码（半径 0.15 假设）：用 doc 球半径+地面顶面高 | P1 | S | | ⬜ |
 | AG-24 | explain.js explainProjectile | needT 2.5s 固定：tFlight×1.5+0.5 动态 | P1 | S | | ⬜ |
@@ -383,13 +383,13 @@
 | AG-27 | explain.js explainSpring | Ttheory 只用球质量：注明理想弹簧假设（文案）✓ 已有；补悬挂质量校正决策不做 | P3 | S | | ⬜ |
 | AG-28 | explain.js explainAtwood | aFit=2d/t² 假设静止起跑：题给初速时三点二次拟合 | P2 | M | | ⬜ |
 | AG-29 | workbench atwoodInfo | heavyDrop 死行（×0）：删除 | P0 | S | | ✅ B1：删 heavyDrop 死行 |
-| AG-30 | serve.py PARSE_PROMPT | 无少样本示例：附 1 个紧凑示例（斜面 JSON 单行）提升一次通过率 | P1 | M | ⚠ 输出风格漂移需 fixture 回归 | ⬜ |
+| AG-30 | serve.py PARSE_PROMPT | 无少样本示例：附 1 个紧凑示例（斜面 JSON 单行）提升一次通过率 | P1 | M | ⚠ 输出风格漂移需 fixture 回归 | ✅ B8：prompt 附紧凑斜面示例（真实验证 2/2 过，incline 29s→8s） |
 | AG-31 | serve.py temperature | 0.2 固定：实验 0.1（结构化输出更稳）真实抽查对比后定 | P2 | S | ⚠ 调用预算 | ⬜ |
-| AG-32 | serve.py prompt 实体数 | 无上限：补「实体不超过 12 个」防跑题长输出 | P1 | S | | ⬜ |
-| AG-33 | serve.py prompt 数值型 | 未强调「数值必须是 JSON 数字不要字符串」：补一句 | P1 | S | | ⬜ |
+| AG-32 | serve.py prompt 实体数 | 无上限：补「实体不超过 12 个」防跑题长输出 | P1 | S | | ✅ B8：实体数上限 12 写入 prompt |
+| AG-33 | serve.py prompt 数值型 | 未强调「数值必须是 JSON 数字不要字符串」：补一句 | P1 | S | | ✅ B8：数值必须是 JSON 数字写入 prompt |
 | AG-34 | serve.py response_format | 未尝试 json 模式：探测 step_plan 支持 response_format=json_object 则启用 | P2 | M | | ⬜ |
 | AG-35 | serve.py 图片尺寸 | 1400 上限：文字密集竖照（长题）上限放宽 1800 竖向：客户端按宽高比分支 | P2 | S | ⚠ 请求体 | ⬜ |
-| AG-36 | serve.py 重试 | 上游 5xx/超时无自动重试 1 次（服务端侧）：幂等可重试（连 AG 客户端 FEEL-45 二选一，先客户端） | P2 | S | | ⬜ |
+| AG-36 | serve.py 重试 | 上游 5xx/超时无自动重试 1 次（服务端侧）：幂等可重试（连 AG 客户端 FEEL-45 二选一，先客户端） | P2 | S | | ✅ B8：随 FEEL-45 客户端侧实现（服务端重试不做，避免双份） |
 | AG-37 | serve.py 超时 | 90s 长：视觉思考流确实长；保持（记录决策） | P3 | S | | ⬜ |
 | AG-38 | workbench parseQuestion | fetch 无 AbortController 超时：100s AbortController（UI-17 取消复用） | P1 | S | | ✅ B3：fetchParse + AbortController 100s 超时+专属文案 |
 | AG-39 | workbench adoptServerParse | confidence<0.35 低置信无警示：banner 提示「模型置信度低，请逐项核对」 | P1 | S | | ✅ B3：confidence<0.35 警示进 warnings 区 |
@@ -415,12 +415,12 @@
 | AG-59 | parse-schema celestial 恢复 | r<1e-6 && speed>0 反推 ✓；position 完全缺失且速度 0：落默认 r=3+assumption ✓ 已兜；补 errors 提示 | P2 | S | | ⬜ |
 | AG-60 | parse-schema 光滑推断 | friction 注入 ✓ 推断徽标 ✓；粗糙语义（「粗糙」「摩擦因数 μ=0.5」）已有显式 friction ✓；无项 | P3 | S | | ⬜ |
 | AG-61 | parse-schema RANGES | momentOfInertia 两拼写 ✓；补 damping/长度类键？ 决策不加（防编造） | P3 | S | | ⬜ |
-| AG-62 | serve.py prompt 天体 | G/position/radius 语义 ✓ 已修；补「卫星速度方向垂直于位置连线」一句（圆轨道图示常见歧义） | P1 | S | | ⬜ |
-| AG-63 | serve.py prompt 铰链 | 复摆提示缺（杆长写 length、锚点 position）：补一句 kind=hinge 规则 | P1 | S | | ⬜ |
-| AG-64 | serve.py prompt 抛体 | 无专项规则（初速 vx/vy 语义）：补「抛体题球 given.velocity=[vx,vy,0]」 | P1 | S | | ⬜ |
+| AG-62 | serve.py prompt 天体 | G/position/radius 语义 ✓ 已修；补「卫星速度方向垂直于位置连线」一句（圆轨道图示常见歧义） | P1 | S | | ✅ B8：天体速度垂直位置连线规则 |
+| AG-63 | serve.py prompt 铰链 | 复摆提示缺（杆长写 length、锚点 position）：补一句 kind=hinge 规则 | P1 | S | | ✅ B8：hinge 布局规则（杆=box+length，锚=box/ground+position） |
+| AG-64 | serve.py prompt 抛体 | 无专项规则（初速 vx/vy 语义）：补「抛体题球 given.velocity=[vx,vy,0]」 | P1 | S | | ✅ B8：抛体规则（单球 velocity=[vx,vy,0]+position） |
 | AG-65 | workbench buildChangePreview | attach 显示 k=—：rope 显示 绳长；✓小改 | P3 | S | | ⬜ |
-| AG-66 | workbench PEDIT | cylinder 无 height 行、box 无尺寸行（AG-18 联动补） | P1 | S | | ⬜ |
-| AG-67 | workbench PEDIT celestial | mass 上限 1e6 vs registry 检查器 1e4：对齐 1e6（质量范围一致化） | P1 | S | | ⬜ |
+| AG-66 | workbench PEDIT | cylinder 无 height 行、box 无尺寸行（AG-18 联动补） | P1 | S | | ✅ B8：PEDIT 补 box 长/宽/高+cylinder 高 |
+| AG-67 | workbench PEDIT celestial | mass 上限 1e6 vs registry 检查器 1e4：对齐 1e6（质量范围一致化） | P1 | S | | ✅ B8：检查器质量上限对齐 1e6 |
 | AG-68 | parse-schema 速度范围 | velocity 无量级校验（1000m/s 也收）：范围 ±100 clamp+警告 | P2 | S | | ⬜ |
 | AG-69 | parse-schema angvel | 同上 ±100 | P2 | S | | ⬜ |
 | AG-70 | workbench loadParse | 外部注入通道 ✓（回归用）；无项 | P3 | S | | ⬜ |
@@ -428,7 +428,7 @@
 | AG-72 | workbench 解析并发 | 双通道同时 parse 无互斥：busy 期 btnParseText 禁用（防双计费） | P1 | S | | ✅ B3：parseBusy 三通道互斥 |
 | AG-73 | serve.py 线程 | 并发 parse 多线程 ✓（daemon 见 PER-45）；无 key 早退 ✓ | P3 | S | | ⬜ |
 | AG-74 | serve.py 错误分类 | 401/429 ✓；500/503 区分文案 | P2 | S | | ⬜ |
-| AG-75 | serve.py 健康检查 | 无 /api/status：GET 返回 {key:bool,model}，UI 顶栏 key chip（绿/灰） | P1 | M | ⚠ 不回显 key | ⬜ |
+| AG-75 | serve.py 健康检查 | 无 /api/status：GET 返回 {key:bool,model}，UI 顶栏 key chip（绿/灰） | P1 | M | ⚠ 不回显 key | ✅ B8：/api/status 探针（只回布尔）+无 key boot 提示 |
 | AG-76 | workbench 错误文案 | 「解析服务连接失败（超时）」✓；补建议动作（检查代理/重试） | P2 | S | | ⬜ |
 | AG-77 | workbench 采纳后 | plan 持久 ✓ 重解析覆盖 ✓；无项 | P3 | S | | ⬜ |
 | AG-78 | workbench 混合天体 | 复用匹配 celestial 已有天体时 transform 平面化 ✓ 统一走 planToOverrides；无项 | P3 | S | | ⬜ |

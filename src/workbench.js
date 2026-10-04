@@ -1194,7 +1194,7 @@ function renderInspector() {
   sel.onchange = () => { e.physics.body = sel.value; patchPhysics(e, '切换刚体类型'); renderInspector(); };
   grpPh.appendChild(bodyRow);
 
-  numRow(grpPh, '质量', 'kg', e.physics.mass, 0.1, (v) => { e.physics.mass = v; patchPhysics(e, '改质量'); }, { min: 0.01, max: 10000 });
+  numRow(grpPh, '质量', 'kg', e.physics.mass, 0.1, (v) => { e.physics.mass = v; patchPhysics(e, '改质量'); }, { min: 0.01, max: 1000000 });   // 上限与 Agent 评审表单对齐（AG-67）
   numRow(grpPh, '摩擦系数', '', e.physics.friction, 0.05, (v) => { e.physics.friction = v; patchPhysics(e, '改摩擦'); }, { min: 0, max: 2 });
   numRow(grpPh, '弹性系数', '', e.physics.restitution, 0.05, (v) => { e.physics.restitution = v; patchPhysics(e, '改弹性'); }, { min: 0, max: 1 });
   if (e.physics.body === 'dynamic') {
@@ -2062,10 +2062,16 @@ const PEDIT = {
     ['radius', '半径', 'm', 0.15, [0.01, 2]],
     ['friction', '摩擦', '', 0.3, [0, 2]],
   ],
-  box: [['mass', '质量', 'kg', 1, [0.01, 10000]]],
+  box: [
+    ['mass', '质量', 'kg', 1, [0.01, 10000]],
+    ['length', '长', 'm', 0.3, [0.02, 10]],
+    ['width', '宽', 'm', 0.3, [0.02, 10]],
+    ['height', '高', 'm', 0.3, [0.02, 10]],
+  ],
   cylinder: [
     ['mass', '质量', 'kg', 1, [0.01, 10000]],
     ['radius', '半径', 'm', 0.12, [0.01, 2]],
+    ['height', '高', 'm', 0.3, [0.02, 8]],
   ],
   ground: [],
   pulley: [],
@@ -2129,6 +2135,12 @@ function bindAgentPanel() {
   $('btnRunExplain').onclick = () => runAndExplain();
   bindCropEvents();
   setAgentStage('idle', '未开始：上传/拍照题目图片，或用下方示例数据');
+  // 无 Key 探针（AG-75）：boot 时问一次服务端，不回显 key 只拿布尔——首用教师不再对着 503 猜
+  fetch('/api/status').then((r) => r.json()).then((st) => {
+    if (st && st.ok && !st.key) {
+      setAgentStage('idle', '未开始：未配置解析 Key，可手动搭建或载入示例数据（配置后可拍照解析）');
+    }
+  }).catch(() => { /* 服务不可用时保持默认文案（w3 断言依赖） */ });
 }
 
 // ============ Agent 面板当前任务（阶段徽标状态机） ============
@@ -2344,6 +2356,11 @@ async function fetchParse(url, body) {
   }
 }
 
+// 上游瞬时失败（502 族：5xx/网关/解析内容异常）自动重试一次；确定性失败（400/413/503 无 key）不重试
+function isRetryableParseError(errMsg) {
+  return typeof errMsg === 'string' && errMsg.startsWith('解析服务');
+}
+
 async function parseQuestion() {
   if (parseBusy) return;
   if (!agentImageDataUrl) { setParseStatus('请先上传或拍照题目图片', true); return; }
@@ -2353,8 +2370,11 @@ async function parseQuestion() {
   setAgentStage('parsing', '正在解析题目…');
   setParseStatus(`正在解析${tag}（step-5-preview 视觉模型）…`, false, true);
   try {
-    const resp = await fetchParse('/api/parse-question', { image: dataUrl });
-    const out = await resp.json();
+    let out = await (await fetchParse('/api/parse-question', { image: dataUrl })).json();
+    if (!out.ok && isRetryableParseError(out.error)) {
+      setParseStatus(`首次解析失败（${out.error}），自动重试一次…`, false, true);
+      out = await (await fetchParse('/api/parse-question', { image: dataUrl })).json();
+    }
     if (!out.ok) { setAgentStage('error', '解析失败'); setParseStatus('解析失败：' + out.error + '（可重试，或用下方示例数据）', true); return; }
     adoptServerParse(out);
   } catch (e) {
@@ -2372,8 +2392,11 @@ async function parseTextQuestion() {
   setAgentStage('parsing', '正在解析文字要求…');
   setParseStatus('正在解析文字要求（step-5-preview）…', false, true);
   try {
-    const resp = await fetchParse('/api/parse-text', { text });
-    const out = await resp.json();
+    let out = await (await fetchParse('/api/parse-text', { text })).json();
+    if (!out.ok && isRetryableParseError(out.error)) {
+      setParseStatus(`首次解析失败（${out.error}），自动重试一次…`, false, true);
+      out = await (await fetchParse('/api/parse-text', { text })).json();
+    }
     if (!out.ok) { setAgentStage('error', '解析失败'); setParseStatus('解析失败：' + out.error + '（可重试）', true); return; }
     if (adoptServerParse(out)) {
       $('parseSrcBadge').textContent = 'step-5-preview·文字';
