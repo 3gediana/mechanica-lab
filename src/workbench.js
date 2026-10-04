@@ -398,6 +398,7 @@ function opDuplicate(id) {
 // ============ 模拟控制 ============
 function play() {
   if (mode === 'run' && !paused) return;
+  if (doc.entities.length === 0) toast('空场景：无实体可演化，从目录添加组件后再运行');
   mode = 'run'; paused = false;
   viewport.setGizmoEnabled(false);
   updateSimbarStatic();
@@ -434,7 +435,11 @@ function updateSimbarStatic() {
   }
   const chip = $('modeChip');
   chip.textContent = mode === 'edit' ? '编辑态' : (paused ? '暂停态' : '运行态');
-  chip.className = 'chip ' + (mode === 'edit' ? '' : (paused ? 'pause' : 'run'));
+  const dropped = runtime.dropped > 0.1;   // 性能欠载透明化（UI-61）
+  chip.className = 'chip ' + (mode === 'edit' ? '' : (paused ? 'pause' : 'run')) + (dropped ? ' warn' : '');
+  chip.title = dropped
+    ? `性能欠载：已丢弃 ${runtime.dropped.toFixed(2)}s 模拟步（可降低时间倍率或关闭叠加层）`
+    : '';
   $('inspBody').querySelectorAll('input,select').forEach((el) => { el.disabled = mode === 'run'; });
 }
 
@@ -661,12 +666,41 @@ function onKey(e) {
     else if (k === 'd') { e.preventDefault(); if (selectedId) opDuplicate(selectedId); }
     return;
   }
+  if (e.key === '?') {
+    e.preventDefault();
+    $('helpOverlay').classList.toggle('on');
+    return;
+  }
+  if (e.code === 'Escape') {
+    const help = $('helpOverlay');
+    if (help.classList.contains('on')) { help.classList.remove('on'); return; }
+    if (viewport.boxSelectMode) { viewport.setBoxSelect(false); $('btnBoxSel').classList.remove('hot'); return; }
+    viewport.hideGhost();
+    return;
+  }
   if (e.code === 'Space') { e.preventDefault(); mode === 'run' ? pauseToggle() : play(); }
   else if (e.code === 'KeyW') setGizmoMode('translate');
   else if (e.code === 'KeyE') setGizmoMode('rotate');
   else if (e.code === 'KeyF') viewport.focusOn(selectedId ? runtime.binds.get(selectedId).mesh : null);
   else if (e.code === 'KeyR') resetSim();
   else if (e.code === 'Delete' || e.code === 'Backspace') { if (selectedId) opRemoveEntity(selectedId); }
+  else if (e.code.startsWith('Arrow') && selectedId && mode === 'edit') {
+    // 方向键微调（FEEL-4）：0.1m 步进，Shift=1m；写回文档走 undo 主通道
+    const step = e.shiftKey ? 1 : 0.1;
+    const bind = runtime.binds.get(selectedId);
+    const ent = getEntity(doc, selectedId);
+    if (!bind || !ent) return;
+    e.preventDefault();
+    const p = bind.mesh.position;
+    if (e.code === 'ArrowLeft') p.x -= step;
+    else if (e.code === 'ArrowRight') p.x += step;
+    else if (e.code === 'ArrowUp') p.z -= step;
+    else if (e.code === 'ArrowDown') p.z += step;
+    viewport.applyGizmoToEntity(ent);
+    rebuildAll();
+    commitChange('微调 ' + ent.name);
+    renderInspector();
+  }
 }
 
 // ============ 左侧目录 / 大纲 ============
@@ -2051,7 +2085,31 @@ function selectTab(which) {
 
 function bindAgentPanel() {
   const fileInput = $('agentFile');
-  $('dropZone').onclick = () => fileInput.click();
+  const dz = $('dropZone');
+  dz.onclick = () => fileInput.click();
+  // 拖拽上传（UI-3）：教师传题高频路径，drop 与点击同一条 readQuestionImage 链
+  dz.addEventListener('dragover', (ev) => { ev.preventDefault(); dz.style.borderColor = 'rgba(217,164,65,.6)'; dz.style.color = 'var(--text)'; });
+  dz.addEventListener('dragleave', () => { dz.style.borderColor = ''; dz.style.color = ''; });
+  dz.addEventListener('drop', (ev) => {
+    ev.preventDefault();
+    dz.style.borderColor = ''; dz.style.color = '';
+    const f = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
+    if (!f) return;
+    if (!f.type.startsWith('image/')) { setParseStatus('只支持图片文件（PNG/JPG）', true); return; }
+    readQuestionImage(f);
+  });
+  // Ctrl+V 粘贴截图（UI-3）：截图工具/微信复制图片后直接粘贴
+  window.addEventListener('paste', (ev) => {
+    const items = ev.clipboardData && ev.clipboardData.items;
+    if (!items) return;
+    for (const it of items) {
+      if (it.type && it.type.startsWith('image/')) {
+        const blob = it.getAsFile();
+        if (blob) { readQuestionImage(blob); ev.preventDefault(); }
+        return;
+      }
+    }
+  });
   $('btnCamera').onclick = () => startCamera();
   $('btnCapture').onclick = () => captureFrame();
   $('btnCamCancel').onclick = () => { stopCamera(); $('dropZone').style.display = 'block'; setParseStatus('已取消拍照'); };
@@ -2078,7 +2136,7 @@ function setAgentStage(stage, text) {
   const STAGES = { idle: '未开始', uploaded: '图片就绪', parsing: '解析中', parsed: '待确认', building: '建场中', built: '已建场', explaining: '运行解释中', explained: '已解释', error: '出错' };
   const el = $('taskStage'), tx = $('taskText');
   if (!el) return;
-  el.textContent = STAGES[stage] || stage;
+  el.innerHTML = (STAGES[stage] || stage) + (stage === 'parsing' || stage === 'explaining' ? '<span class="spinner"></span>' : '');
   el.className = 'badge' + (stage === 'explained' ? ' given' : (stage === 'built' ? ' given' : (stage === 'error' ? '' : (stage === 'parsing' ? ' given' : ''))));
   if (text) tx.textContent = text;
   const opsEl = $('taskOps');
@@ -2328,7 +2386,11 @@ async function parseTextQuestion() {
   }
 }
 
-async function loadFixtureParse() { if (parseBusy) return; loadFixtureData('incline'); }
+async function loadFixtureParse() {
+  if (parseBusy) return;
+  const sel = document.getElementById('fixtureSel');
+  loadFixtureData((sel && sel.value) || 'incline');
+}
 
 async function loadFixtureData(name) {
   try {
@@ -2744,9 +2806,10 @@ function applyAgentPlanInner(M, reportCounts) {
   toast(`已按解析创建 ${created.length} 个实体${agentPlan.fixture ? '（示例数据）' : ''}`);
   agentPlanApplied = true;
   setAgentStage('built', `已建场 ${created.length} 实体，可运行并生成解释`);
-  // 建场成功即开放"运行并生成解释"（解释体在运行后填充）
+  // 建场成功即开放"运行并生成解释"（解释体在运行后填充）。
+  // 不再强制跳检查器页签（UI-48）：操作明细就在本页签，跳走会打断核对；相机自动取景代偿（UI-49）
   $('explainGrp').style.display = 'block';
-  selectTab('inspector');
+  viewport.focusScene();
 }
 
 function resetAgentPanel() {

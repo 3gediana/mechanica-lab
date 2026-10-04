@@ -42,6 +42,21 @@ export class Viewport {
   }
 
   // ============ 选中对象定位：相机 target/距离平滑移向实体（第六章「选中对象定位」） ============
+  // 场景全景取景（UI-49）：建场/载入后把相机平滑移到全部实体的包围盒
+  focusScene() {
+    const box = new THREE.Box3();
+    let any = false;
+    for (const m of this.scene.children) {
+      if (!m.userData || !m.userData.entityId || !m.visible) continue;
+      box.expandByObject(m);
+      any = true;
+    }
+    if (!any) return;
+    const center = box.getCenter(new THREE.Vector3());
+    const size = Math.max(box.getSize(new THREE.Vector3()).length(), 1);
+    this._focusAnim = { target: center, dist: Math.max(size * 1.6, 2.2) };
+  }
+
   focusOn(mesh) {
     if (!mesh) return;   // 无选中时聚焦是安全空操作（与 focus() 同守卫）
     const box = new THREE.Box3().setFromObject(mesh);

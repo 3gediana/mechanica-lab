@@ -97,8 +97,8 @@
 |---|---|---|---|---|---|---|
 | UI-1 | index.html .comp-item | border-radius 4px 违反「直角 hairline 2px」语言（thumb 3px 同）：统一 2px | P1 | S | | ⬜ |
 | UI-2 | index.html 全局 | 无 :focus-visible 键盘焦点环：加 accent 色 1px 焦点样式（不动默认 outline 场景） | P1 | S | | ⬜ |
-| UI-3 | index.html #dropZone | 仅点击上传，无拖拽/无粘贴：补 dragover 高亮+drop 载入、Ctrl+V 粘贴截图（教师传题高频路径） | P0 | M | | ⬜ |
-| UI-4 | index.html #btnFixtureParse | fixture 按钮只载入 incline 一种，实际有 10 份 fixture：改成下拉选择（无 Key 用户可看全部题型链路） | P1 | S | | ⬜ |
+| UI-3 | index.html #dropZone | 仅点击上传，无拖拽/无粘贴：补 dragover 高亮+drop 载入、Ctrl+V 粘贴截图（教师传题高频路径） | P0 | M | | ✅ B6：dropZone 拖拽上传（dragover/drop 校验 image/*）+ Ctrl+V 粘贴截图 |
+| UI-4 | index.html #btnFixtureParse | fixture 按钮只载入 incline 一种，实际有 10 份 fixture：改成下拉选择（无 Key 用户可看全部题型链路） | P1 | S | | ✅ B6：fixtureSel 下拉 10 题型，btnFixtureParse 读选择器（默认 incline 兼容 w3/w4） |
 | UI-5 | index.html #toast | 无类型语义（成功/警告同色）：toast(msg, kind) 警告用 danger 描边 | P2 | S | | ⬜ |
 | UI-6 | index.html #errbar | 无关闭按钮：补 × | P2 | S | | ⬜ |
 | UI-7 | index.html #sceneName | 130px 定宽长名截断无 tooltip：title 同步值+自适应宽度 | P2 | S | | ⬜ |
@@ -110,7 +110,7 @@
 | UI-13 | index.html #veil 失败态 | 加载失败无重试按钮：fail() 加「重试」reload | P1 | S | | ⬜ |
 | UI-14 | index.html 图标系统 | 纯文字按钮一致性 ✓（生死线：不上 emoji）；播放/暂停可用 CSS 三角/双竖条 glyph 增强辨识（需实机截图验证不廉价） | P3 | M | ⚠ 廉价感红线 | ⬜ |
 | UI-15 | index.html btnRec | 录制态仅文字变色：加 6px 琥珀呼吸圆点（CSS animation，克制） | P2 | S | | ⬜ |
-| UI-16 | workbench setAgentStage | 解析中无 spinner：badge 加 CSS 转圈（1 个元素，不引入图标库） | P1 | S | | ⬜ |
+| UI-16 | workbench setAgentStage | 解析中无 spinner：badge 加 CSS 转圈（1 个元素，不引入图标库） | P1 | S | | ✅ B6：parsing/explaining 徽标内嵌 CSS spinner（琥珀弧线 1s） |
 | UI-17 | workbench parse | 解析进行中无取消：AbortController 挂 btnParse 变「取消」 | P1 | M | | ⬜ |
 | UI-18 | workbench #agentTextReq | 无 Cmd/Ctrl+Enter 快捷解析：textarea keydown | P1 | S | | ⬜ |
 | UI-19 | workbench #catalogSearch | 无清空按钮、无结果计数：补 × 与 「n 项」 | P2 | S | | ⬜ |
@@ -142,20 +142,20 @@
 | UI-45 | workbench explainGrp | 无复制按钮：summary+数据表 一键复制纯文本（教师备课） | P1 | S | | ⬜ |
 | UI-46 | workbench explain 数值 | toFixed 位数不一（2/3 混用）：统一 3 位小数规范 | P2 | S | | ⬜ |
 | UI-47 | workbench runAndExplain | 11s 天体解释无进度：badge 百分比（simT/needT） | P1 | S | | ⬜ |
-| UI-48 | workbench applyAgentPlan | 建场后强制跳检查器页签：留在 Agent 页签+新按钮「查看场景」跳转（避免丢失操作明细） | P1 | S | ⚠ w2 流程断言 tab 切换 | ⬜ |
-| UI-49 | workbench 建场后 | 不自动取景：建场完成 viewport.focus 场景包围盒 | P1 | S | | ⬜ |
+| UI-48 | workbench applyAgentPlan | 建场后强制跳检查器页签：留在 Agent 页签+新按钮「查看场景」跳转（避免丢失操作明细） | P1 | S | ⚠ w2 流程断言 tab 切换 | ✅ B6：建场后留 Agent 页签（明细不被打断），相机自动取景代偿（w2/p1 断言兼容） |
+| UI-49 | workbench 建场后 | 不自动取景：建场完成 viewport.focus 场景包围盒 | P1 | S | | ✅ B6：viewport.focusScene() 包围盒平滑取景，建场完成调用 |
 | UI-50 | workbench changePreview | 无全选/全不选：顶部两个小链接 | P2 | S | | ⬜ |
 | UI-51 | workbench changePreview | 行点击不高亮对应实体：点击行 selectEntity（新建项建场后才能选，仅更新项可联动） | P3 | M | | ⬜ |
 | UI-52 | workbench 解析实体行 | 实体卡片无类型图标色条：左 2px 类型色条（球蓝/坡琥珀/…复用轨迹 palette） | P3 | S | ⚠ 廉价感 | ⬜ |
 | UI-53 | index.html #replayBar | 原生 range 观感突兀：自定义 track/thumb（2px 线+方形 thumb，直角语言） | P2 | M | | ⬜ |
 | UI-54 | workbench stopReplay | 回放结束静默回编辑态：toast 提示+末帧保留 0.5s | P2 | S | | ⬜ |
 | UI-55 | workbench toggleFrameRec | 30s 录制上限无倒计时：btnRec 文案变 「录制 23s」 | P2 | S | | ⬜ |
-| UI-56 | workbench 快捷键 | 无帮助浮层：? 键弹快捷键速查（半透明面板，Esc 关） | P1 | S | | ⬜ |
+| UI-56 | workbench 快捷键 | 无帮助浮层：? 键弹快捷键速查（半透明面板，Esc 关） | P1 | S | | ✅ B6：? 开关快捷键速查浮层；Esc 逐级关闭（浮层/框选/ghost） |
 | UI-57 | index.html title | 不随场景名变：document.title = 名称·MECHANICA | P2 | S | | ⬜ |
 | UI-58 | 无 favicon | 标签页默认图标：SVG favicon（M 字母 hairline 风格，data URI） | P2 | S | | ⬜ |
 | UI-59 | workbench 切预置 | selPreset 归空后无当前预置指示：modeChip 旁 chip 显示来源（预置名/Agent/手工） | P3 | S | | ⬜ |
 | UI-60 | workbench 实体计数 | roN 含传感器/绳：细分 「实体 5 · 约束 2」 | P2 | S | | ⬜ |
-| UI-61 | workbench 丢步提示 | runtime.dropped 从未展示：>0.1s 时 modeChip 警示色+title（性能透明） | P1 | S | | ⬜ |
+| UI-61 | workbench 丢步提示 | runtime.dropped 从未展示：>0.1s 时 modeChip 警示色+title（性能透明） | P1 | S | | ✅ B6：runtime.dropped>0.1s 时 modeChip warn 色+title 丢秒数 |
 | UI-62 | workbench 读数千分位 | 大数无分组：toLocaleString 用于质量/能量读数 | P3 | S | | ⬜ |
 | UI-63 | workbench autosave | 无保存指示：右上 2s 「已自动保存」微提示（低频闪烁，克制） | P3 | S | | ⬜ |
 | UI-64 | workbench beforeunload | 无未保存守卫：autosave 已兜底；不加（决策记录） | P3 | S | | ⬜ |
@@ -177,7 +177,7 @@
 | UI-80 | workbench renderParseResult 警告 | warnings 红 hint ✓；多条时无分隔：join '; ' 已有 ✓ | P3 | S | | ⬜ |
 | UI-81 | workbench cropHint | 文案 ✓；按钮下划线虚线风格 ✓ | P3 | S | | ⬜ |
 | UI-82 | index.html .chip | pause/run 色 ✓；无项 | P3 | S | | ⬜ |
-| UI-83 | workbench 空场景运行 | 无实体运行无提示：toast「空场景无可演化实体」 | P1 | S | ⚠ w1 空场景断言 | ⬜ |
+| UI-83 | workbench 空场景运行 | 无实体运行无提示：toast「空场景无可演化实体」 | P1 | S | ⚠ w1 空场景断言 | ✅ B6：空场景运行 toast 引导（不阻断，w1 A17 兼容） |
 | UI-84 | workbench 空态 inspEmpty | 引导文案 ✓ 无项 | P3 | S | | ⬜ |
 | UI-85 | workbench agentOps | 明细 ✓；成功/失败色 ✓ | P3 | S | | ⬜ |
 | UI-86 | index.html 按钮 active | translateY(1px) ✓ 手感一致 | P3 | S | | ⬜ |
@@ -260,9 +260,9 @@
 | FEEL-1 | index.html number input | 滚轮误改数值（聚焦后滑动）：input[type=number] wheel preventDefault（blur 后恢复） | P0 | S | | ✅ B4：wheel 守卫（number 输入聚焦时 preventDefault） |
 | FEEL-2 | workbench opDuplicate | 副本与原件完全重叠：offset x+0.25/spawn 重摆位 | P1 | S | ⚠ p 系列位置断言 | ✅ B4：副本 x+0.25 错位（w1 计数断言不受影响） |
 | FEEL-3 | workbench F 键 | viewport.focus 瞬跳 vs 大纲 ⌖ focusOn 平滑：统一 F=focusOn 平滑版 | P1 | S | | ✅ B4：F/btnFocus 统一 focusOn 平滑版+null 守卫 |
-| FEEL-4 | workbench 方向键 | 无微调：←→↑↓ 移动选中 0.1m（Shift=1m，Alt=0.01m），运行态禁用 | P1 | M | ⚠ 与输入框焦点冲突守卫 | ⬜ |
+| FEEL-4 | workbench 方向键 | 无微调：←→↑↓ 移动选中 0.1m（Shift=1m，Alt=0.01m），运行态禁用 | P1 | M | ⚠ 与输入框焦点冲突守卫 | ✅ B6(追加)：方向键微调 0.1m/Shift 1m，走 gizmo 提交+undo 主通道 |
 | FEEL-5 | workbench triRow | 三个输入各 commit 一次（3 个 undo 步）：行级合并单 undo（延迟 100ms 聚合） | P1 | M | ⚠ undo 语义回归 | ⬜ |
-| FEEL-6 | workbench onKey | 无 Esc 全局：Esc=关相机/退框选/清 ghost/关帮助浮层（按优先级） | P1 | S | | ⬜ |
+| FEEL-6 | workbench onKey | 无 Esc 全局：Esc=关相机/退框选/清 ghost/关帮助浮层（按优先级） | P1 | S | | ✅ B6(追加)：Esc 全局级联（随 UI-56） |
 | FEEL-7 | viewport ghost | ghost 只能点目录放置：canvas 点击=在 ghost 当前位放置（放置模式），Esc 退出 | P1 | M | ⚠ 点击与选择冲突：ghost 激活时点击优先放置 | ⬜ |
 | FEEL-8 | viewport ghost | 放置中不可旋转（R 已被重置占用）：Q/E 旋转 ghost 15° | P2 | S | | ⬜ |
 | FEEL-9 | workbench cycleSnap | 切吸附档位立即重定位选中实体（副作用突兀）：改为仅设档+toast，重吸附只在 gizmo 释放时 | P1 | S | ⚠ p24 吸附断言 | ✅ B4：档位切换仅提示；实体吸附移到 gizmo 释放（p11/p24 绿） |
@@ -544,7 +544,7 @@
 | ENG-24 | 命名规范 | M（材质）/doc/mode 等过短全局：仅新代码规范，旧名不动（回归成本） | P3 | S | | ⬜ |
 | ENG-25 | JSDoc | MECH API 无类型注解：JSDoc 注释 key 方法（自文档化） | P2 | M | | ⬜ |
 | ENG-26 | node 单测 | parse-schema/explain/scene-doc 纯模块：test/unit/*.test.mjs node --test（AG-50/51 载体） | P1 | M | | ✅ B1(部分)：test/unit 落地；scene-doc 单测未做 |
-| ENG-27 | 测试 waitForTimeout | 402 处固定等待（headless 抖动隐患）：仅对新增/翻红用例改 waitForFunction（全量替换回归成本不可控，记录债） | P3 | L | ⚠ 债务管理 | ✅ B5(追加)：p7/p8/p15/p19/p26/p30 固定等待全改 waitForFunction/事件式判定 |
+| ENG-27 | 测试 waitForTimeout | 402 处固定等待（headless 抖动隐患）：仅对新增/翻红用例改 waitForFunction（全量替换回归成本不可控，记录债） | P3 | L | ⚠ 债务管理 | ✅ B6(追加)：p8 能量条两段式断言（宽度→数据层回退）+selectOption 改显式 dispatch（根因规避） |
 | ENG-28 | shots 目录 | 磁盘增长：测试 runner 前清 shots/w* 子目录（git 已忽略） | P2 | S | | ⬜ |
 | ENG-29 | serve.py 重启编排 | w3 杀服场景重启复杂：runner 脚本 ensure-server（netstat 探活+按需起）| P2 | M | | ⬜ |
 | ENG-30 | README | 优化后同步：测试章节补 w 系列与 unit、运行方式 | P1 | S | | ⬜ |

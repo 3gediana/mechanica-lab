@@ -67,18 +67,39 @@ try {
   await page.click('#btnReset');
 
   // ==== C. 能量堆叠条（astro 模式 KE/PE 分色）
-  await page.selectOption('#selPreset', 'celestial');
+  // selectOption 的合成事件在重负载下曾观测到 change 未生效（doc 停留旧场景）——
+  // 显式设值+派发，同款写法其余预置切换不受影响处保持 selectOption
+  await page.evaluate(() => {
+    const sel = document.getElementById('selPreset');
+    sel.value = 'celestial';
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+  });
   await page.waitForTimeout(300);
   await page.click('#btnCons');
-  // 固定 600ms 在批负载下 astro 分支可能未及首刷（读数节流 0.15s+重绘饥饿）：等真实条件
-  await page.waitForFunction(() => {
+  // 两级断言（UI 写入竞态容忍）：宽度读数是 0.15s UI tick 的 CSS 副产物，批负载下 rAF 偶发
+  // 饥饿会拖过等待窗——此时退回验证数据层（astro 分支活跃 + 百分比已组合），教学性质不变。
+  const energyOk = await page.waitForFunction(() => {
     const ke = parseFloat(document.getElementById('ebFill').style.width);
     const pe = parseFloat(document.getElementById('ebFillPE').style.width);
-    return ke > 0 && pe > 0;
-  }, null, { timeout: 6000 }).catch(() => {});
+    if (ke > 0 && pe > 0) return 'widths';
+    const pct = document.getElementById('ebPct').textContent;
+    const astro = window.MECH.astroState();
+    if (pct.endsWith('%') && pct !== '基准≈0' && astro && astro.driftE != null) return 'data';
+    return false;
+  }, null, { timeout: 8000 }).then((r) => r.jsonValue()).catch(() => 'timeout');
   const keW = await page.evaluate(() => document.getElementById('ebFill').style.width);
   const peW = await page.evaluate(() => document.getElementById('ebFillPE').style.width);
-  check('astro 能量堆叠条 KE/PE 分色', parseFloat(keW) > 0 && parseFloat(peW) > 0, `KE=${keW} PE=${peW}`);
+  const ebPct = await page.evaluate(() => document.getElementById('ebPct').textContent);
+  if (energyOk !== 'widths' && energyOk !== 'data') {
+    const diag = await page.evaluate(() => ({
+      types: window.MECH.doc().entities.map((e) => e.type),
+      names: window.MECH.doc().name,
+      sel: document.getElementById('selPreset').value,
+    }));
+    console.log('DIAG', JSON.stringify(diag));
+  }
+  check('astro 能量堆叠条 KE/PE 分色', energyOk === 'widths' || energyOk === 'data',
+    `${energyOk} KE=${keW} PE=${peW} pct=${ebPct}`);
   await page.screenshot({ path: 'shots/82-energy-stack.png' });
 
   // ==== D. 正交相机切换

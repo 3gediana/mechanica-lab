@@ -291,6 +291,22 @@
     opacity: 0; pointer-events: none; transition: opacity .25s;
   }
   #toast.on { opacity: 1; }
+  .chip.warn { color: var(--danger); border-color: rgba(201,106,90,.5); }
+  /* 解析中徽标的克制转圈（UI-16）：12px 琥珀弧线，1s 一圈 */
+  .spinner { display: inline-block; width: 9px; height: 9px; margin-left: 5px; vertical-align: -1px;
+    border: 1.5px solid rgba(217,164,65,.35); border-top-color: var(--accent); border-radius: 50%;
+    animation: mechspin 1s linear infinite; }
+  @keyframes mechspin { to { transform: rotate(360deg); } }
+  /* 快捷键速查浮层（UI-56）：Esc 或 ? 关闭 */
+  #helpOverlay { position: fixed; inset: 0; z-index: 55; display: none;
+    background: rgba(5,6,8,.72); align-items: center; justify-content: center; }
+  #helpOverlay.on { display: flex; }
+  #helpOverlay .card { background: var(--panel-solid); border: 1px solid var(--line-strong); border-radius: 2px;
+    padding: 18px 22px; min-width: 320px; max-width: 460px; }
+  #helpOverlay h2 { font-size: 11px; color: var(--accent); letter-spacing: .22em; font-weight: 500; margin-bottom: 12px; }
+  #helpOverlay table { border-collapse: collapse; width: 100%; }
+  #helpOverlay td { font-size: 11px; color: var(--dim); padding: 3px 0; }
+  #helpOverlay td.k { font-family: var(--mono); color: var(--text); padding-right: 18px; white-space: nowrap; }
 </style>
 <script type="importmap">
 {
@@ -374,7 +390,7 @@
     </div>
     <div class="grp">
       <div class="grp-h">题目图片</div>
-      <div id="dropZone">点击上传题目图片</div>
+      <div id="dropZone">点击上传题目图片（或拖拽图片到此 · Ctrl+V 粘贴截图）</div>
       <div class="btnrow" style="margin-top:6px">
         <button id="btnCamera">拍照</button>
       </div>
@@ -398,7 +414,21 @@
         </div>
       </div>
       <input type="file" id="agentFile" accept="image/*" style="display:none">
-      <div style="margin-top:8px"><button id="btnFixtureParse" style="appearance:none;background:none;border:none;padding:0;cursor:pointer;font-size:10px;color:var(--faint);letter-spacing:.06em;text-decoration:underline dotted">无 Key？载入本地示例解析数据（fixture，非真实模型输出）</button></div>
+      <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
+        <select id="fixtureSel" title="选择示例题型" style="appearance:none;background:transparent;border:1px solid var(--line);border-radius:2px;color:var(--dim);font-family:var(--mono);font-size:10px;padding:3px 6px;max-width:150px">
+          <option value="incline">斜面下滑</option>
+          <option value="momentum">一维对撞</option>
+          <option value="momentum2d">二维斜碰</option>
+          <option value="celestial">天体绕转</option>
+          <option value="spin">转台角动量</option>
+          <option value="spin-real">转台（转动惯量题给）</option>
+          <option value="spring">弹簧振子</option>
+          <option value="hinge">复摆（铰链杆）</option>
+          <option value="projectile">抛体运动</option>
+          <option value="atwood">阿特伍德机</option>
+        </select>
+        <button id="btnFixtureParse" style="appearance:none;background:none;border:none;padding:0;cursor:pointer;font-size:10px;color:var(--faint);letter-spacing:.06em;text-decoration:underline dotted">载入示例解析数据（fixture，非真实模型输出）</button>
+      </div>
       <div style="margin-top:10px;border-top:1px solid var(--line);padding-top:8px">
         <div class="k" style="font-size:10px;color:var(--faint);margin-bottom:4px">文字要求（混合搭建：按文字补充/调整当前场景）</div>
         <textarea id="agentTextReq" rows="3" placeholder="例：在现有斜面上放一个质量 2 kg 的小球，光滑无初速，从顶端释放…"
@@ -520,6 +550,25 @@
 
 <div id="toast"></div>
 <div id="errbar"></div>
+
+<div id="helpOverlay" title="按 Esc 关闭">
+  <div class="card">
+    <h2>快捷键速查</h2>
+    <table>
+      <tr><td class="k">空格</td><td>运行 / 暂停</td></tr>
+      <tr><td class="k">R</td><td>重置到初始态</td></tr>
+      <tr><td class="k">W / E</td><td>移动 / 旋转 gizmo</td></tr>
+      <tr><td class="k">F</td><td>聚焦选中对象</td></tr>
+      <tr><td class="k">Ctrl+Z / Ctrl+Shift+Z</td><td>撤销 / 重做</td></tr>
+      <tr><td class="k">Ctrl+D</td><td>复制选中对象</td></tr>
+      <tr><td class="k">Ctrl+S</td><td>保存场景 JSON</td></tr>
+      <tr><td class="k">Delete</td><td>删除选中对象</td></tr>
+      <tr><td class="k">方向键</td><td>微调选中对象位置（Shift 大步）</td></tr>
+      <tr><td class="k">?</td><td>打开 / 关闭本速查</td></tr>
+      <tr><td class="k">Esc</td><td>关闭浮层 / 退出框选</td></tr>
+    </table>
+  </div>
+</div>
 
 <div id="veil">
   <div class="brand">MECHANICA</div>
