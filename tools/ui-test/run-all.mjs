@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const P_ALL = Array.from({ length: 32 }, (_, i) => `p${i}`);
+const P_ALL = Array.from({ length: 33 }, (_, i) => `p${i}`);   // p0-p32（p32=R2 新预置冒烟）
 const W_NOAPI = ['w1-manual', 'w5-journey', 'w6-depth'];
 const W_API = ['w2-agent', 'w4-mixed', 'w7-presets-explain'];
 

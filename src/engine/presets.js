@@ -400,6 +400,1026 @@ export const PRESETS = {
       return doc;
     },
   },
+
+  // ========== 第二批教学预置（OPTIMIZATION-R2 MDL-16~40）==========
+  // 绳/弹簧均为 link 实体：attach=[实体A.id, 实体B.id]（两端锚点取刚体质心，runtime 建 rope/spring 关节）。
+  // 注意两类引擎口径（预置数值都按此校准）：
+  //   恢复系数/摩擦按两碰撞体的平均值合成 → 需要指定配对值时两侧设同值或按平均值反解；
+  //   rope 是 max-distance 约束（仅拉不推），spring 关节拉/推双向（不能当"分离式弹射器"直接连弹丸）。
+
+  pendulum: {
+    id: 'pendulum', label: '单摆',
+    build() {
+      const doc = createEmptyDoc('单摆：周期与摆长');
+      const seq = {};
+      const L = 1.2, th0 = 0.3;                       // 摆长 1.2 m，拉开 0.3 rad 静止释放
+      const anchor = createEntity('box', {
+        name: '悬点锚',
+        transform: { pos: [0, 2.5, 0], rot: [0, 0, 0] },
+        params: { sx: 0.2, sy: 0.2, sz: 0.2 },
+        physics: { body: 'fixed', friction: 0.8 },
+        render: { material: 'steelDark' },
+        source: 'preset',
+      }, seq);
+      const ball = createEntity('sphere', {
+        name: '摆球',
+        transform: { pos: [L * Math.sin(th0), 2.5 - L * Math.cos(th0), 0], rot: [0, 0, 0] },
+        params: { radius: 0.1 },
+        physics: {
+          body: 'dynamic', mass: 1, friction: 0.3, restitution: 0,
+          linvel: [0, 0, 0], angvel: [0, 0, 0],
+          linDamping: 0, angDamping: 0, gravityScale: 1,
+        },
+        render: { material: 'chrome' },
+        measured: true,
+        source: 'preset',
+      }, seq);
+      const rope = createEntity('rope', {
+        name: `绳 ${L.toFixed(2)}m`,
+        params: { length: L },
+        attach: [anchor.id, ball.id],
+        transform: { pos: [(0 + L * Math.sin(th0)) / 2, (2.5 + 2.5 - L * Math.cos(th0)) / 2, 0] },
+        source: 'preset',
+      }, seq);
+      doc.entities.push(anchor, ball, rope);
+      doc.meta.assumptions = [
+        '验证目标：小角单摆周期 T=2π√(L/g)=2π√(1.2/9.81)≈2.20 s（θ₀=0.3 rad 时精确解仅偏大约 0.03%）',
+        '质点摆理想化：摆球有限半径的复摆修正可忽略（r=0.1 ≪ L=1.2）',
+        '轻绳 max-distance 约束（只拉不推）：初始恰好张紧（球心到锚心=1.2 m）',
+      ];
+      return doc;
+    },
+  },
+
+  conical: {
+    id: 'conical', label: '圆锥摆',
+    build() {
+      const doc = createEmptyDoc('圆锥摆：稳定回转');
+      const seq = {};
+      const L = 1.0, th = Math.PI / 6, g = 9.81;      // 摆长 1 m，半顶角 30°
+      const v = Math.sqrt(g * L * Math.sin(th) * Math.tan(th));   // ≈1.683 m/s
+      const anchor = createEntity('box', {
+        name: '悬点锚',
+        transform: { pos: [0, 2.2, 0], rot: [0, 0, 0] },
+        params: { sx: 0.15, sy: 0.15, sz: 0.15 },
+        physics: { body: 'fixed', friction: 0.8 },
+        render: { material: 'steelDark' },
+        source: 'preset',
+      }, seq);
+      const ball = createEntity('sphere', {
+        name: '回转球',
+        transform: { pos: [L * Math.sin(th), 2.2 - L * Math.cos(th), 0], rot: [0, 0, 0] },
+        params: { radius: 0.05 },
+        physics: {
+          body: 'dynamic', mass: 0.5, friction: 0, restitution: 0,
+          linvel: [0, 0, -v], angvel: [0, 0, 0],
+          linDamping: 0, angDamping: 0, gravityScale: 1,
+        },
+        render: { material: 'chrome' },
+        measured: true,
+        source: 'preset',
+      }, seq);
+      const rope = createEntity('rope', {
+        name: `绳 ${L.toFixed(2)}m`,
+        params: { length: L },
+        attach: [anchor.id, ball.id],
+        transform: { pos: [L * Math.sin(th) / 2, (2.2 + 2.2 - L * Math.cos(th)) / 2, 0] },
+        source: 'preset',
+      }, seq);
+      doc.entities.push(anchor, ball, rope);
+      doc.meta.assumptions = [
+        '验证目标：圆锥摆稳定回转，θ=30° 所需切向速度 v=√(g·L·sinθ·tanθ)≈1.68 m/s，周期 T=2πρ/v≈1.87 s（ρ=L·sinθ=0.5 m）',
+        '绳为 max-distance 约束（仅拉不推）：回转半径存在约束半径内的微摆，长期轨道稳定',
+        '向心力由张力水平分量提供，竖直分量平衡重力（tanθ=v²/(g·ρ)）',
+      ];
+      return doc;
+    },
+  },
+
+  vertCircle: {
+    id: 'vertCircle', label: '竖直圆周（临界速度）',
+    build() {
+      const doc = createEmptyDoc('竖直圆周：临界速度对照');
+      const seq = {};
+      const L = 1.2, H = 2.4;                          // 绳长 1.2 m，锚高 2.4 m
+      const mk = (z, v, label, mat) => {
+        const a = createEntity('box', {
+          name: `锚 ${label}`,
+          transform: { pos: [0, H, z], rot: [0, 0, 0] },
+          params: { sx: 0.15, sy: 0.15, sz: 0.15 },
+          physics: { body: 'fixed', friction: 0.8 },
+          render: { material: 'steelDark' },
+          source: 'preset',
+        }, seq);
+        const b = createEntity('sphere', {
+          name: `圆周球（${label}，v=${v.toFixed(1)}）`,
+          transform: { pos: [0, H - L, z], rot: [0, 0, 0] },
+          params: { radius: 0.08 },
+          physics: {
+            body: 'dynamic', mass: 0.5, friction: 0.3, restitution: 0.05,
+            linvel: [v, 0, 0], angvel: [0, 0, 0],
+            linDamping: 0, angDamping: 0, gravityScale: 1,
+          },
+          render: { material: mat },
+          measured: true,
+          source: 'preset',
+        }, seq);
+        const r = createEntity('rope', {
+          name: `绳 ${L.toFixed(2)}m`,
+          params: { length: L },
+          attach: [a.id, b.id],
+          transform: { pos: [0, H - L / 2, z] },
+          source: 'preset',
+        }, seq);
+        return [a, b, r];
+      };
+      const slow = mk(-0.7, 7.0, 'A', 'brass');        // < 临界 7.67：顶部抛离
+      const fast = mk(0.7, 8.0, 'B', 'chrome');        // > 临界：过顶
+      const ground = createEntity('ground', {
+        name: '地面板',
+        transform: { pos: [0, -0.05, 0], rot: [0, 0, 0] },
+        params: { sx: 10, sy: 0.1, sz: 4 },
+        source: 'preset',
+      }, seq);
+      doc.entities.push(...slow, ...fast, ground);
+      doc.meta.assumptions = [
+        '验证目标：竖直圆周临界底部速度 √(5gL)=√(5×1.2×9.81)≈7.67 m/s',
+        'v=7.0 < 临界：绳在顶点前约 44°（φ≈136°，自底量起）松弛，球脱离圆轨作抛体（顶部抛离）',
+        'v=8.0 > 临界：全程张紧过顶，顶点速度 √(v²−4gL)≈4.12 m/s > √(gL)≈3.43 m/s',
+        '两套装置 z=±0.7 平行摆位互不干扰；绳为 max-distance 约束（仅拉不推，松弛即抛体）',
+      ];
+      return doc;
+    },
+  },
+
+  springSHM: {
+    id: 'springSHM', label: '弹簧振子（水平简谐）',
+    build() {
+      const doc = createEmptyDoc('弹簧振子：水平简谐振动');
+      const seq = {};
+      const k = 20, m = 1, L0 = 0.9;                   // T=2π√(m/k)=1.40 s
+      const ground = createEntity('ground', {
+        name: '光滑地面',
+        transform: { pos: [0, -0.05, 0], rot: [0, 0, 0] },
+        params: { sx: 6, sy: 0.1, sz: 1.6 },
+        physics: { body: 'fixed', friction: 0, restitution: 0 },
+        render: { material: 'steelDark' },
+        source: 'preset',
+      }, seq);
+      // 固定墙：中心与球心等高（弹簧沿两刚体质心连线作用，等高才是纯水平力）
+      const wall = createEntity('box', {
+        name: '固定墙',
+        transform: { pos: [-1, 0.15, 0], rot: [0, 0, 0] },
+        params: { sx: 0.2, sy: 0.6, sz: 0.8 },
+        physics: { body: 'fixed', friction: 0.8 },
+        render: { material: 'marble' },
+        source: 'preset',
+      }, seq);
+      const ball = createEntity('sphere', {
+        name: '振子球',
+        transform: { pos: [0.5, 0.15, 0], rot: [0, 0, 0] },
+        params: { radius: 0.15 },
+        physics: {
+          body: 'dynamic', mass: m, friction: 0, restitution: 0,
+          linvel: [0, 0, 0], angvel: [0, 0, 0],
+          linDamping: 0, angDamping: 0, gravityScale: 1,
+        },
+        render: { material: 'chrome' },
+        measured: true,
+        source: 'preset',
+      }, seq);
+      const spring = createEntity('spring', {
+        name: `弹簧 k=${k}`,
+        params: { stiffness: k, restLength: L0, damping: 0 },   // 默认 0.5 会衰减，必须显式置 0
+        attach: [wall.id, ball.id],
+        transform: { pos: [(-1 + 0.5) / 2, 0.15, 0] },
+        source: 'preset',
+      }, seq);
+      doc.entities.push(ground, wall, ball, spring);
+      doc.meta.assumptions = [
+        '验证目标：水平弹簧振子周期 T=2π√(m/k)=2π√(1/20)≈1.40 s',
+        '释放拉伸 0.6 m → 振幅 A=0.6 m，弹性势 ½kA²=3.6 J 与动能往复互换（平衡位 x=−0.1 m=墙心+原长）',
+        '弹簧阻尼显式置 0（组件默认 0.5 会衰减振幅）；光滑地面（μ=0）球纯滑动不受滚转转矩',
+      ];
+      return doc;
+    },
+  },
+
+  springVert: {
+    id: 'springVert', label: '竖直弹簧振子',
+    build() {
+      const doc = createEmptyDoc('竖直弹簧振子：重力只移平衡位');
+      const seq = {};
+      const k = 30, m = 1, L0 = 1.0;                   // T=2π√(m/k)≈1.15 s
+      const anchor = createEntity('box', {
+        name: '吊锚',
+        transform: { pos: [0, 3.0, 0], rot: [0, 0, 0] },
+        params: { sx: 0.15, sy: 0.15, sz: 0.15 },
+        physics: { body: 'fixed', friction: 0.8 },
+        render: { material: 'steelDark' },
+        source: 'preset',
+      }, seq);
+      const ball = createEntity('sphere', {
+        name: '振子球',
+        transform: { pos: [0, 3.0 - L0, 0], rot: [0, 0, 0] },   // 从自然长静止释放
+        params: { radius: 0.12 },
+        physics: {
+          body: 'dynamic', mass: m, friction: 0.3, restitution: 0,
+          linvel: [0, 0, 0], angvel: [0, 0, 0],
+          linDamping: 0, angDamping: 0, gravityScale: 1,
+        },
+        render: { material: 'chrome' },
+        measured: true,
+        source: 'preset',
+      }, seq);
+      const spring = createEntity('spring', {
+        name: `弹簧 k=${k}`,
+        params: { stiffness: k, restLength: L0, damping: 0 },
+        attach: [anchor.id, ball.id],
+        transform: { pos: [0, (3.0 + 2.0) / 2, 0] },
+        source: 'preset',
+      }, seq);
+      doc.entities.push(anchor, ball, spring);
+      doc.meta.assumptions = [
+        '验证目标：竖直弹簧振子周期与水平相同 T=2π√(m/k)=2π√(1/30)≈1.15 s（重力只移动平衡位，不改变周期）',
+        '平衡位在锚下 L0+mg/k=1.0+0.327≈1.33 m；从自然长静止释放 → 最大伸长 2mg/k≈0.65 m（由 mg·Δ=½kΔ²）',
+        '重力势能基准面取 y=0（能量曲线口径）；最低点球底 y≈1.23 m，全程不触地',
+      ];
+      return doc;
+    },
+  },
+
+  coupled: {
+    id: 'coupled', label: '耦合双振子',
+    build() {
+      const doc = createEmptyDoc('耦合双振子：质心匀速+相对振动');
+      const seq = {};
+      const k = 15, L0 = 0.8;                          // 相对振动 T=2π√(m/(2k))≈1.15 s
+      const ground = createEntity('ground', {
+        name: '光滑地面（加长）',
+        transform: { pos: [2, -0.05, 0], rot: [0, 0, 0] },
+        params: { sx: 14, sy: 0.1, sz: 3 },            // 质心漂移 0.5 m/s 需长地面承接
+        physics: { body: 'fixed', friction: 0, restitution: 0 },
+        render: { material: 'steelDark' },
+        source: 'preset',
+      }, seq);
+      const mkBlock = (x, mat) => createEntity('box', {
+        name: `振子块 ${x < 0 ? 'A' : 'B'}`,
+        transform: { pos: [x, 0.15, 0], rot: [0, 0, 0] },
+        params: { sx: 0.3, sy: 0.3, sz: 0.3 },
+        physics: {
+          body: 'dynamic', mass: 1, friction: 0, restitution: 0,
+          linvel: [0.5, 0, 0], angvel: [0, 0, 0],      // 质心初速 0.5 m/s（两块同速）
+          linDamping: 0, angDamping: 0, gravityScale: 1,
+        },
+        render: { material: mat },
+        measured: true,
+        source: 'preset',
+      }, seq);
+      const a = mkBlock(-0.55, 'chrome');
+      const b = mkBlock(0.55, 'brass');
+      const spring = createEntity('spring', {
+        name: `耦合弹簧 k=${k}`,
+        params: { stiffness: k, restLength: L0, damping: 0 },
+        attach: [a.id, b.id],
+        transform: { pos: [0, 0.15, 0] },
+        source: 'preset',
+      }, seq);
+      doc.entities.push(ground, a, b, spring);
+      doc.meta.assumptions = [
+        '验证目标：光滑地面质心匀速 0.5 m/s（系统动量守恒）+ 相对振动叠加',
+        '相对振动周期 T=2π√(m/(2k))=2π√(1/30)≈1.15 s（两等质量+单弹簧的等效劲度 2k）',
+        '初始拉伸 0.3 m → 两块间距在 0.5~1.1 m 间振荡（块宽 0.3 永不接触）；地面加长至 14 m 承接质心漂移',
+      ];
+      return doc;
+    },
+  },
+
+  springGun: {
+    id: 'springGun', label: '弹簧弹射平抛',
+    build() {
+      const doc = createEmptyDoc('弹簧弹射：弹性势能→平抛');
+      const seq = {};
+      const k = 20, L0 = 0.9, dx = 0.5;                // 压缩 0.5 m 释放
+      const ground = createEntity('ground', {
+        name: '地面',
+        transform: { pos: [9, -0.05, 0], rot: [0, 0, 0] },
+        params: { sx: 24, sy: 0.1, sz: 3 },            // 球落地后滚动段防滚出
+        physics: { body: 'fixed', friction: 0.3, restitution: 0.05 },
+        render: { material: 'steelDark' },
+        source: 'preset',
+      }, seq);
+      // 高台：台面顶 y=1.0，右缘 x=0.7（球离台后平抛 1 m 落地）
+      const table = createEntity('box', {
+        name: '发射台',
+        transform: { pos: [-0.4, 0.95, 0], rot: [0, 0, 0] },
+        params: { sx: 2.2, sy: 0.1, sz: 1.2 },
+        physics: { body: 'fixed', friction: 0, restitution: 0 },
+        render: { material: 'marble' },
+        source: 'preset',
+      }, seq);
+      const wall = createEntity('box', {
+        name: '固定墙',
+        transform: { pos: [-1.2, 1.1, 0], rot: [0, 0, 0] },
+        params: { sx: 0.2, sy: 0.5, sz: 0.8 },
+        physics: { body: 'fixed', friction: 0.8 },
+        render: { material: 'marble' },
+        source: 'preset',
+      }, seq);
+      // 轻推板：弹簧拉/推双向不能直连弹丸（会永远振荡）→ 推板传力，原长点板减速球自然分离
+      const plate = createEntity('box', {
+        name: '轻推板 (0.02kg)',
+        transform: { pos: [-1.2 + L0 - dx, 1.1, 0], rot: [0, 0, 0] },
+        params: { sx: 0.04, sy: 0.2, sz: 0.3 },
+        physics: {
+          body: 'dynamic', mass: 0.02, friction: 0, restitution: 0,
+          linvel: [0, 0, 0], angvel: [0, 0, 0],
+          linDamping: 0, angDamping: 0, gravityScale: 1,
+        },
+        render: { material: 'brass' },
+        source: 'preset',
+      }, seq);
+      const ball = createEntity('sphere', {
+        name: '弹射球',
+        transform: { pos: [-1.2 + L0 - dx + 0.02 + 0.1 + 0.002, 1.1, 0], rot: [0, 0, 0] },
+        params: { radius: 0.1 },
+        physics: {
+          body: 'dynamic', mass: 1, friction: 0, restitution: 0.05,
+          linvel: [0, 0, 0], angvel: [0, 0, 0],
+          linDamping: 0, angDamping: 0, gravityScale: 1,
+        },
+        render: { material: 'chrome' },
+        measured: true,
+        source: 'preset',
+      }, seq);
+      const spring = createEntity('spring', {
+        name: `弹簧 k=${k}`,
+        params: { stiffness: k, restLength: L0, damping: 0 },
+        attach: [wall.id, plate.id],
+        transform: { pos: [(-1.2 + -1.2 + L0 - dx) / 2, 1.1, 0] },
+        source: 'preset',
+      }, seq);
+      doc.entities.push(ground, table, wall, plate, ball, spring);
+      doc.meta.assumptions = [
+        '验证目标：出口速度 v=Δx·√(k/(m+m板))≈0.5×√(20/1.02)≈2.21 m/s（理想 √(kΔx²/m)=2.24，轻板 0.02 kg 修正 <1%）',
+        '引擎 spring 关节拉/推双向作用，球直接连弹簧会永远振荡——经轻质推板传力，球在原长点（推板开始减速）自然分离',
+        '平抛落点理论：台缘 x=0.7、球心高 1.1 m，t=√(2×1.0/9.81)≈0.45 s，落点 x≈0.7+2.21×0.45≈1.70 m；台面光滑',
+      ];
+      return doc;
+    },
+  },
+
+  collLab: {
+    id: 'collLab', label: '一维碰撞实验台',
+    build() {
+      const doc = createEmptyDoc('一维碰撞实验台：e=1 与 e=0 双泳道');
+      const seq = {};
+      const ground = createEntity('ground', {
+        name: '光滑地面',
+        transform: { pos: [5, -0.05, 0], rot: [0, 0, 0] },
+        params: { sx: 24, sy: 0.1, sz: 2.4 },          // 碰后滚行段防滚出
+        physics: { body: 'fixed', friction: 0, restitution: 0.1 },
+        render: { material: 'steelDark' },
+        source: 'preset',
+      }, seq);
+      // 双泳道：z=−0.3 弹性道（e=1），z=+0.3 非弹性道（e=0）；同泳道两球同 e（引擎按平均合成）
+      const mk = (z, e, matA, matB) => {
+        const a = createEntity('sphere', {
+          name: `入射球（e=${e}）`,
+          transform: { pos: [-1.2, 0.15, z], rot: [0, 0, 0] },
+          params: { radius: 0.15 },
+          physics: {
+            body: 'dynamic', mass: 1, friction: 0, restitution: e,
+            linvel: [1.5, 0, 0], angvel: [0, 0, 0],
+            linDamping: 0, angDamping: 0, gravityScale: 1,
+          },
+          render: { material: matA },
+          measured: true,
+          source: 'preset',
+        }, seq);
+        const b = createEntity('sphere', {
+          name: `靶球（e=${e}）`,
+          transform: { pos: [0.6, 0.15, z], rot: [0, 0, 0] },
+          params: { radius: 0.15 },
+          physics: {
+            body: 'dynamic', mass: 1, friction: 0, restitution: e,
+            linvel: [0, 0, 0], angvel: [0, 0, 0],
+            linDamping: 0, angDamping: 0, gravityScale: 1,
+          },
+          render: { material: matB },
+          measured: true,
+          source: 'preset',
+        }, seq);
+        return [a, b];
+      };
+      const elastic = mk(-0.3, 1, 'chrome', 'brass');
+      const inelastic = mk(0.3, 0, 'chrome', 'brass');
+      doc.entities.push(ground, ...elastic, ...inelastic);
+      doc.meta.assumptions = [
+        '验证目标（e=1 泳道）：等质量弹性对撞速度交换——A 停、B 以 1.5 m/s 前进；动量与动能双守恒',
+        '验证目标（e=0 泳道）：完全非弹性共速 v′=1.5/2=0.75 m/s；动能损失 50%，动量守恒',
+        '同泳道两球设相同恢复系数（引擎按两碰撞体平均合成 e）；双泳道 z=±0.3 互不干扰',
+      ];
+      return doc;
+    },
+  },
+
+  bulletBlock: {
+    id: 'bulletBlock', label: '子弹打木块',
+    build() {
+      const doc = createEmptyDoc('子弹打木块：完全非弹性碰撞');
+      const seq = {};
+      const ground = createEntity('ground', {
+        name: '地面',
+        transform: { pos: [2, -0.05, 0], rot: [0, 0, 0] },
+        params: { sx: 20, sy: 0.1, sz: 3 },            // 共速 0.71 m/s 长滑行需长地面
+        physics: { body: 'fixed', friction: 0, restitution: 0.1 },
+        render: { material: 'steelDark' },
+        source: 'preset',
+      }, seq);
+      const bullet = createEntity('sphere', {
+        name: '弹丸 (0.05kg)',
+        transform: { pos: [-1.0, 0.1, 0], rot: [0, 0, 0] },
+        params: { radius: 0.03 },
+        physics: {
+          body: 'dynamic', mass: 0.05, friction: 0, restitution: 0,
+          linvel: [15, 0, 0], angvel: [0, 0, 0],
+          linDamping: 0, angDamping: 0, gravityScale: 1,
+        },
+        render: { material: 'rubber' },
+        measured: true,
+        source: 'preset',
+      }, seq);
+      const block = createEntity('box', {
+        name: '木块 (1kg)',
+        transform: { pos: [0.2, 0.1, 0], rot: [0, 0, 0] },
+        params: { sx: 0.4, sy: 0.2, sz: 0.3 },
+        physics: {
+          body: 'dynamic', mass: 1, friction: 0, restitution: 0,
+          linvel: [0, 0, 0], angvel: [0, 0, 0],
+          linDamping: 0, angDamping: 0, gravityScale: 1,
+        },
+        render: { material: 'wood' },
+        measured: true,
+        source: 'preset',
+      }, seq);
+      doc.entities.push(ground, bullet, block);
+      doc.meta.assumptions = [
+        '验证目标：完全非弹性碰撞动量守恒 v′=m·v/(m+M)=0.05×15/1.05≈0.71 m/s',
+        '弹丸不嵌入木块，但双方 e=0 碰后共速，与完全非弹性语义等价',
+        '动能损失 ≈95%：ΔKE=½·μ·v²≈5.36 J（μ=mM/(m+M) 为约化质量）；光滑地面水平方向无外力',
+      ];
+      return doc;
+    },
+  },
+
+  newtonCradle: {
+    id: 'newtonCradle', label: '牛顿摆',
+    build() {
+      const doc = createEmptyDoc('牛顿摆：动量链式传递');
+      const seq = {};
+      const n = 5, r = 0.05, L = 0.8, pull = 0.6;      // 球 r=0.05，绳长 0.8，左球拉开 0.6 rad
+      const beam = createEntity('box', {
+        name: '固定横梁',
+        transform: { pos: [0, 1.88, 0], rot: [0, 0, 0] },
+        params: { sx: 0.6, sy: 0.06, sz: 0.06 },
+        physics: { body: 'fixed', friction: 0.8 },
+        render: { material: 'steelDark' },
+        source: 'preset',
+      }, seq);
+      const balls = [], ropes = [];
+      for (let i = 0; i < n; i++) {
+        const x = (i - (n - 1) / 2) * 2 * r;           // 相邻球心距 = 2r 精确预接触
+        const nub = createEntity('box', {
+          name: `吊点 ${i + 1}`,
+          transform: { pos: [x, 1.8, 0], rot: [0, 0, 0] },
+          params: { sx: 0.02, sy: 0.02, sz: 0.02 },
+          physics: { body: 'fixed', friction: 0.8 },
+          render: { material: 'brass' },
+          source: 'preset',
+        }, seq);
+        const isPulled = i === 0;
+        const px = x - (isPulled ? L * Math.sin(pull) : 0);
+        const py = 1.8 - L * Math.cos(isPulled ? pull : 0);
+        const ball = createEntity('sphere', {
+          name: isPulled ? `摆球 1（拉开 ${pull}rad）` : `摆球 ${i + 1}`,
+          transform: { pos: [px, py, 0], rot: [0, 0, 0] },
+          params: { radius: r },
+          physics: {
+            body: 'dynamic', mass: 0.1, friction: 0, restitution: 1,
+            linvel: [0, 0, 0], angvel: [0, 0, 0],
+            linDamping: 0, angDamping: 0, gravityScale: 1,
+          },
+          render: { material: 'chrome' },
+          measured: true,
+          source: 'preset',
+        }, seq);
+        const rope = createEntity('rope', {
+          name: `绳 ${i + 1} (${L.toFixed(2)}m)`,
+          params: { length: L },
+          attach: [nub.id, ball.id],
+          transform: { pos: [(x + px) / 2, (1.8 + py) / 2, 0] },
+          source: 'preset',
+        }, seq);
+        balls.push(ball); ropes.push(rope); doc.entities.push(nub);
+      }
+      doc.entities.unshift(beam);
+      doc.entities.push(...balls, ...ropes);
+      doc.meta.assumptions = [
+        '验证目标：e=1 等质量链式动量传递——理想结果仅远端球摆出、其余球保持静止',
+        '求解器按接触对序列逐步传递（非严格同时碰撞）：末端摆幅不足与中间球残余微动属数值局限，系统总动量始终守恒',
+        '5 球等长绳（L=0.8 m）预接触：相邻球心距=2r=0.1 m 精确对齐；左端球拉开 0.6 rad 静止释放',
+      ];
+      return doc;
+    },
+  },
+
+  ballChain: {
+    id: 'ballChain', label: '水平碰撞链',
+    build() {
+      const doc = createEmptyDoc('水平碰撞链：多球连环传递');
+      const seq = {};
+      const r = 0.1, e = 0.95;
+      const ground = createEntity('ground', {
+        name: '光滑地面',
+        transform: { pos: [6, -0.05, 0], rot: [0, 0, 0] },
+        params: { sx: 24, sy: 0.1, sz: 2 },            // 链传递后滚行段防滚出（入射球少量反弹向左）
+        physics: { body: 'fixed', friction: 0, restitution: 0.05 },
+        render: { material: 'steelDark' },
+        source: 'preset',
+      }, seq);
+      doc.entities.push(ground);
+      for (let i = 0; i < 5; i++) {
+        doc.entities.push(createEntity('sphere', {
+          name: `链球 ${i + 1}`,
+          transform: { pos: [(i - 2) * 2 * r, r, 0], rot: [0, 0, 0] },   // 预接触：球心距=2r
+          params: { radius: r },
+          physics: {
+            body: 'dynamic', mass: 1, friction: 0, restitution: e,
+            linvel: [0, 0, 0], angvel: [0, 0, 0],
+            linDamping: 0, angDamping: 0, gravityScale: 1,
+          },
+          render: { material: 'brass' },
+          measured: true,
+          source: 'preset',
+        }, seq));
+      }
+      doc.entities.push(createEntity('sphere', {
+        name: '入射球',
+        transform: { pos: [-1.5, r, 0], rot: [0, 0, 0] },
+        params: { radius: r },
+        physics: {
+          body: 'dynamic', mass: 1, friction: 0, restitution: e,
+          linvel: [2, 0, 0], angvel: [0, 0, 0],
+          linDamping: 0, angDamping: 0, gravityScale: 1,
+        },
+        render: { material: 'chrome' },
+        measured: true,
+        source: 'preset',
+      }, seq));
+      doc.meta.assumptions = [
+        '验证目标：光滑水平面多球连环碰撞系统动量守恒——入射 2 m/s，碰后各球速度之和恒为 2 m/s（实测对照）',
+        'e=0.95 折衷（e=1 的链式传递对求解器时序更敏感）：末端球带出最大前进速度，入射球有少量反弹残余，总动量守恒',
+        '5 球预接触（球心距=2r=0.2 m 精确对齐）+1 入射球；μ=0 纯滑动不受滚转',
+      ];
+      return doc;
+    },
+  },
+
+  bounceCompare: {
+    id: 'bounceCompare', label: '反弹高度对照',
+    build() {
+      const doc = createEmptyDoc('反弹高度对照：e=0.9/0.5/0.2');
+      const seq = {};
+      const lanes = [
+        { z: -0.4, e: 0.9, mat: 'chrome' },
+        { z: 0.0, e: 0.5, mat: 'brass' },
+        { z: 0.4, e: 0.2, mat: 'rubber' },
+      ];
+      for (const { z, e, mat } of lanes) {
+        // 分道地面：恢复系数与该道球同步同值（引擎取平均合成，同值时 e 不被稀释）
+        doc.entities.push(createEntity('ground', {
+          name: `分道地面（e=${e}）`,
+          transform: { pos: [0, -0.05, z], rot: [0, 0, 0] },
+          params: { sx: 2, sy: 0.1, sz: 0.3 },
+          physics: { body: 'fixed', friction: 0.6, restitution: e },
+          render: { material: 'steelDark' },
+          source: 'preset',
+        }, seq));
+        doc.entities.push(createEntity('sphere', {
+          name: `落球（e=${e}）`,
+          transform: { pos: [0, 2.0, z], rot: [0, 0, 0] },
+          params: { radius: 0.15 },
+          physics: {
+            body: 'dynamic', mass: 1, friction: 0.4, restitution: e,
+            linvel: [0, 0, 0], angvel: [0, 0, 0],
+            linDamping: 0, angDamping: 0, gravityScale: 1,
+          },
+          render: { material: mat },
+          measured: true,
+          source: 'preset',
+        }, seq));
+      }
+      doc.meta.assumptions = [
+        '验证目标：首轮反弹高度 h₁=e²·h₀（h₀=2 m，以球心计）：e=0.9→1.62 m、e=0.5→0.50 m、e=0.2→0.08 m',
+        '三分道地面与球设同值恢复系数（引擎按两碰撞体平均合成 e）',
+        '无空气阻力（linDamping=0）：逐次反弹 hₙ=e²ⁿ·h₀',
+      ];
+      return doc;
+    },
+  },
+
+  galileoDrop: {
+    id: 'galileoDrop', label: '平抛与自由落体',
+    build() {
+      const doc = createEmptyDoc('平抛与自由落体：同时落地');
+      const seq = {};
+      const ground = createEntity('ground', {
+        name: '地面',
+        transform: { pos: [4, -0.05, 0], rot: [0, 0, 0] },
+        params: { sx: 24, sy: 0.1, sz: 2 },            // 平抛球落地后仍滚动，长地面防滚出
+        physics: { body: 'fixed', friction: 0.4, restitution: 0.05 },
+        render: { material: 'steelDark' },
+        source: 'preset',
+      }, seq);
+      const mk = (z, vx, name, mat) => createEntity('sphere', {
+        name,
+        transform: { pos: [0, 2.0, z], rot: [0, 0, 0] },
+        params: { radius: 0.15 },
+        physics: {
+          body: 'dynamic', mass: 1, friction: 0.3, restitution: 0.05,
+          linvel: [vx, 0, 0], angvel: [0, 0, 0],
+          linDamping: 0, angDamping: 0, gravityScale: 1,
+        },
+        render: { material: mat },
+        measured: true,
+        source: 'preset',
+      }, seq);
+      const proj = mk(-0.3, 2, '平抛球（vx=2）', 'chrome');
+      const drop = mk(0.3, 0, '自由落体球', 'brass');
+      doc.entities.push(ground, proj, drop);
+      doc.meta.assumptions = [
+        '验证目标：平抛与自由落体同时落地——水平速度不影响下落时间，t=√(2h/g)≈0.61 s（球底高 1.85 m）',
+        '平抛球水平位移 x=vx·t=2×0.61≈1.23 m（落地时刻两球 y 始终相同）',
+        '两球 z=±0.3 错开防互碰；落地 e=0.05 防乱跳',
+      ];
+      return doc;
+    },
+  },
+
+  rangeAngles: {
+    id: 'rangeAngles', label: '斜抛射程角对照',
+    build() {
+      const doc = createEmptyDoc('斜抛射程角：30°/45°/60°');
+      const seq = {};
+      const v0 = 5;
+      const ground = createEntity('ground', {
+        name: '地面',
+        transform: { pos: [16, -0.05, 0], rot: [0, 0, 0] },
+        params: { sx: 36, sy: 0.1, sz: 2.4 },          // 落点 2.2~2.6 m，落地后滚动防滚出
+        physics: { body: 'fixed', friction: 0.4, restitution: 0.05 },
+        render: { material: 'steelDark' },
+        source: 'preset',
+      }, seq);
+      const lanes = [
+        { z: -0.5, deg: 30, mat: 'chrome' },
+        { z: 0.0, deg: 45, mat: 'brass' },
+        { z: 0.5, deg: 60, mat: 'rubber' },
+      ];
+      for (const { z, deg, mat } of lanes) {
+        const th = deg * Math.PI / 180;
+        doc.entities.push(createEntity('sphere', {
+          name: `斜抛球 ${deg}°`,
+          transform: { pos: [0, 0.12, z], rot: [0, 0, 0] },
+          params: { radius: 0.12 },
+          physics: {
+            body: 'dynamic', mass: 1, friction: 0.3, restitution: 0.05,
+            linvel: [v0 * Math.cos(th), v0 * Math.sin(th), 0], angvel: [0, 0, 0],
+            linDamping: 0, angDamping: 0, gravityScale: 1,
+          },
+          render: { material: mat },
+          measured: true,
+          source: 'preset',
+        }, seq));
+      }
+      doc.entities.unshift(ground);
+      doc.meta.assumptions = [
+        '验证目标：同速斜抛射程 R=v²·sin2θ/g（v=5）：30°→2.21 m、45°→2.55 m（最大）、60°→2.21 m（与 30° 对称）',
+        '三球 z=−0.5/0/0.5 三泳道互不干扰',
+        '落地 e=0.05 防乱跳；不计空气阻力（linDamping=0）',
+      ];
+      return doc;
+    },
+  },
+
+  atwoodHeavy: {
+    id: 'atwoodHeavy', label: '阿特伍德机（大质量比）',
+    build() {
+      const doc = createEmptyDoc('阿特伍德机：3:1 大质量比');
+      const seq = {};
+      // 定滑轮（固定轴承，视觉轮体）
+      const pulley = createEntity('pulley', {
+        name: '定滑轮',
+        transform: { pos: [0, 3.0, 0], rot: [0, 0, 0] },
+        params: { radius: 0.3 },
+        source: 'preset',
+      }, seq);
+      // 两侧小球：m1=3（左/重）m2=1（右/轻）；绳长常数 C = 1.0 + 1.0 = 2.0
+      const mkBall = (side, x, m, mat) => createEntity('sphere', {
+        name: `${side}侧球 (${m}kg)`,
+        transform: { pos: [x, 1.0, 0], rot: [0, 0, 0] },
+        params: { radius: 0.12 },
+        physics: {
+          body: 'dynamic', mass: m, friction: 0, restitution: 0,
+          linvel: [0, 0, 0], angvel: [0, 0, 0],
+          linDamping: 0, angDamping: 0, gravityScale: 1, onPulley: pulley.id,
+        },
+        render: { material: mat },
+        measured: true,
+        source: 'preset',
+      }, seq);
+      const left = mkBall('左', -0.35, 3, 'chrome');
+      const right = mkBall('右', 0.35, 1, 'brass');
+      doc.entities.push(pulley, left, right);
+      doc.meta.assumptions = [
+        '轻绳不可伸长：y1+y2=常数（逐步投影约束），两侧竖直导轨理想化（无摆动）',
+        '理论加速度 a=(m1−m2)g/(m1+m2)=2×9.81/4≈4.91 m/s²（3:1 质量比加速度显著）',
+        '张力 T=2·m1·m2·g/(m1+m2)=2×3×1×9.81/4≈14.72 N；滑轮与绳质量不计（理想滑轮）',
+      ];
+      return doc;
+    },
+  },
+
+  binaryStar: {
+    id: 'binaryStar', label: '双星互绕',
+    build() {
+      const doc = createEmptyDoc('双星系统：绕质心互绕');
+      doc.G = 1;                                       // 教学缩放引力常数（动力学同构）
+      const seq = {};
+      const m = 50, d = 4;
+      const v = Math.sqrt(1 * m / (2 * d));            // v=√(G·m/(2d))=2.5 m/s（G=1）
+      const mk = (x, vz, name, mat) => createEntity('celestial', {
+        name,
+        transform: { pos: [x, 0, 0], rot: [0, 0, 0] },
+        params: { radius: 0.35 },
+        physics: { mass: m, linvel: [0, 0, vz] },
+        render: { material: mat },
+        measured: true,
+        source: 'preset',
+      }, seq);
+      const a = mk(-d / 2, -v, '恒星 A (50kg)', 'sun');
+      const b = mk(d / 2, v, '恒星 B (50kg)', 'saturn');
+      doc.entities.push(a, b);
+      doc.meta.assumptions = [
+        '验证目标：双星绕共同质心（原点）互绕，圆轨道条件 v=√(G·m/(2d))=√(50/8)=2.5 m/s（d=4、质量相等）',
+        '周期 T=2π·(d/2)/v=2π×2/2.5≈5.03 s；两星轨迹为等半径圆（r=d/2=2 m）',
+        '文档引力常数 G=1（教学缩放）；初始总动量为零（质心静止），velocity-Verlet 辛积分零扩展',
+      ];
+      return doc;
+    },
+  },
+
+  threeBody: {
+    id: 'threeBody', label: '三星拉格朗日解',
+    build() {
+      const doc = createEmptyDoc('三星系统：拉格朗日等边三角形解');
+      doc.G = 1;                                       // 教学缩放引力常数
+      const seq = {};
+      const m = 30, a = 3;
+      const R = a / Math.sqrt(3);                      // 外接圆半径
+      const v = Math.sqrt(1 * m / a);                  // v=√(G·m/a)=√10≈3.16 m/s（G=1）
+      const mats = ['sun', 'saturn', 'marble'];
+      for (let i = 0; i < 3; i++) {
+        const phi = i * 2 * Math.PI / 3;               // 等边三角形顶点（xz 平面）
+        doc.entities.push(createEntity('celestial', {
+          name: `星体 ${i + 1} (30kg)`,
+          transform: {
+            pos: [R * Math.cos(phi), 0, R * Math.sin(phi)],
+            rot: [0, 0, 0],
+          },
+          params: { radius: 0.25 },
+          physics: {
+            mass: m,
+            linvel: [-v * Math.sin(phi), 0, v * Math.cos(phi)],   // 切向（绕质心同向）
+          },
+          render: { material: mats[i] },
+          measured: true,
+          source: 'preset',
+        }, seq));
+      }
+      doc.meta.assumptions = [
+        '验证目标：拉格朗日等边三角形解——三星绕质心整体刚性旋转，各切向 v=√(G·m/a)=√(30/3)≈3.16 m/s（a=3）',
+        '周期 T=2π/ω，ω=√(G·3m/a³)≈1.83 rad/s → T≈3.44 s（三角形边长 3 m 保持不变）',
+        'G=1 教学缩放；三体系统一般混沌，此特殊解对初值敏感：约 20 s 内演化可信，此后数值漂移逐渐放大',
+      ];
+      return doc;
+    },
+  },
+
+  rollRace: {
+    id: 'rollRace', label: '滚动竞速（球 vs 圆柱）',
+    build() {
+      const doc = createEmptyDoc('滚动竞速：球 vs 圆柱');
+      const seq = {};
+      const Lb = 3.0, H = 0.8;                         // 坡角 atan(0.8/3)≈14.9°≈15°
+      const hyp = Math.hypot(Lb, H);
+      const nx = H / hyp, ny = Lb / hyp;               // 坡面法向 (sinθ, cosθ)
+      const tx = Lb / hyp, ty = -H / hyp;              // 坡面向下方向
+      const r = 0.1, s0 = 0.15;                        // 起点距坡顶 0.15 m（坡面弧长）
+      const ax = -Lb / 2 + s0 * tx, ay = 0.85 + s0 * ty;   // 坡顶 (−1.5, 0.85)（含 ramp 抬高 0.05）
+      const cx = ax + r * nx, cy = ay + r * ny + 0.01; // 球心 = 表面点 + r·n̂（+0.01 沉降余量）
+      const ground = createEntity('ground', {
+        name: '地面板',
+        transform: { pos: [16, -0.05, 0], rot: [0, 0, 0] },
+        params: { sx: 40, sy: 0.1, sz: 2 },            // 坡底出速 ~3.3 m/s，长地面防滚出
+        source: 'preset',
+      }, seq);
+      const ramp = createEntity('ramp', {
+        name: '缓坡（≈15°）',
+        transform: { pos: [0, 0.05, 0], rot: [0, 0, 0] },
+        params: { length: Lb, height: H, width: 0.6 },  // 坡宽 0.6 ≥ 2.2×半径 防侧翻出坡
+        physics: { body: 'fixed', friction: 0.5 },      // 与滚动物同 μ（平均合成 0.5，纯滚动充足）
+        source: 'preset',
+      }, seq);
+      const ball = createEntity('sphere', {
+        name: '实心球 (1kg)',
+        transform: { pos: [cx, cy, -0.15], rot: [0, 0, 0] },
+        params: { radius: r },
+        physics: {
+          body: 'dynamic', mass: 1, friction: 0.5, restitution: 0.05,
+          linvel: [0, 0, 0], angvel: [0, 0, 0],
+          linDamping: 0, angDamping: 0, gravityScale: 1,
+        },
+        render: { material: 'chrome' },
+        measured: true,
+        source: 'preset',
+      }, seq);
+      const cyl = createEntity('cylinder', {
+        name: '实心圆柱 (1kg)',
+        transform: { pos: [cx, cy, 0.15], rot: [Math.PI / 2, 0, 0] },   // 轴向放倒沿 z，沿坡滚下
+        params: { radius: r, height: 0.2, spokes: 0 },
+        physics: {
+          body: 'dynamic', mass: 1, friction: 0.5, restitution: 0.05,
+          linvel: [0, 0, 0], angvel: [0, 0, 0],
+          linDamping: 0, angDamping: 0, gravityScale: 1,
+        },
+        render: { material: 'brass' },
+        measured: true,
+        source: 'preset',
+      }, seq);
+      doc.entities.push(ground, ramp, ball, cyl);
+      doc.meta.assumptions = [
+        '验证目标：同质量（1kg）同半径（0.1m）的实心球与实心圆柱比赛下滑——球 a=5/7·g·sinθ≈1.80 m/s² 先到，圆柱 a=2/3·g·sinθ≈1.69 m/s²',
+        '差别来自转动惯量（球 2/5mr²、圆柱 1/2mr²）：同样势能下降，圆柱把更多能量分给转动',
+        '坡角 ≈15°（14.9°）；μ=0.5 ≥ (2/7)tanθ≈0.075 保证纯滚动；坡宽 0.6 m ≥ 2.2×半径 防侧翻出坡',
+      ];
+      return doc;
+    },
+  },
+
+  frictionLock: {
+    id: 'frictionLock', label: '摩擦自锁（临界角）',
+    build() {
+      const doc = createEmptyDoc('摩擦自锁：tanθ=μ 临界');
+      const seq = {};
+      const Lb = 1.6, H = 0.8;                         // 坡角 atan(0.8/1.6)=26.57°（tanθ=0.500）
+      const th = Math.atan2(H, Lb);
+      const hyp = Math.hypot(Lb, H);
+      const nx = H / hyp, ny = Lb / hyp;
+      const tx = Lb / hyp, ty = -H / hyp;
+      const s0 = 0.55, half = 0.12;                    // 方块半高 0.12（0.24³ 块）
+      const ax = -Lb / 2 + s0 * tx, ay = 0.85 + s0 * ty;   // 坡面表面点（ramp 抬高 0.05）
+      const ground = createEntity('ground', {
+        name: '地面板',
+        transform: { pos: [0, -0.05, 0], rot: [0, 0, 0] },
+        params: { sx: 6, sy: 0.1, sz: 3 },
+        source: 'preset',
+      }, seq);
+      const ramp = createEntity('ramp', {
+        name: '斜坡（26.57°）',
+        transform: { pos: [0, 0.05, 0], rot: [0, 0, 0] },
+        params: { length: Lb, height: H, width: 0.5 },  // 默认 1.6×0.8 即 26.57°
+        physics: { body: 'fixed', friction: 0.5 },      // 与块同 μ（平均合成得配对值 0.5）
+        source: 'preset',
+      }, seq);
+      const block = createEntity('box', {
+        name: '方块 (μ=0.5)',
+        transform: {
+          pos: [ax + half * nx, ay + half * ny, 0],     // 块心 = 表面点 + (h/2)·n̂
+          rot: [0, 0, -th],                             // 贴坡面姿态（局部 y 对齐坡面法向）
+        },
+        params: { sx: 0.24, sy: 0.24, sz: 0.24 },
+        physics: {
+          body: 'dynamic', mass: 1, friction: 0.5, restitution: 0.05,
+          linvel: [0, 0, 0], angvel: [0, 0, 0],
+          linDamping: 0, angDamping: 0, gravityScale: 1,
+        },
+        render: { material: 'wood' },
+        measured: true,
+        source: 'preset',
+      }, seq);
+      doc.entities.push(ground, ramp, block);
+      doc.meta.assumptions = [
+        '验证目标：摩擦自锁临界条件 tanθ=μ——坡角 26.57°（tanθ=0.500）恰与 μ=0.5 相等，处于自锁临界',
+        '引擎摩擦无静/动摩擦之分（单一动摩擦模型）：临界附近方块会有缓慢蠕变，属数值现象而非物理结论',
+        '摩擦按两接触面平均合成：块与坡面同设 μ=0.5；检查器微调坡高跨临界（26.57°±）可观察 静止↔滑动 切换',
+      ];
+      return doc;
+    },
+  },
+
+  blockOnBlock: {
+    id: 'blockOnBlock', label: '板块模型（滑板叠块）',
+    build() {
+      const doc = createEmptyDoc('板块模型：地面光滑+叠面摩擦');
+      const seq = {};
+      const ground = createEntity('ground', {
+        name: '光滑地面',
+        transform: { pos: [6, -0.05, 0], rot: [0, 0, 0] },
+        params: { sx: 28, sy: 0.1, sz: 3 },            // 共速 1.33 m/s 长滑行需长地面
+        physics: { body: 'fixed', friction: 0, restitution: 0.1 },
+        render: { material: 'steelDark' },
+        source: 'preset',
+      }, seq);
+      // 板 μ=0、滑块 μ=0.8：叠面有效 μ=avg(0,0.8)=0.4，板-地有效 μ=avg(0,0)=0（两侧接触面各取所需）
+      const board = createEntity('box', {
+        name: '滑板 (2kg, v0=2)',
+        transform: { pos: [0, 0.1, 0], rot: [0, 0, 0] },
+        params: { sx: 1.2, sy: 0.2, sz: 0.6 },
+        physics: {
+          body: 'dynamic', mass: 2, friction: 0, restitution: 0,
+          linvel: [2, 0, 0], angvel: [0, 0, 0],
+          linDamping: 0, angDamping: 0, gravityScale: 1,
+        },
+        render: { material: 'wood' },
+        measured: true,
+        source: 'preset',
+      }, seq);
+      const slider = createEntity('box', {
+        name: '滑块 (1kg)',
+        transform: { pos: [0, 0.35, 0], rot: [0, 0, 0] },   // 叠放：板顶 0.2 + 块半高 0.15
+        params: { sx: 0.3, sy: 0.3, sz: 0.3 },
+        physics: {
+          body: 'dynamic', mass: 1, friction: 0.8, restitution: 0,
+          linvel: [0, 0, 0], angvel: [0, 0, 0],
+          linDamping: 0, angDamping: 0, gravityScale: 1,
+        },
+        render: { material: 'chrome' },
+        measured: true,
+        source: 'preset',
+      }, seq);
+      doc.entities.push(ground, board, slider);
+      doc.meta.assumptions = [
+        '验证目标：板块模型动量守恒（地面光滑）→ 共速 v′=m板·v0/(m板+m块)=2×2/3≈1.33 m/s',
+        '叠面有效摩擦 μ=0.4（引擎取两接触面平均：板 μ=0、滑块 μ=0.8 → 板-地 μ=0 光滑）',
+        '摩擦生热 Q=μ·m块·g·d相对≈0.4×9.81×0.34≈1.33 J = 初始动能 4 J − 末动能 2.67 J（能量守恒对照）',
+      ];
+      return doc;
+    },
+  },
+
+  weightless: {
+    id: 'weightless', label: '失重演示（力传感器）',
+    build() {
+      const doc = createEmptyDoc('失重演示：力传感器读数');
+      const seq = {};
+      const ground = createEntity('ground', {
+        name: '地面',
+        transform: { pos: [4, -0.05, 0], rot: [0, 0, 0] },
+        params: { sx: 16, sy: 0.1, sz: 3 },            // 落地弹跳滚动段防滚出
+        physics: { body: 'fixed', friction: 0.6, restitution: 0.2 },
+        render: { material: 'steelDark' },
+        source: 'preset',
+      }, seq);
+      const ball = createEntity('sphere', {
+        name: '抛体球',
+        transform: { pos: [0, 1.5, 0], rot: [0, 0, 0] },
+        params: { radius: 0.15 },
+        physics: {
+          body: 'dynamic', mass: 1, friction: 0.4, restitution: 0.2,
+          linvel: [1.2, 3, 0], angvel: [0, 0, 0],
+          linDamping: 0, angDamping: 0, gravityScale: 1,
+        },
+        render: { material: 'chrome' },
+        measured: true,
+        source: 'preset',
+      }, seq);
+      // 力传感器：绑定单个动态体（attach:[id]），实时读接触合力（支持力+摩擦）
+      const sensor = createEntity('forceSensor', {
+        name: '力传感器→抛体球',
+        attach: [ball.id],
+        transform: { pos: [0.6, 0.03, 0], rot: [0, 0, 0] },
+        source: 'preset',
+      }, seq);
+      doc.entities.push(ground, ball, sensor);
+      doc.meta.assumptions = [
+        '验证目标：力传感器读接触合力——自由飞行段 ≈0 N（失重：a=g，视重为零），落地静止后 ≈mg=9.81 N',
+        '球上抛初速 (1.2, 3) m/s：飞行约 0.91 s，全程失重读数 0',
+        '传感器绑定单个动态体（attach 一元数组）；读数口径为支持力+摩擦的接触合力，已做线阻尼补偿（linDamping=0 时精确）',
+      ];
+      return doc;
+    },
+  },
 };
 
 export function getPreset(id) {
