@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { newId } from './scene-doc.js';
 import { TRACK_POINTS, TRACK_META } from '../track-curve.js';
+import { getSharedMaterials } from '../materials.js'; // celestial 环复用 saturnRing（MAT-68）
 
 // ---------- 轨道：半管参数面（经典管道轨道，球经中心线解析约束滑行，Goal 第二节组件化迁移） ----------
 function buildTroughGeometry(arcFraction, along, radial) {
@@ -51,9 +52,13 @@ export const MATERIAL_OPTIONS = [
   { key: 'chrome', label: '铬钢' },
   { key: 'steelDark', label: '暗钢' },
   { key: 'rubber', label: '橡胶' },
+  { key: 'mattePlastic', label: '哑光塑料' }, // MAT-75
+  { key: 'chalk', label: '粉笔' },            // MAT-75
   { key: 'brass', label: '黄铜' },
   { key: 'sun', label: '恒星' },
   { key: 'saturn', label: '土星' },
+  { key: 'jupiter', label: '木星' },          // MAT-67
+  { key: 'mars', label: '火星' },             // MAT-67
 ];
 
 export const BODY_OPTIONS = [
@@ -99,6 +104,17 @@ function wedgePoints(L, H, W) {
 const SPOKE_MAT = new THREE.MeshStandardMaterial({ color: 0x8a6a48, roughness: 0.6, metalness: 0.1 });
 const FLAG_MAT = new THREE.MeshStandardMaterial({ color: 0xc96a5a, roughness: 0.5 });
 const BULB_MAT = new THREE.MeshStandardMaterial({ color: 0xffe0b0, emissive: 0xffc880, emissiveIntensity: 0.9, roughness: 0.4 });
+// MAT-90：灯泡按亮度三档预建共享 clone（暗 <2 / 中 2~8 / 亮 >8，emissive 0.35/0.9/1.6），
+// lightGroup 构造时按 params.intensity 选挂 —— 仍为模块级共享，不回到每实例一份
+const BULB_MAT_DIM = BULB_MAT.clone();
+BULB_MAT_DIM.emissiveIntensity = 0.35;   // 暗档：余温微光
+const BULB_MAT_BRIGHT = BULB_MAT.clone();
+BULB_MAT_BRIGHT.emissiveIntensity = 1.6; // 亮档：灼目高亮
+function bulbMatFor(intensity) {
+  if (intensity < 2) return BULB_MAT_DIM;
+  if (intensity > 8) return BULB_MAT_BRIGHT;
+  return BULB_MAT; // 中档即原共享实例（0.9）
+}
 
 export const COMPONENTS = {
   sphere: {
@@ -240,7 +256,7 @@ export const COMPONENTS = {
     schema: [
       { key: 'length', label: '绳长', unit: 'm', min: 0.05, max: 20, step: 0.05 },
     ],
-    buildGeometry: () => new THREE.CylinderGeometry(0.008, 0.008, 1, 8),   // 单位杆，runtime 按两端拉伸
+    buildGeometry: () => new THREE.CylinderGeometry(0.008, 0.008, 1, 12),  // 单位杆，runtime 按两端拉伸；径向 12 段（MAT-76）斜视轮廓更圆
     buildCollider: () => null,
     isLink: true,                                  // 连接类：无独立 body，runtime 建绳关节并每帧同步网格
     spawnY: () => 0.5,
@@ -256,7 +272,7 @@ export const COMPONENTS = {
       { key: 'restLength', label: '原长', unit: 'm', min: 0.1, max: 10, step: 0.05 },
       { key: 'damping', label: '阻尼', unit: '', min: 0, max: 50, step: 0.1 },
     ],
-    buildGeometry: () => new THREE.CylinderGeometry(0.022, 0.022, 1, 10),   // 单位杆，runtime 按两端拉伸
+    buildGeometry: () => new THREE.CylinderGeometry(0.022, 0.022, 1, 14),  // 单位杆，runtime 按两端拉伸；径向 14 段（MAT-76）弹簧线圈更圆润
     buildCollider: () => null,
     isLink: true,
     spawnY: () => 0.5,
@@ -277,11 +293,11 @@ export const COMPONENTS = {
 
   celestial: {
     id: 'celestial', label: '天体', category: '天体',
-    desc: '参与成对引力作用的球状天体（不受世界重力，physics.gravitating）',
-    compat: '参与成对引力（场景 G）；不与世界重力作用',
+    desc: '参与成对引力作用的球状天体（不受世界重力，physics.gravitating）；ring=1 挂 26.7° 倾角行星环',
+    compat: '参与成对引力（场景 G）；不与世界重力作用；行星环仅视觉不参与碰撞',
     // 渲染半径与引力质量分离：radius 只是视觉/碰撞尺寸，mass 才是引力质量（物理实体与视觉实体分离）
     defaults: {
-      params: { radius: 0.5 },
+      params: { radius: 0.5, ring: 0 },
       physics: {
         body: 'dynamic', mass: 100, friction: 0, restitution: 0.5,
         linvel: [0, 0, 0], angvel: [0, 0, 0],
@@ -291,8 +307,10 @@ export const COMPONENTS = {
     },
     schema: [
       { key: 'radius', label: '半径', unit: 'm', min: 0.05, max: 4, step: 0.05 },
+      { key: 'ring', label: '行星环', unit: '', min: 0, max: 1, step: 1 }, // MAT-68：0/1 开关
     ],
     buildGeometry: (p) => new THREE.SphereGeometry(p.radius, 48, 32),
+    makeMesh: (p, material) => celestialGroup(p, material), // MAT-68：可选环，Group 结构
     buildCollider: (RAPIER, p) => RAPIER.ColliderDesc.ball(p.radius),
     spawnY: (p) => p.radius,
     inertiaY: (p, m) => 0.4 * m * p.radius * p.radius,
@@ -405,11 +423,28 @@ function markerGroup(height, material) {
   return g;
 }
 
-function lightGroup(p) {
-  // 点光源：小灯泡球体 + PointLight（暖白，照亮半径约 6m；不投影避免阴影重叠）
+function celestialGroup(p, material) {
+  // 天体组（MAT-68）：本体球（组件材质）+ 可选行星环；环仅视觉，碰撞体仍是球
   const g = new THREE.Group();
-  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.07, 16, 12), BULB_MAT);
-  const lamp = new THREE.PointLight(0xffe2b8, p.intensity ?? 6, 7, 2);
+  g.add(new THREE.Mesh(new THREE.SphereGeometry(p.radius, 48, 32), material));
+  if (p.ring) {
+    const ringMat = getSharedMaterials()?.saturnRing; // 材质表未就绪或环图缺失 → null → 跳过环（既有契约）
+    if (ringMat) {
+      // 内 1.4r 外 2.3r；材质自带 transparent + DoubleSide + depthWrite:false（materials.js 契约）
+      const ring = new THREE.Mesh(new THREE.RingGeometry(p.radius * 1.4, p.radius * 2.3, 64), ringMat);
+      ring.rotation.x = -Math.PI / 2 + (26.7 * Math.PI) / 180; // 先放平再倾 26.7°（土星轴倾角实测）
+      g.add(ring);
+    }
+  }
+  return g;
+}
+
+function lightGroup(p) {
+  // 点光源：小灯泡球体（亮度三档 emissive，MAT-90）+ PointLight（暖白，decay=2 物理平方衰减；
+  // MAT-83：distance 0 = 无 7m 硬截断，光沿距离自然回落；不投影避免阴影重叠）
+  const g = new THREE.Group();
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.07, 16, 12), bulbMatFor(p.intensity ?? 6));
+  const lamp = new THREE.PointLight(0xffe2b8, p.intensity ?? 6, 0, 2);
   lamp.position.y = 0;
   g.add(bulb, lamp);
   return g;

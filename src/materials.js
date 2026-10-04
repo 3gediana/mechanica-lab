@@ -25,22 +25,99 @@ async function loadTex(url, { srgb = false, repeat = null } = {}) {
   }
 }
 
+// ---------- 程序化贴图（MAT-69/72/74）：canvas 现场生成，不新增图片文件 ----------
+
+// 256² 径向临边昏暗 emissiveMap（MAT-69）：中心 1.0 → 边缘 0.72，恒星盘面亮度向边缘自然回落，
+// 去掉"均匀涂色球"的廉价感（真实恒星临边昏暗的静态近似）
+function sunLimbTexture() {
+  const S = 256, half = S / 2;
+  const c = document.createElement('canvas');
+  c.width = c.height = S;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(S, S);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const d = Math.min(1, Math.hypot(x + 0.5 - half, y + 0.5 - half) / half); // 0 中心 → 1 边缘
+    const v = Math.round(255 * (1.0 - 0.28 * d)); // 1.0 → 0.72
+    const i = (y * S + x) * 4;
+    img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+    img.data[i + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace; // emissiveMap 属颜色图，须 sRGB 解码
+  return tex;
+}
+
+// 256² 水平拉丝 roughnessMap（MAT-72）：行级 0.35~0.5 值带 + 行内 ±0.015 微扰。
+// 幅度刻意克制 —— 呈机加件拉丝高光的轻微方向感，而不是塑料宽条纹
+function brushedSteelTexture() {
+  const S = 256;
+  const c = document.createElement('canvas');
+  c.width = c.height = S;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(S, S);
+  for (let y = 0; y < S; y++) {
+    const base = 0.35 + Math.random() * 0.15; // 每行一条拉丝痕
+    for (let x = 0; x < S; x++) {
+      const v = Math.round(255 * Math.min(1, Math.max(0, base + (Math.random() - 0.5) * 0.03)));
+      const i = (y * S + x) * 4;
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+      img.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return new THREE.CanvasTexture(c); // 数据图保持默认线性色彩空间
+}
+
+// 128² 微噪声 roughnessMap（MAT-74）：0.90~0.97 逐像素抖动，近全哑光里的橡胶颗粒质感
+function rubberNoiseTexture() {
+  const S = 128;
+  const c = document.createElement('canvas');
+  c.width = c.height = S;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(S, S);
+  for (let i = 0; i < S * S; i++) {
+    const v = Math.round(255 * (0.90 + Math.random() * 0.07));
+    img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = v;
+    img.data[i * 4 + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return new THREE.CanvasTexture(c); // 线性色彩空间
+}
+
+// 单例缓存（MAT-68）：registry.celestial 的环 mesh 需跨模块复用这里的 saturnRing；
+// workbench/legacy 各自 await 一次，重复调用幂等返回同一份（材质全 app 生命周期只读共享）
+let shared = null;
+
+// 同步取已构建的材质表；createMaterials() 完成前为 null，下游按"缺贴图跳过"契约降级
+export function getSharedMaterials() {
+  return shared;
+}
+
 export async function createMaterials() {
-  const [marbleC, marbleR, marbleN, woodC, woodR, saturnC, ringC] = await Promise.all([
+  if (shared) return shared;
+  const [marbleC, marbleR, marbleN, woodC, woodR, woodN, saturnC, jupiterC, marsC, ringC] = await Promise.all([
     loadTex(`${TEX}marble/color.jpg`, { srgb: true, repeat: REPEAT_MARBLE }),
     loadTex(`${TEX}marble/roughness.jpg`, { repeat: REPEAT_MARBLE }), // 粗糙度/法线图保持默认线性色彩空间
     loadTex(`${TEX}marble/normal.jpg`, { repeat: REPEAT_MARBLE }),
     loadTex(`${TEX}wood/color.jpg`, { srgb: true, repeat: REPEAT_WOOD }),
     loadTex(`${TEX}wood/roughness.jpg`, { repeat: REPEAT_WOOD }),
+    loadTex(`${TEX}wood/normal.jpg`, { repeat: REPEAT_WOOD }), // MAT-66：法线图，线性色彩空间
     loadTex(`${TEX}planet/saturn_color.jpg`, { srgb: true }),
+    loadTex(`${TEX}planet/jupiter_color.jpg`, { srgb: true }), // MAT-67：盘上已有、此前未加载
+    loadTex(`${TEX}planet/mars_color.jpg`, { srgb: true }),    // MAT-67：同上
     loadTex(`${TEX}planet/saturn_ring.png`, { srgb: true }),
   ]);
 
-  return {
+  const mats = {
     // 铬钢球（主角）：抛光铬实测反射率 ≈0.9，metalness 1 + roughness 0.06 得锐利镜面高光
     chrome: new THREE.MeshPhysicalMaterial({ color: 0xffffff, metalness: 1, roughness: 0.06, envMapIntensity: 1.25 }),
-    // 暗钢支架：metalness 0.9 模拟表面微氧化层，roughness 0.42 呈哑光机加质感
-    steelDark: new THREE.MeshPhysicalMaterial({ color: 0x2e3134, metalness: 0.9, roughness: 0.42, envMapIntensity: 0.9 }),
+    // 暗钢支架：metalness 0.9 模拟表面微氧化层；水平拉丝 roughnessMap 驱动 0.35~0.5 值带（MAT-72），
+    // 标量 roughness 1.0 交由贴图全权驱动，高光沿拉丝方向轻微展开
+    steelDark: new THREE.MeshPhysicalMaterial({
+      color: 0x2e3134, metalness: 0.9, roughness: 1.0, envMapIntensity: 0.9,
+      roughnessMap: brushedSteelTexture(),
+    }),
 
     // 抛光大理石滑道：有图时 color 置白防染色（map 与 color 相乘），roughness 1.0 交由贴图全权驱动
     marble: new THREE.MeshPhysicalMaterial({
@@ -54,31 +131,63 @@ export async function createMaterials() {
       envMapIntensity: 1.0,
     }),
 
-    // 橡木块：木料为电介质（metalness 默认 0），roughness 0.72 ≈ 木蜡油半哑光表面
+    // 橡木块：木料为电介质（metalness 默认 0），roughness 0.72 ≈ 木蜡油半哑光表面；
+    // normal.jpg 补载（MAT-66）：normalScale 0.5 温和木纹凹凸，再强会塑料化
     wood: new THREE.MeshPhysicalMaterial({
       color: woodC ? 0xffffff : 0x8a6a48, // 降级为橡木暖棕
       roughness: woodR ? 1.0 : 0.72,
       ...(woodC && { map: woodC }),
       ...(woodR && { roughnessMap: woodR }),
+      ...(woodN && { normalMap: woodN, normalScale: new THREE.Vector2(0.5, 0.5) }),
       envMapIntensity: 0.55, // 木料弱反射，压低环境强度避免塑料感
     }),
 
-    // 橡胶球：roughness 0.94 近全哑光，纯电介质，漫射为主几乎无高光
-    rubber: new THREE.MeshPhysicalMaterial({ color: 0x17181a, roughness: 0.94, metalness: 0 }),
+    // 橡胶球：近全哑光电介质；128² 微噪声 roughnessMap（0.90~0.97，MAT-74）给表面颗粒感
+    rubber: new THREE.MeshPhysicalMaterial({
+      color: 0x17181a, roughness: 1.0, metalness: 0,
+      roughnessMap: rubberNoiseTexture(),
+    }),
 
-    // 黄铜展台：抛光黄铜反射率 ≈0.8，roughness 0.28 呈缎面拉丝高光
-    brass: new THREE.MeshPhysicalMaterial({ color: 0x9c7a3c, metalness: 1, roughness: 0.28, envMapIntensity: 1.1 }),
+    // 哑光塑料（MAT-75）：冷灰烟色（与背景带同族色相），roughness 0.55 + 极薄 clearcoat 0.06 ——
+    // 教学器材外壳的均匀半哑光，只余一层若隐若现的表面膜
+    mattePlastic: new THREE.MeshPhysicalMaterial({ color: 0x9aa0a6, roughness: 0.55, metalness: 0, clearcoat: 0.06 }),
 
-    // 恒星（天体场景）：自发光为主，暗场里作为光源质感出现，不靠环境反射
+    // 粉笔（MAT-75）：0xd8d5cf 暖白近全哑光（roughness 0.98），黑板/桌面教学件的干燥矿物质感
+    chalk: new THREE.MeshPhysicalMaterial({ color: 0xd8d5cf, roughness: 0.98, metalness: 0 }),
+
+    // 黄铜展台：抛光黄铜反射率 ≈0.8，roughness 0.28 缎面拉丝高光；
+    // clearcoat 0.25/0.35（MAT-73）加一层薄蜡质亮膜 —— 亮而不刺眼，守住摄影棚克制语言
+    brass: new THREE.MeshPhysicalMaterial({ color: 0x9c7a3c, metalness: 1, roughness: 0.28, envMapIntensity: 1.1, clearcoat: 0.25, clearcoatRoughness: 0.35 }),
+
+    // 恒星（天体场景）：自发光为主，暗场里作为光源质感出现，不靠环境反射；
+    // 程序化径向临边昏暗 emissiveMap（MAT-69）：盘面中心 1.0 → 边缘 0.72
     sun: new THREE.MeshStandardMaterial({
       color: 0xffc46b, emissive: 0xff9a2a, emissiveIntensity: 1.35, roughness: 1, metalness: 0,
+      emissiveMap: sunLimbTexture(),
     }),
 
     // 土星本体：气态行星以漫射为主，roughness 0.95 消除镜面高光
     saturn: new THREE.MeshPhysicalMaterial({
       color: saturnC ? 0xffffff : 0xc9b38a, // 降级为云带米金色
       roughness: 0.95, metalness: 0,
+      envMapIntensity: 0.35, // 环境反射梯度（MAT-71）：chrome 1.25 镜面主角 > wood 0.55 弱反射介质 > 行星 0.35 深空漫射体仅余微弱拾光
       ...(saturnC && { map: saturnC }),
+    }),
+
+    // 木星本体（MAT-67，结构同 saturn）：条带云层 + 大红斑贴图，降级米棕条带色
+    jupiter: new THREE.MeshPhysicalMaterial({
+      color: jupiterC ? 0xffffff : 0xc8a678,
+      roughness: 0.95, metalness: 0,
+      envMapIntensity: 0.35, // 同 saturn（MAT-71 梯度）
+      ...(jupiterC && { map: jupiterC }),
+    }),
+
+    // 火星本体（MAT-67，结构同 saturn）：锈红氧化铁表面贴图，降级铁锈红
+    mars: new THREE.MeshPhysicalMaterial({
+      color: marsC ? 0xffffff : 0xb5623c,
+      roughness: 0.95, metalness: 0,
+      envMapIntensity: 0.35, // 同 saturn（MAT-71 梯度）
+      ...(marsC && { map: marsC }),
     }),
 
     // 土星环：PNG 自带 alpha 故 transparent；depthWrite false 防半透明环片深度排序错误；双面可见
@@ -89,4 +198,6 @@ export async function createMaterials() {
     // 反光地板覆层：近黑基色压暗摄影棚地面，roughness 0.5 只留温润反光，opacity 0.9 透出镜面地板的克制倒影
     floorOverlay: new THREE.MeshPhysicalMaterial({ color: 0x0a0a0c, roughness: 0.5, metalness: 0, transparent: true, opacity: 0.9 }),
   };
+  shared = mats;
+  return mats;
 }

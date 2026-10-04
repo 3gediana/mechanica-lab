@@ -3,6 +3,8 @@
 // buildGeometry/makeMesh + 默认材质渲染小图；dataURL 按 typeId 缓存。
 import * as THREE from 'three';
 
+const FOV = 42; // 与主视口一致（MAT-78，值照抄 viewport.js）：缩略图与实机同 tone mapping/曝光/fov，目录不再"两张脸"
+
 let renderer = null;
 let scene = null;
 let camera = null;
@@ -14,6 +16,8 @@ function ensure(materials) {
   if (renderer) return;
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
   renderer.setSize(72, 72);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping; // MAT-78：主视口同款曲线（viewport.js:568）
+  renderer.toneMappingExposure = 1.06;                 // 同曝光（viewport.js:569）
   scene = new THREE.Scene();
   scene.add(new THREE.AmbientLight(0xffffff, 1.0));
   const key = new THREE.DirectionalLight(0xffffff, 1.6);
@@ -22,7 +26,7 @@ function ensure(materials) {
   const rim = new THREE.DirectionalLight(0xbfd4ff, 0.5);
   rim.position.set(-2, 1, -2);
   scene.add(rim);
-  camera = new THREE.PerspectiveCamera(38, 1, 0.01, 400);
+  camera = new THREE.PerspectiveCamera(FOV, 1, 0.01, 400);
 }
 
 export function renderThumb(comp, materials) {
@@ -45,7 +49,7 @@ export function renderThumb(comp, materials) {
     const size = box.getSize(new THREE.Vector3());
     const center = box.getCenter(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z) || 1;
-    const dist = (maxDim / 2) / Math.tan((38 * Math.PI) / 360) * 1.2;
+    const dist = (maxDim / 2) / Math.tan((FOV * Math.PI) / 360) * 1.2; // 与 camera fov 同源，改一处即可
     camera.position.set(center.x + dist * 0.75, center.y + dist * 0.6, center.z + dist);
     camera.lookAt(center);
     renderer.render(scene, camera);
