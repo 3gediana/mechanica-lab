@@ -4,7 +4,7 @@
 import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
 
-const BASE = 'http://127.0.0.1:8721';
+const BASE = process.env.MECH_BASE || 'http://127.0.0.1:8721';
 const QUESTION_IMG = '../fixtures/question-incline.png';   // 相对 tools/ui-test 的真实题目图片
 
 mkdirSync('shots/w2', { recursive: true });

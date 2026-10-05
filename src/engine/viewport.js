@@ -7,6 +7,11 @@ import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
 
 const ACCENT = 0xd9a441;
 
+// 叠加层箭头/法线的模块级 scratch（PL-54）：每帧 × 每箭头的 new THREE.Vector3 是
+// 稳定 GC 来源；setDirection/normalize 只读传入值，不持有引用，复用安全。
+const _sv3 = new THREE.Vector3();
+const _sv3b = new THREE.Vector3();
+
 export class Viewport {
   // cb: {onSelect(id|null), onGizmoCommit(), onEnvReady()}
   constructor(container, cb) {
@@ -23,6 +28,8 @@ export class Viewport {
     this.trailsVisible = false;
     this._trailLines = [];
     this._impacts = [];          // 碰撞时刻标记环（1.5s 淡出）
+    this._impactPool = [];       // 环对象池（PL-21：几何共享 + mesh 复用，防碰撞风暴 GC）
+    this._impactGeo = null;
     this.boxSelectMode = false;
     this._boxSel = null;         // {x0,y0,x1,y1} 屏幕坐标
     this._highlights = [];       // 多选高亮 BoxHelper 池
@@ -97,11 +104,19 @@ export class Viewport {
   }
 
   // ============ 碰撞时刻标记（关键时刻可视化） ============
+  // PL-21 池化：牛顿摆/碰撞链每步碰撞，原先每环 new RingGeometry+材质、1.5s 后 dispose——
+  // GPU 缓冲反复建删 + GC。改共享几何 + mesh/材质对象池，只在池空时建新实例。
   spawnImpact(pos) {
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.06, 0.1, 40),
-      new THREE.MeshBasicMaterial({ color: ACCENT, transparent: true, opacity: 0.95, side: THREE.DoubleSide, depthWrite: false })
-    );
+    let ring = this._impactPool.pop();
+    if (!ring) {
+      if (!this._impactGeo) {
+        this._impactGeo = new THREE.RingGeometry(0.06, 0.1, 40);
+      }
+      ring = new THREE.Mesh(
+        this._impactGeo,
+        new THREE.MeshBasicMaterial({ color: ACCENT, transparent: true, opacity: 0.95, side: THREE.DoubleSide, depthWrite: false })
+      );
+    }
     ring.position.set(pos[0], pos[1] + 0.01, pos[2]);
     ring.rotation.x = -Math.PI / 2;
     ring.userData.spawnT = performance.now();
@@ -116,8 +131,7 @@ export class Viewport {
       const age = (now - m.userData.spawnT) / 1000;
       if (age > 1.5) {
         this.scene.remove(m);
-        m.geometry.dispose();
-        m.material.dispose();
+        this._impactPool.push(m);      // 几何共享不 dispose；材质随 mesh 回池复用
         this._impacts.splice(i, 1);
         continue;
       }
@@ -296,11 +310,11 @@ export class Viewport {
           ];
       for (const vd of vecs) {
         const a = this._forceArrows[ai++];
-        const len = vd.v ? Math.hypot(...vd.v) : 0;
+        const len = vd.v ? Math.hypot(vd.v[0], vd.v[1], vd.v[2]) : 0;
         if (vd.v && len > vd.min) {
           a.visible = true;
-          a.position.set(...it.pos);
-          a.setDirection(new THREE.Vector3(...vd.v).normalize());
+          a.position.set(it.pos[0], it.pos[1], it.pos[2]);
+          a.setDirection(_sv3.set(vd.v[0], vd.v[1], vd.v[2]).normalize());
           a.setLength(Math.min(0.12 + len * vd.scale, vd.max), 0.07, 0.045);
         } else {
           a.visible = false;
@@ -338,8 +352,8 @@ export class Viewport {
         const a = this._springArrows[ai++];
         if (mag > 0.05) {
           a.visible = true;
-          a.position.set(...pos);
-          a.setDirection(new THREE.Vector3(f[0], f[1], f[2]).normalize());
+          a.position.set(pos[0], pos[1], pos[2]);
+          a.setDirection(_sv3.set(f[0], f[1], f[2]).normalize());
           a.setLength(Math.min(0.12 + mag * 0.05, 1.4), 0.08, 0.05);
         } else {
           a.visible = false;
@@ -358,7 +372,8 @@ export class Viewport {
   updateJointViz(items) {
     const want = items.length;
     while (this._jointVizLines.length < want) {
-      const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));   // PL-54：定点缓冲复用
       const mat = new THREE.LineDashedMaterial({ color: 0x7ba7d9, dashSize: 0.06, gapSize: 0.04, transparent: true, opacity: 0.85 });
       const line = new THREE.Line(geo, mat);
       line.renderOrder = 5;
@@ -368,10 +383,11 @@ export class Viewport {
     this._jointVizLines.forEach((line, i) => {
       if (i >= want) { line.visible = false; return; }
       const it = items[i];
-      const pts = it.ok
-        ? [new THREE.Vector3(...it.from), new THREE.Vector3(...it.to)]
-        : [new THREE.Vector3(...it.from), new THREE.Vector3(it.from[0], it.from[1] + 0.5, it.from[2])];
-      line.geometry.setFromPoints(pts);
+      const to = it.ok ? it.to : [it.from[0], it.from[1] + 0.5, it.from[2]];
+      const attr = line.geometry.attributes.position;
+      attr.setXYZ(0, it.from[0], it.from[1], it.from[2]);
+      attr.setXYZ(1, to[0], to[1], to[2]);
+      attr.needsUpdate = true;
       line.computeLineDistances();
       line.material.color.setHex(it.ok ? 0x7ba7d9 : 0xc96a5a);
       line.visible = true;
@@ -398,15 +414,13 @@ export class Viewport {
     }
     let ai = 0;
     for (const it of items) {
-      const dir = new THREE.Vector3().subVectors(
-        new THREE.Vector3(...it.bPos), new THREE.Vector3(...it.aPos)
-      ).normalize();
+      _sv3b.set(it.bPos[0] - it.aPos[0], it.bPos[1] - it.aPos[1], it.bPos[2] - it.aPos[2]).normalize();
       for (const [pos, mag, outward] of [[it.aPos, it.tA, -1], [it.bPos, it.tB, 1]]) {
         const a = this._tensionArrows[ai++];
         const len = Math.min(0.15 + mag * 0.05, 1.4);
         a.visible = mag > 0.2;
         a.position.set(pos[0], pos[1], pos[2]);
-        a.setDirection(dir.clone().multiplyScalar(outward));
+        a.setDirection(_sv3.set(outward * _sv3b.x, outward * _sv3b.y, outward * _sv3b.z));
         a.setLength(len, 0.08, 0.05);
       }
     }
@@ -520,12 +534,13 @@ export class Viewport {
     }
     this._arrows.forEach((a, i) => {
       if (i >= items.length) { a.visible = false; return; }
-      const v = new THREE.Vector3(...items[i].vel);
-      const speed = v.length();
+      const v = items[i].vel;
+      const speed = Math.hypot(v[0], v[1], v[2]);
       if (speed < 0.01) { a.visible = false; return; }
       a.visible = true;
-      a.position.set(...items[i].pos);
-      a.setDirection(v.normalize());
+      const p = items[i].pos;
+      a.position.set(p[0], p[1], p[2]);
+      a.setDirection(_sv3.set(v[0] / speed, v[1] / speed, v[2] / speed));
       a.setLength(Math.min(0.15 + speed * 0.22, 1.8), 0.09, 0.055);
     });
   }
@@ -549,8 +564,10 @@ export class Viewport {
     this._normViz.forEach((a, i) => {
       if (i >= items.length) { a.visible = false; return; }
       a.visible = true;
-      a.position.set(...items[i].pos);
-      a.setDirection(new THREE.Vector3(...items[i].dir).normalize());
+      const p = items[i].pos;
+      a.position.set(p[0], p[1], p[2]);
+      const d = items[i].dir;
+      a.setDirection(_sv3.set(d[0], d[1], d[2]).normalize());
       a.setLength(0.55, 0.07, 0.045);
     });
   }
@@ -612,6 +629,8 @@ export class Viewport {
     key.shadow.bias = -0.0002;
     key.shadow.normalBias = 0.02;   // 消斜面/球面接触带自阴影 acne（MAT-6）
     scene.add(key);
+    this._keyLight = key;           // 画质档位降/升阴影贴图用（PL-56）
+    this._qTier = 2;                // 2=high 1=med 0=low（只动阴影+分辨率，QUALITY BAR 下限）
     const fill = new THREE.DirectionalLight(0xbcccdd, 0.5);
     fill.position.set(-5, 3.5, -4);
     scene.add(fill);
@@ -911,6 +930,29 @@ export class Viewport {
     this.markDirty();
   }
 
+  // ============ 画质档（PL-56/58 自适应降档的唯一入口） ============
+  // 只动阴影贴图分辨率与画布 pixelRatio（下限 1），不动几何/材质/叠加层（QUALITY BAR）。
+  setQualityTier(tier) {
+    tier = Math.max(0, Math.min(2, tier | 0));
+    if (!this.renderer || this._qTier === tier) return;
+    this._qTier = tier;
+    const shadowSize = [512, 1024, 2048][tier];
+    const key = this._keyLight;
+    if (key && key.shadow.mapSize.x !== shadowSize) {
+      key.shadow.mapSize.set(shadowSize, shadowSize);
+      if (key.shadow.map) { key.shadow.map.dispose(); key.shadow.map = null; }   // 下一帧按新尺寸重建
+    }
+    const dpr = window.devicePixelRatio || 1;
+    const pr = Math.max(1, Math.min(dpr, [1, 1.5, 2][tier]));
+    if (this.renderer.getPixelRatio() !== pr) {
+      this.renderer.setPixelRatio(pr);
+      this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
+    }
+    this.markDirty();
+  }
+
+  qualityTier() { return this._qTier == null ? 2 : this._qTier; }
+
   // ============ 脏标记（静止帧跳过 GPU 渲染，PER-1） ============
   // 任何可能改变画面的事件都必须 markDirty()；controls/gizmo 在 init 里统一接线。
   // 保险丝：连续跳过最长 500ms——未知置脏源漏网时至多半秒旧画，不会冻结。
@@ -926,5 +968,8 @@ export class Viewport {
     // 这里只做高亮盒跟随与 GPU 提交。
     this.refreshHighlight();
     this.renderer.render(this.scene, this.camera);
+    // PL-50：HUD draw calls / 三角数（一次 render pass 的统计，读 info 不触发 GPU 工作）
+    this.drawCalls = this.renderer.info.render.calls;
+    this.triangles = this.renderer.info.render.triangles;
   }
 }

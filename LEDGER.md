@@ -407,3 +407,14 @@ spin(rotation+joint)/spring(box 墙+sphere 振子)/atwood(pulley+双 box) 全过
 
 仪器级暗色摄影棚工具界面。冷灰烟色 + 单点缀琥珀（仪表读数与激活态）；直角 hairline（radius 2px）；
 无渐变无玻璃拟态无 emoji 无 em-dash；数字等宽；动效只做状态反馈。
+
+## R4-PLAY 前沿 0（10-05，分支 r4-play / worktree D:\mechanica-lab-r4）
+
+运行态玩具手感六层 Goal 开线。与另一 agent 的 R3 编辑态线并行：git worktree 隔离开发，主工作区不动。
+PL-* 台账落 `docs/OPTIMIZATION-R4-PLAY.md`（PL-50..58 性能 / PL-1..8 声音 / PL-10..14 运行中交互 / PL-20..23 juice / PL-30..32 时间 / PL-40..44 反馈）。
+
+- **性能地基全落（PL-50..58 ☑）**：perf HUD（fps/frame p50·p95·max·1%low/四段分解/dc/tri/画质档，0.25s 节流+脏检查，`perf` 按钮+localStorage 持久）；DOM 读数 setTxt/setSt 脏检查 + liveGrid 元素缓存；曲线采样/重绘 3:1 解耦 + 总 E 线去 map 分配；`telemetryInto` 零分配遥测 + 叠加层六条目池 + 箭头 scratch Vector3 + joint viz 定点缓冲；碰撞环对象池（共享几何）；`_gravAccel` 乒乓双缓冲预分配（Verlet 的 g.acc 持引用，单缓冲会读零）；`setQualityTier` 阴影 512/1024/2048 + pixelRatio clamp(≥1)。
+- **p34-perf 26/26 全绿（新套件，headed 真 GPU）**：最重四预置（threeBody/newtonCradle/ballChain/collLab）墙钟 ≥30s 采样，p95 帧成本 0.3~0.5ms（预算 5ms 的 ~1/10），max ≤1.3ms，**零 >8ms 尖峰**，rAF 238fps 健康门，HUD 在画取证 + 开关刷新持久。数据在 R4 台账表。
+- **环境坑三条入账**：worktree 漏签 assets/（HDRI 404 静默降级）；headed 失焦 20fps 节流（rAF 健康门 + 禁节流 flag）；waitForFunction rAF 轮询 CDP 风暴（polling:500 + 页面函数禁引 Node 闭包）。
+- 测试基建：全部 UI 套件支持 `MECH_BASE` 环境变量（默认 8721 不变）——双 agent 并行各用各端口。
+- 全量回归 run-all 36 套全绿（p1 首跑缺 `tools/server/step_key.txt`，复制后复跑 19/19）；单测 78/78（+perfmon 6）。

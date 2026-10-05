@@ -4,7 +4,7 @@
 import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
 
-const BASE = 'http://127.0.0.1:8721';
+const BASE = process.env.MECH_BASE || 'http://127.0.0.1:8721';
 mkdirSync('shots/w5', { recursive: true });
 
 const results = [];

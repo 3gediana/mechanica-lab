@@ -6,7 +6,7 @@ import { mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
-const BASE = 'http://127.0.0.1:8721';
+const BASE = process.env.MECH_BASE || 'http://127.0.0.1:8721';
 const DIR = dirname(fileURLToPath(import.meta.url));
 const IMG_CELESTIAL = resolve(DIR, '../fixtures/question-celestial.png');
 const IMG_SPIN = resolve(DIR, '../fixtures/question-spin.png');

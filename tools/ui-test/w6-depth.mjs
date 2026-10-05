@@ -7,7 +7,7 @@ import { mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
-const BASE = 'http://127.0.0.1:8721';
+const BASE = process.env.MECH_BASE || 'http://127.0.0.1:8721';
 const NOISE_IMG = resolve(dirname(fileURLToPath(import.meta.url)), '../fixtures/question-noise.png');
 
 mkdirSync('shots/w6', { recursive: true });

@@ -2,7 +2,7 @@
 // 实体就绪、真实物理可推进、telemetry 无 NaN、无 console 错误。单浏览器/单标签，约 90s。
 import { chromium } from 'playwright';
 
-const BASE = 'http://127.0.0.1:8721';
+const BASE = process.env.MECH_BASE || 'http://127.0.0.1:8721';
 const PRESETS = [
   'pendulum', 'conical', 'vertCircle', 'springSHM', 'springVert', 'coupled', 'springGun',
   'collLab', 'bulletBlock', 'newtonCradle', 'ballChain', 'bounceCompare', 'galileoDrop',

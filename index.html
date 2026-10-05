@@ -258,6 +258,16 @@
     background: rgba(11,12,14,.6); padding: 3px 8px; border-radius: 2px; user-select: none;
   }
 
+  /* 性能 HUD（PL-50）：帧预算/分段耗时/draw calls，运行态常开可关 */
+  #perfHud {
+    position: fixed; right: calc(var(--right-w) + 12px); top: calc(var(--topbar-h) + 10px); z-index: 14;
+    font-family: var(--mono); font-size: 10px; line-height: 1.6; color: var(--dim);
+    letter-spacing: .04em; white-space: pre; text-align: right;
+    background: rgba(11,12,14,.72); padding: 4px 9px; border: 1px solid var(--line);
+    border-radius: 2px; user-select: none; pointer-events: none;
+  }
+  #btnPerf { font-size: 10px; letter-spacing: .1em; }
+
   /* 时间曲线面板 */
   #curvePanel {
     position: fixed; right: calc(var(--right-w) + 10px); bottom: calc(var(--simbar-h) + 10px); z-index: 18;
@@ -360,6 +370,7 @@
     <button id="btnFocus" title="聚焦选中（F）">聚焦</button>
   </div>
   <div class="spacer"></div>
+  <button id="btnPerf" title="性能 HUD：帧预算/分段耗时/draw calls（运行态采样，PL-50）">perf</button>
   <span id="modeChip" class="chip">编辑态</span>
   <a id="linkClassic" href="./classic.html" title="原固定轨道演示页（保留）">经典演示</a>
 </header>
@@ -574,6 +585,8 @@
     </table>
   </div>
 </div>
+
+<div id="perfHud" style="display:none"></div>
 
 <div id="veil">
   <div class="brand">MECHANICA</div>

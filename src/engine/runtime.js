@@ -43,6 +43,8 @@ export class Runtime {
     this.sensorReadings = new Map();  // 传感器读数（id → {speed/crossedT,...}），运行态数据不进文档
     this._colOwner = new Map();       // collider.handle → 实体 id（碰撞事件 O(1) 归属，PER-4）
     this._bindDocs = null;
+    this._gravBufs = [[], []];        // 天体加速度乒乓缓冲（PL-57，见 _gravAccel）
+    this._gravBufIdx = 0;
   }
 
   get doc() { return this._bindDocs; }
@@ -359,10 +361,19 @@ export class Runtime {
     }
   }
 
+  // PL-57 零分配：加速度写进乒乓预分配缓冲（_gravStep 里 g.acc 持有上一轮返回值，
+  // 单缓冲会在「vel += ½(acc+na)h」读到被清零的自身——必须双缓冲交替）。
+  // 天体 4 子步 × 120Hz = 每秒 480 次调用，原先每次 gs.map(() => [0,0,0]) 是 GC 大头。
   _gravAccel() {
     const G = this._bindDocs.G;
     const gs = this._grav;
-    const acc = gs.map(() => [0, 0, 0]);
+    this._gravBufIdx = 1 - (this._gravBufIdx || 0);
+    const acc = this._gravBufs[this._gravBufIdx];
+    if (acc.length !== gs.length) {
+      acc.length = gs.length;
+      for (let i = 0; i < gs.length; i++) acc[i] = [0, 0, 0];
+    }
+    for (let i = 0; i < gs.length; i++) { const a = acc[i]; a[0] = 0; a[1] = 0; a[2] = 0; }
     for (let i = 0; i < gs.length; i++) {
       for (let j = i + 1; j < gs.length; j++) {
         const dx = gs[j].pos[0] - gs[i].pos[0];
@@ -761,26 +772,38 @@ export class Runtime {
 
   // ============ 遥测（检查器实时区 / 底栏 / 解释器用）；天体走自积分状态 ============
   telemetry(id) {
+    const out = { pos: [0, 0, 0], vel: [0, 0, 0], angvel: [0, 0, 0], speed: 0, mass: 0, momentum: 0, keTrans: 0, height: 0 };
+    return this.telemetryInto(id, out) ? out : null;
+  }
+
+  // PL-53 零分配遥测：写入调用方复用的 out 对象（叠加层每帧 × 每实体调用，原先每次
+  // 新分配 4 数组 + 1 对象是 60Hz 下 GC 稳定来源）。有遥测返回 out，无则 null。
+  telemetryInto(id, out) {
     const b = this.binds.get(id);
     if (!b) return null;
-    let pos, vel, m, ang;
+    let m;
     if (b.body) {
       const p = b.body.translation(), v = b.body.linvel(), w = b.body.angvel();
-      pos = [p.x, p.y, p.z]; vel = [v.x, v.y, v.z]; m = b.body.mass();
-      ang = [w.x, w.y, w.z];
+      out.pos[0] = p.x; out.pos[1] = p.y; out.pos[2] = p.z;
+      out.vel[0] = v.x; out.vel[1] = v.y; out.vel[2] = v.z;
+      out.angvel[0] = w.x; out.angvel[1] = w.y; out.angvel[2] = w.z;
+      m = b.body.mass();
     } else {
       const g = this._gravMap.get(id);
       if (!g) return null;
-      pos = [...g.pos]; vel = [...g.vel]; m = g.m; ang = [0, 0, 0];
+      out.pos[0] = g.pos[0]; out.pos[1] = g.pos[1]; out.pos[2] = g.pos[2];
+      out.vel[0] = g.vel[0]; out.vel[1] = g.vel[1]; out.vel[2] = g.vel[2];
+      out.angvel[0] = 0; out.angvel[1] = 0; out.angvel[2] = 0;
+      m = g.m;
     }
-    const speed = Math.hypot(vel[0], vel[1], vel[2]);
-    return {
-      pos, vel, angvel: ang,
-      speed, mass: m,
-      momentum: m * speed,
-      keTrans: 0.5 * m * speed * speed,
-      height: pos[1],
-    };
+    const vx = out.vel[0], vy = out.vel[1], vz = out.vel[2];
+    const speed = Math.hypot(vx, vy, vz);
+    out.speed = speed;
+    out.mass = m;
+    out.momentum = m * speed;
+    out.keTrans = 0.5 * m * speed * speed;
+    out.height = out.pos[1];
+    return out;
   }
 
   // 选中实体最近一次碰撞（t, 对方 id）

@@ -14,9 +14,21 @@ import { createMaterials } from './materials.js';
 import { normalizeParse, planToOverrides } from './engine/parse-schema.js';
 import { explainRun } from './engine/explain.js';
 import { renderThumb } from './engine/thumbs.js';
+import { PerfMon } from './perfmon.js';
 
 const $ = (id) => document.getElementById(id);
 const veil = $('veil'), veilStatus = $('veilStatus'), errbar = $('errbar');
+
+// PL-51 DOM 读数脏检查：textContent 只在文本真变时写（0.15s 节流后仍每帧比较，
+// 但相同值零布局/零绘制提交——运行态读数是常驻 DOM 写入源）
+function setTxt(el, s) {
+  if (el && el.__t !== s) { el.__t = s; el.textContent = s; }
+}
+// 同口径的样式脏检查（守恒量条宽度/颜色是另一常驻样式写入源）
+function setSt(el, prop, v) {
+  const k = '__s' + prop;
+  if (el && el[k] !== v) { el[k] = v; el.style[prop] = v; }
+}
 
 function setLoad(msg) { veilStatus.textContent = msg; }
 function fail(msg) {
@@ -98,6 +110,11 @@ const AUTOSAVE_KEY = 'mechanica.autosave.v1';
     doc = saved || getPreset('incline');
     rebuildAll();
     bindUI();
+    {
+      let hudPref = true;
+      try { hudPref = localStorage.getItem('mech.perfhud') !== '0'; } catch (e) { /* 隐私模式默认开 */ }
+      setPerfHud(hudPref);
+    }
 
     appReady = true;
     veil.classList.add('gone');
@@ -628,6 +645,7 @@ function bindUI() {
   $('curveTabMotion').onclick = () => setCurveMode('motion');
   $('curveTabEnergy').onclick = () => setCurveMode('energy');
   $('btnCons').onclick = () => setCons(!consOn);
+  $('btnPerf').onclick = () => setPerfHud(!perfHudOn);
 
   $('sceneName').onchange = (e) => { doc.name = e.target.value || '未命名场景'; e.target.value = doc.name; autosave(); };
 
@@ -1079,6 +1097,7 @@ function ungroupMembers(ids) {
 
 // ============ 检查器 ============
 function renderInspector() {
+  _liveEls = null;   // liveGrid 随面板重建，读数元素缓存必须失效（PL-51）
   const box = $('inspBody'), empty = $('inspEmpty');
   const e = selectedId ? getEntity(doc, selectedId) : null;
   if (!e) {
@@ -1481,6 +1500,8 @@ function setCurves(on) {
   if (on) {
     curveData.t.length = 0; curveData.ke.length = 0; curveData.pe.length = 0;
     curveData.byId.clear(); curveData.epoch = -1; curveData.legendN = -1;
+    _curveDrawT = 1;               // 开关/换模式立即重绘一次（不等 0.45s 节流拍）
+    drawCurves();
   }
 }
 function setCurveMode(m) {
@@ -1492,6 +1513,7 @@ function setCurveMode(m) {
   curveData.t.length = 0; curveData.ke.length = 0; curveData.pe.length = 0;
   curveData.byId.clear(); curveData.epoch = -1; curveData.legendN = -1;
   updateCurveLegend();
+  drawCurves();
 }
 function setTrails(on) {
   trailsOn = on;
@@ -1519,13 +1541,13 @@ function updateAtwoodCons() {
   const aT = (a.m1 - a.m2) * g / (a.m1 + a.m2);
   const T = 2 * a.m1 * a.m2 * g / (a.m1 + a.m2);
   const err = Math.abs(a.aMeasured - aT) / Math.max(Math.abs(aT), 1e-9) * 100;
-  $('cwM').textContent = a.m1 + ' / ' + a.m2 + ' kg';
-  $('cwT').textContent = T.toFixed(3) + ' N';
-  $('cwAT').textContent = aT.toFixed(3) + ' m/s²';
-  $('cwAM').textContent = a.aMeasured.toFixed(3) + ' m/s²';
-  $('cwErr').textContent = err.toFixed(2) + '%';
-  $('cwErr').style.color = err < 8 ? 'var(--accent)' : 'var(--danger)';
-  $('cwTime').textContent = 't=' + a.simT.toFixed(1) + 's';
+  setTxt($('cwM'), a.m1 + ' / ' + a.m2 + ' kg');
+  setTxt($('cwT'), T.toFixed(3) + ' N');
+  setTxt($('cwAT'), aT.toFixed(3) + ' m/s²');
+  setTxt($('cwAM'), a.aMeasured.toFixed(3) + ' m/s²');
+  setTxt($('cwErr'), err.toFixed(2) + '%');
+  setSt($('cwErr'), 'color', err < 8 ? 'var(--accent)' : 'var(--danger)');
+  setTxt($('cwTime'), 't=' + a.simT.toFixed(1) + 's');
 }
 
 // ---------- 天体守恒量（系统 E/Lz + 相对轨道几何） ----------
@@ -1635,24 +1657,24 @@ function updateRotationCons() {
   if (!r) return;
   updateEnergyBar(r.KE / Math.max(rotationBase.KE, 1e-12));
   const dL = Math.abs(r.Lz - rotationBase.L) / Math.max(Math.abs(rotationBase.L), 1e-12) * 100;
-  $('crOmega').textContent = `${r.omega.toFixed(3)} rad/s`;
-  $('crI').textContent = `${r.I.toFixed(3)} kg·m²`;
-  $('crL').textContent = `${r.Lz.toFixed(3)} kg·m²/s`;
-  $('crLdrift').textContent = `${dL.toFixed(3)}%`;
-  $('crLdrift').style.color = dL < 1 ? 'var(--accent)' : 'var(--danger)';
-  $('crKE').textContent = `${r.KE.toFixed(3)} J`;
-  $('crR').textContent = r.sliderR != null ? `${r.sliderR.toFixed(3)} m` : '--';
-  $('crTorque').textContent = '0（无外力矩）';
-  $('crTime').textContent = `t=${r.simT.toFixed(1)}s`;
+  setTxt($('crOmega'), `${r.omega.toFixed(3)} rad/s`);
+  setTxt($('crI'), `${r.I.toFixed(3)} kg·m²`);
+  setTxt($('crL'), `${r.Lz.toFixed(3)} kg·m²/s`);
+  setTxt($('crLdrift'), `${dL.toFixed(3)}%`);
+  setSt($('crLdrift'), 'color', dL < 1 ? 'var(--accent)' : 'var(--danger)');
+  setTxt($('crKE'), `${r.KE.toFixed(3)} J`);
+  setTxt($('crR'), r.sliderR != null ? `${r.sliderR.toFixed(3)} m` : '--');
+  setTxt($('crTorque'), '0（无外力矩）');
+  setTxt($('crTime'), `t=${r.simT.toFixed(1)}s`);
 }
 
 function updateEnergyBar(rate, keFrac = 1) {
   const pct = Math.max(0, Math.min(rate, 1.5)) * 100 / 1.5;   // 条量程 0-150%，66.7% 刻度=100%
-  $('ebFill').style.width = (pct * keFrac) + '%';              // KE 段（琥珀）
-  $('ebFillPE').style.width = (pct * (1 - keFrac)) + '%';      // PE 段（蓝，堆叠）
-  $('ebFillPE').style.left = (pct * keFrac) + '%';
-  $('ebFill').style.background = rate > 1.02 ? 'var(--text)' : 'var(--accent)';
-  $('ebPct').textContent = (rate * 100).toFixed(1) + '%';
+  setSt($('ebFill'), 'width', (pct * keFrac) + '%');           // KE 段（琥珀）
+  setSt($('ebFillPE'), 'width', (pct * (1 - keFrac)) + '%');   // PE 段（蓝，堆叠）
+  setSt($('ebFillPE'), 'left', (pct * keFrac) + '%');
+  setSt($('ebFill'), 'background', rate > 1.02 ? 'var(--text)' : 'var(--accent)');
+  setTxt($('ebPct'), (rate * 100).toFixed(1) + '%');
 }
 
 function updateConsbar() {
@@ -1671,29 +1693,29 @@ function updateConsbar() {
   if (!momentumBase || momentumBase.epoch !== runtime.epoch) momentumBase = { epoch: runtime.epoch, KE: live.ke };
   if (momentumBase.KE < 0.05) {
     // 初始静止场景（KE0≈0）：保持率无意义，隐藏比例条数字
-    $('ebFill').style.width = '0%';
-    $('ebPct').textContent = '基准≈0';
+    setSt($('ebFill'), 'width', '0%');
+    setTxt($('ebPct'), '基准≈0');
   } else {
     updateEnergyBar(live.ke / momentumBase.KE);
   }
-  $('cbP').textContent = `${live.p[0].toFixed(3)} N·s`;
-  $('cbKE').textContent = `${live.ke.toFixed(3)} J`;
+  setTxt($('cbP'), `${live.p[0].toFixed(3)} N·s`);
+  setTxt($('cbKE'), `${live.ke.toFixed(3)} J`);
   const rep = runtime.collisionReports[runtime.collisionReports.length - 1];
   if (!rep) {
-    $('cbT').textContent = '尚无碰撞';
-    $('cbPerr').textContent = '--';
-    ['cbPb', 'cbPa', 'cbKEb', 'cbKEa'].forEach((id) => { $(id).textContent = '--'; });
+    setTxt($('cbT'), '尚无碰撞');
+    setTxt($('cbPerr'), '--');
+    ['cbPb', 'cbPa', 'cbKEb', 'cbKEa'].forEach((id) => { setTxt($(id), '--'); });
     return;
   }
-  $('cbT').textContent = `t=${rep.t.toFixed(3)}s`;
+  setTxt($('cbT'), `t=${rep.t.toFixed(3)}s`);
   const pB = rep.pBefore[0], pA = rep.pAfter[0];
   const err = Math.abs(pB) > 1e-9 ? Math.abs(pA - pB) / Math.abs(pB) * 100 : 0;
-  $('cbPerr').textContent = `${err.toFixed(3)}%`;
-  $('cbPerr').style.color = err < 1 ? 'var(--accent)' : 'var(--danger)';
-  $('cbPb').textContent = `${pB.toFixed(3)} N·s`;
-  $('cbPa').textContent = `${pA.toFixed(3)} N·s`;
-  $('cbKEb').textContent = `${rep.keBefore.toFixed(3)} J`;
-  $('cbKEa').textContent = `${rep.keAfter.toFixed(3)} J`;
+  setTxt($('cbPerr'), `${err.toFixed(3)}%`);
+  setSt($('cbPerr'), 'color', err < 1 ? 'var(--accent)' : 'var(--danger)');
+  setTxt($('cbPb'), `${pB.toFixed(3)} N·s`);
+  setTxt($('cbPa'), `${pA.toFixed(3)} N·s`);
+  setTxt($('cbKEb'), `${rep.keBefore.toFixed(3)} J`);
+  setTxt($('cbKEa'), `${rep.keAfter.toFixed(3)} J`);
 }
 
 // 阿特伍德遥测：重侧位移二次拟合加速度（y = ½at² + v0t + y0，三点拟合足够）
@@ -1732,35 +1754,45 @@ function updateAstroCons() {
   updateEnergyBar(a.E / astroBase.E, a.KE / Math.max(a.KE + Math.abs(a.PE), 1e-12));   // KE/PE 构成分色
   const dE = Math.abs(a.E - astroBase.E) / Math.max(Math.abs(astroBase.E), 1e-12) * 100;
   const dL = Math.abs(a.Lz - astroBase.L) / Math.max(Math.abs(astroBase.L), 1e-12) * 100;
-  $('caE').textContent = `${a.E.toFixed(3)} J`;
-  $('caEdrift').textContent = `${dE.toFixed(3)}%`;
-  $('caEdrift').style.color = dE < 2 ? 'var(--accent)' : 'var(--danger)';
-  $('caL').textContent = `${a.Lz.toFixed(3)} kg·m²/s`;
-  $('caLdrift').textContent = `${dL.toFixed(3)}%`;
-  $('caLdrift').style.color = dL < 2 ? 'var(--accent)' : 'var(--danger)';
-  $('caEcc').textContent = a.ecc != null ? a.ecc.toFixed(3) : '--';
-  $('caT').textContent = a.period != null ? `${a.period.toFixed(2)} s` : '采样中';
-  $('caR').textContent = a.rmin != null ? `${a.rmin.toFixed(2)} / ${a.rmax.toFixed(2)} m` : '--';
-  $('caTime').textContent = `t=${runtime.simT.toFixed(1)}s`;
+  setTxt($('caE'), `${a.E.toFixed(3)} J`);
+  setTxt($('caEdrift'), `${dE.toFixed(3)}%`);
+  setSt($('caEdrift'), 'color', dE < 2 ? 'var(--accent)' : 'var(--danger)');
+  setTxt($('caL'), `${a.Lz.toFixed(3)} kg·m²/s`);
+  setTxt($('caLdrift'), `${dL.toFixed(3)}%`);
+  setSt($('caLdrift'), 'color', dL < 2 ? 'var(--accent)' : 'var(--danger)');
+  setTxt($('caEcc'), a.ecc != null ? a.ecc.toFixed(3) : '--');
+  setTxt($('caT'), a.period != null ? `${a.period.toFixed(2)} s` : '采样中');
+  setTxt($('caR'), a.rmin != null ? `${a.rmin.toFixed(2)} / ${a.rmax.toFixed(2)} m` : '--');
+  setTxt($('caTime'), `t=${runtime.simT.toFixed(1)}s`);
 }
 
 // ============ 底栏读数 + 检查器实时区 ============
 let roTimer = 0;
 let _seenReports = 0;
+let _liveEls = null;      // PL-51：liveGrid 读数元素缓存（原每项每轮 querySelector）
+function liveEls() {
+  if (_liveEls) return _liveEls;
+  const grid = document.getElementById('liveGrid');
+  _liveEls = { grid, map: new Map() };
+  if (grid) {
+    for (const el of grid.querySelectorAll('[data-lv]')) _liveEls.map.set(el.dataset.lv, el);
+  }
+  return _liveEls;
+}
 function updateReadouts() {
-  $('roT').textContent = runtime.simT.toFixed(3);
-  $('roN').textContent = doc.entities.length;
+  setTxt($('roT'), runtime.simT.toFixed(3));
+  setTxt($('roN'), String(doc.entities.length));
   const e = selectedId ? getEntity(doc, selectedId) : null;
   const roSel = $('roSel');
-  if (!e) { roSel.textContent = '未选中'; }
+  if (!e) { setTxt(roSel, '未选中'); }
   else {
     const t = runtime.telemetry(e.id);
-    roSel.textContent = t
+    setTxt(roSel, t
       ? `${e.name}  v=${t.speed.toFixed(2)}m/s  h=${t.height.toFixed(2)}m  |p|=${t.momentum.toFixed(2)}`
-      : `${e.name}  仅视觉`;
-    const grid = document.getElementById('liveGrid');
+      : `${e.name}  仅视觉`);
+    const { grid, map } = liveEls();
     if (grid) {
-      const set = (k, v) => { const el = grid.querySelector(`[data-lv=${k}]`); if (el) el.textContent = v; };
+      const set = (k, v) => { const el = map.get(k); if (el) setTxt(el, v); };
       if (t) {
         set('speed', t.speed.toFixed(3));
         set('height', t.height.toFixed(3));
@@ -1768,7 +1800,7 @@ function updateReadouts() {
         set('momentum', t.momentum.toFixed(3));
         set('keTrans', t.keTrans.toFixed(3));
         set('omega', `${Math.hypot(t.angvel[0], t.angvel[1], t.angvel[2]).toFixed(2)} rad/s`);
-        set('vel', `[${t.vel.map((x) => x.toFixed(2)).join(', ')}]`);
+        set('vel', `[${t.vel[0].toFixed(2)}, ${t.vel[1].toFixed(2)}, ${t.vel[2].toFixed(2)}]`);
         const col = runtime.lastCollisionFor(e.id);
         set('coll', col ? `t=${col.t.toFixed(2)}s` : '无');
         // 滚动状态（Goal 六「滚动或滑动状态」）：|v| vs |ω|r 判定（r 已知且角速度非零才有意义）
@@ -1811,8 +1843,12 @@ function sampleCurves() {
     curveData.t.shift(); curveData.ke.shift(); curveData.pe.shift();
     for (const sr of curveData.byId.values()) { sr.speed.shift(); sr.height.shift(); }
   }
-  drawCurves();
+  // PL-52：采样（0.15s，数据必须连续）与重绘（0.45s，canvas 全幅重画贵）解耦节流
+  _curveDrawT += 0.15;
+  if (_curveDrawT >= 0.45) { _curveDrawT = 0; drawCurves(); }
 }
+
+let _curveDrawT = 1;   // 初值 1：首次采样后立即出图
 
 function drawCurves() {
   const cv = $('curveCanvas');
@@ -1833,14 +1869,15 @@ function drawCurves() {
   }
   const t0 = curveData.t[0], t1 = curveData.t[n - 1];
   const span = Math.max(t1 - t0, 1e-6);
-  const trace = (data, color, dash) => {
+  // PL-52：取值函数代替数组参数——能量总 E 线不再 ke.map() 新分配（每次重绘 300 元素数组）
+  const trace = (get, color, dash) => {
     ctx.strokeStyle = color;
     ctx.lineWidth = 1.4;
     ctx.setLineDash(dash || []);
     ctx.beginPath();
     for (let i = 0; i < n; i++) {
       const x = ((curveData.t[i] - t0) / span) * (W - 8) + 4;
-      const y = H - 6 - (Math.abs(data[i]) / vmax) * (H - 12);
+      const y = H - 6 - (Math.abs(get(i)) / vmax) * (H - 12);
       if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     }
     ctx.stroke();
@@ -1849,18 +1886,18 @@ function drawCurves() {
   if (curveMode === 'energy') {
     // 能量堆叠对照（Goal 第九章「能量曲线」）：KE 绿 / PE 蓝 / 总 E 金——
     // 光滑场景 E 平线（守恒可视），摩擦/非弹性碰撞场景 E 阶跃衰减
-    trace(curveData.ke, '#7dc87d');
-    trace(curveData.pe, '#5b8dd9');
-    trace(curveData.ke.map((v, i) => v + curveData.pe[i]), '#d9a441');
+    trace((i) => curveData.ke[i], '#7dc87d');
+    trace((i) => curveData.pe[i], '#5b8dd9');
+    trace((i) => curveData.ke[i] + curveData.pe[i], '#d9a441');
   } else {
     let i = 0;
     for (const sr of curveData.byId.values()) {
       const c = CURVE_PALETTE[i % CURVE_PALETTE.length];
-      trace(sr.speed, c);              // 速率：实线
-      trace(sr.height, c, [3, 3]);     // 高度：同色虚线
+      trace((j) => sr.speed[j], c);              // 速率：实线
+      trace((j) => sr.height[j], c, [3, 3]);     // 高度：同色虚线
       i++;
     }
-    trace(curveData.ke, '#7dc87d');    // 系统KE：绿实线
+    trace((j) => curveData.ke[j], '#7dc87d');    // 系统KE：绿实线
   }
   const legendKey = curveMode + ':' + curveData.byId.size;
   if (curveData.legendN !== legendKey) {
@@ -1976,12 +2013,89 @@ function stopReplay() {
   updateSimbarStatic();
 }
 
+// ============ 叠加层条目池（PL-53/54 零分配） ============
+// tick 每帧为各叠加层构建 items——原先每帧 new 数组/对象/Vector3 是 GC 稳定来源，
+// 表现为秒级周期性帧尖峰。池条目跨帧复用，帧首 reset、帧尾 trim。
+function mkPool(shape) {
+  const arr = [];
+  let n = 0;
+  return {
+    list: arr,
+    reset() { n = 0; },
+    next() { if (n >= arr.length) arr.push(shape()); return arr[n++]; },
+    retract() { n--; },                 // next 后发现无效（如遥测缺失）退回槽位
+    trim() { arr.length = n; },
+  };
+}
+const POOL_TEL = mkPool(() => ({ pos: [0, 0, 0], vel: [0, 0, 0], angvel: [0, 0, 0], speed: 0, mass: 0, momentum: 0, keTrans: 0, height: 0 }));
+const POOL_NORM = mkPool(() => ({ pos: [0, 0, 0], dir: [0, 0, 0] }));
+const POOL_FORCE = mkPool(() => ({ pos: null, contact: null, gravity: [0, 0, 0], accel: null, normal: [0, 0, 0], friction: [0, 0, 0] }));
+const POOL_TENS = mkPool(() => ({ aPos: [0, 0, 0], bPos: [0, 0, 0], tA: 0, tB: 0 }));
+const POOL_SPRING = mkPool(() => ({ aPos: [0, 0, 0], bPos: [0, 0, 0], fA: [0, 0, 0], k: 0, len: 0, stretch: 0, F: 0, aName: '', bName: '' }));
+const POOL_JOINT = mkPool(() => ({ from: [0, 0, 0], to: [0, 0, 0], ok: true }));
+const _ZERO3 = [0, 0, 0];
+const _nvN = new THREE.Vector3(), _nvP = new THREE.Vector3();   // 斜坡法线 scratch
+
+// ============ 帧预算仪表（PL-50） + 自适应画质档（PL-56/58） ============
+const perfMon = new PerfMon(2400);   // 240Hz 屏 × 10s 全覆盖（30s 采样窗的最近 10s 样本）
+let _fps = 60;                  // rAF 实测帧率 EMA
+let _perfHudT = 0;
+let perfHudOn = true;           // HUD 常开（验收形式），可关，localStorage 持久
+let qTier = 2;                  // 自适应档（0/1/2），只动分辨率与阴影
+let _tierT = 0, _tierUpStreak = 0;
+function setPerfHud(on) {
+  perfHudOn = !!on;
+  try { localStorage.setItem('mech.perfhud', perfHudOn ? '1' : '0'); } catch (e) { /* 隐私模式忽略 */ }
+  const el = $('perfHud');
+  if (el) el.style.display = perfHudOn ? 'block' : 'none';
+  const btn = $('btnPerf');
+  if (btn) btn.classList.toggle('hot', perfHudOn);
+}
+// 每帧收口：渲染帧提交分段样本；HUD 0.25s 节流拼串（脏检查后才写 DOM）；1s 窗口评估降/升档
+function tickPerfHud(rawDt, rendered, phys, ov, rnd, dom) {
+  if (rendered) {
+    perfMon.commit({ frame: phys + ov + rnd + dom, physics: phys, overlay: ov, render: rnd, dom, calls: viewport.drawCalls, tris: viewport.triangles });
+  }
+  _perfHudT += rawDt;
+  if (_perfHudT < 0.25) return;
+  _perfHudT = 0;
+  _tierT += 0.25;
+  if (_tierT >= 1) {
+    _tierT = 0;
+    if (mode === 'run' && !paused && perfMon.n > 120) {
+      const s = perfMon.summary(240);
+      if (s && qTier > 0 && s.frame.p95 > 5) {           // 欠载：降档（先降阴影后降分辨率，setQualityTier 内部实现）
+        qTier--; viewport.setQualityTier(qTier); _tierUpStreak = 0;
+      } else if (s && qTier < 2 && s.frame.p95 < 2.2 && s.spike8 === 0) {
+        if (++_tierUpStreak >= 4) { qTier++; viewport.setQualityTier(qTier); _tierUpStreak = 0; }   // 余量充足 4s 后升档
+      } else {
+        _tierUpStreak = 0;
+      }
+    } else if (mode === 'edit' && qTier !== 2) {
+      qTier = 2; viewport.setQualityTier(2);             // 编辑态永远满画质
+    }
+  }
+  if (!perfHudOn) return;
+  const s = perfMon.summary(600);
+  let txt;
+  if (!s) {
+    txt = 'perf 待运行采样…';
+  } else {
+    txt = `${Math.round(_fps)} FPS · frame ${s.frame.p50.toFixed(2)}ms p95 ${s.frame.p95.toFixed(2)} max ${s.frame.max.toFixed(2)} 1%l ${s.frame.low1.toFixed(2)}${s.spike8 ? ` ⚠>8ms×${s.spike8}` : ''}`
+      + `\nphys ${s.physics.p95.toFixed(2)} ov ${s.overlay.p95.toFixed(2)} rnd ${s.render.p95.toFixed(2)} dom ${s.dom.p95.toFixed(2)} · dc ${s.calls} tri ${(s.tris / 1000).toFixed(0)}k · Q${qTier}`;
+  }
+  const el = $('perfHud');
+  if (el && el.__t !== txt) { el.__t = txt; el.textContent = txt; }
+}
+
 // ============ 主循环 ============
 const clock = new THREE.Clock();
 function tick() {
   requestAnimationFrame(tick);
   if (!appReady) return;
   const rawDt = Math.min(clock.getDelta(), 0.05);
+  if (rawDt > 0) _fps += (Math.min(1 / rawDt, 240) - _fps) * 0.06;
+  const _t0 = performance.now();
   if (replaying) {
     if (!scrubbing) replayIdx += Math.max(1, Math.round(rawDt * 60));   // 60 帧/s 回放速率（拖动时逐帧）
     if (replayIdx >= runtime.frames.length) { stopReplay(); }
@@ -1994,6 +2108,7 @@ function tick() {
     runtime.advance(rawDt * timeScale);
     viewport.markDirty();
   }
+  const _tPhys = performance.now();
   viewport.controls.update();     // 阻尼收敛期持续触发 change→脏（render 内不再重复调用）
   viewport.tickFocus();
   viewport.tickPose();
@@ -2013,78 +2128,97 @@ function tick() {
       if (curvesOn && mode === 'run') sampleCurves();
       updateScaleReadout();
     }
+    tickPerfHud(rawDt, false, 0, 0, 0, 0);
     return;
   }
   if (vectorsOn) {
     // 编辑态显示初速度，运行/暂停显示当前速度（遥测即当前世界态）；
     // per-entity「显示速度向量」关闭的体不画（检查器观察组）
-    const items = [];
+    POOL_TEL.reset();
     for (const e of doc.entities) {
       if (e.physics.body !== 'dynamic' || e.visible === false) continue;
       if (e.params && e.params.showVel === false) continue;
-      const t = runtime.telemetry(e.id);
-      if (t) items.push({ pos: t.pos, vel: t.vel });
+      const t = POOL_TEL.next();
+      if (!runtime.telemetryInto(e.id, t)) POOL_TEL.retract();
     }
-    viewport.updateVelocityArrows(items);
+    POOL_TEL.trim();
+    viewport.updateVelocityArrows(POOL_TEL.list);
   }
   // 斜坡法线可视化（Goal 六「是否显示法线」per-entity）：坡面中心沿法向青色箭头
   {
-    const nitems = [];
+    POOL_NORM.reset();
     for (const e of doc.entities) {
       if (e.type !== 'ramp' || e.visible === false) continue;
       if (!(e.params && e.params.showNormals)) continue;
       const b = runtime.binds.get(e.id);
       if (!b || !b.mesh) continue;
       const H = e.params.height, L = e.params.length;
-      const n = new THREE.Vector3(H, L, 0).normalize().applyQuaternion(b.mesh.quaternion);
-      const p = b.mesh.localToWorld(new THREE.Vector3(0, H / 2, 0));
-      nitems.push({ pos: [p.x, p.y, p.z], dir: [n.x, n.y, n.z] });
+      _nvN.set(H, L, 0).normalize().applyQuaternion(b.mesh.quaternion);
+      _nvP.set(0, H / 2, 0);
+      b.mesh.localToWorld(_nvP);
+      const it = POOL_NORM.next();
+      it.pos[0] = _nvP.x; it.pos[1] = _nvP.y; it.pos[2] = _nvP.z;
+      it.dir[0] = _nvN.x; it.dir[1] = _nvN.y; it.dir[2] = _nvN.z;
     }
-    viewport.updateNormalViz(nitems);
+    POOL_NORM.trim();
+    viewport.updateNormalViz(POOL_NORM.list);
   }
   if (forcesOn) {
     // 通用接触法向：Rapier 接触对收集（任意面：地面/斜坡/墙面/曲轨），运行过才有；
     // 绳/弹簧类无接触对 → 不分解、显示接触合力（张力语义），不再依赖斜面几何特判
     // （wantContactNormals 已前移到主循环脏门槛之前，每帧同步）
-    const items = [];
+    POOL_TEL.reset();
+    POOL_FORCE.reset();
     const gMag = Math.abs(doc.gravity ?? -9.81);            // PAR-1：重力箭头随场景重力卡（月球卡曾画错）
     for (const e of doc.entities) {
       if (e.physics.body !== 'dynamic' || e.visible === false) continue;
-      const t = runtime.telemetry(e.id);
-      if (!t) continue;
-      const contact = runtime.contactForces.get(e.id) || null;
-      const gravity = [0, gMag * (e.physics.gravityScale != null ? e.physics.gravityScale : 1) * t.mass, 0];
-      const item = { pos: t.pos, contact, gravity, accel: runtime.accels.get(e.id) || [0, 0, 0] };
+      const t = POOL_TEL.next();
+      if (!runtime.telemetryInto(e.id, t)) { POOL_TEL.retract(); continue; }
+      const it = POOL_FORCE.next();
+      it.pos = t.pos;
+      it.contact = runtime.contactForces.get(e.id) || null;
+      it.gravity[0] = 0;
+      it.gravity[1] = gMag * (e.physics.gravityScale != null ? e.physics.gravityScale : 1) * t.mass;
+      it.gravity[2] = 0;
+      it.accel = runtime.accels.get(e.id) || _ZERO3;
       const nrm = runtime.contactNormals.get(e.id);
-      if (viewport.decompose && contact && nrm) {
-        const dot = contact[0] * nrm[0] + contact[1] * nrm[1] + contact[2] * nrm[2];
-        const normal = [dot * nrm[0], dot * nrm[1], dot * nrm[2]];         // 支持力 = (F·n̂)n̂
-        const friction = [contact[0] - normal[0], contact[1] - normal[1], contact[2] - normal[2]];   // 摩擦类 = F − N
-        item.normal = normal;
-        item.friction = friction;
-        item.contact = null;                                                // 分解模式不显示合力
+      if (viewport.decompose && it.contact && nrm) {
+        const dot = it.contact[0] * nrm[0] + it.contact[1] * nrm[1] + it.contact[2] * nrm[2];
+        it.normal[0] = dot * nrm[0]; it.normal[1] = dot * nrm[1]; it.normal[2] = dot * nrm[2];   // 支持力 = (F·n̂)n̂
+        it.friction[0] = it.contact[0] - it.normal[0];
+        it.friction[1] = it.contact[1] - it.normal[1];
+        it.friction[2] = it.contact[2] - it.normal[2];   // 摩擦类 = F − N
+        it.contact = null;                               // 分解模式不显示合力
       }
-      items.push(item);
     }
-    viewport.updateForceArrows(items);
+    POOL_TEL.trim();
+    POOL_FORCE.trim();
+    viewport.updateForceArrows(POOL_FORCE.list);
     // 绳张力箭头：T = m·|a − g_vec|（轻绳端点物体受力 = 重力 + 张力，加速度差分反推）
     if (viewport.tensionsOn) {
-      const tItems = [];
+      POOL_TENS.reset();
       for (const e of doc.entities) {
         if (e.type !== 'rope' || !Array.isArray(e.attach) || e.attach.length !== 2) continue;
         const ba = runtime.binds.get(e.attach[0]), bb = runtime.binds.get(e.attach[1]);
         if (!ba || !bb || !ba.mesh || !bb.mesh) continue;
-        const tel = runtime.telemetry(e.attach[0]);
+        const t = POOL_TEL.next();
+        if (!runtime.telemetryInto(e.attach[0], t)) { POOL_TEL.retract(); continue; }
         const acc = runtime.accels.get(e.attach[0]);
-        const T = tel && acc ? tel.mass * Math.hypot(acc[0], acc[1] + gMag, acc[2]) : 0;
-        tItems.push({ aPos: ba.mesh.position.toArray(), bPos: bb.mesh.position.toArray(), tA: T, tB: T });
+        const T = acc ? t.mass * Math.hypot(acc[0], acc[1] + gMag, acc[2]) : 0;
+        const it = POOL_TENS.next();
+        const pa = ba.mesh.position, pb = bb.mesh.position;
+        it.aPos[0] = pa.x; it.aPos[1] = pa.y; it.aPos[2] = pa.z;
+        it.bPos[0] = pb.x; it.bPos[1] = pb.y; it.bPos[2] = pb.z;
+        it.tA = T; it.tB = T;
       }
-      viewport.updateTensionArrows(tItems);
+      POOL_TEL.trim();
+      POOL_TENS.trim();
+      viewport.updateTensionArrows(POOL_TENS.list);
     }
     // 弹簧胡克力箭头（第九章「弹力」独立分列）：F = k·|Δx| 沿轴，拉=指向对方、压=推离；
     // 阻尼力不画（弹力语义=胡克项）；数据同时供 springForceState 数值对照
     if (viewport.springsOn) {
-      const sItems = [];
+      POOL_SPRING.reset();
       for (const e of doc.entities) {
         if (e.type !== 'spring' || !Array.isArray(e.attach) || e.attach.length !== 2) continue;
         const ba = runtime.binds.get(e.attach[0]), bb = runtime.binds.get(e.attach[1]);
@@ -2097,34 +2231,37 @@ function tick() {
         const stretch = len - rest;
         const F = k * stretch;
         const ux = dx / len, uy = dy / len, uz = dz / len;
-        sItems.push({
-          aPos: pa.toArray(), bPos: pb.toArray(),
-          fA: [F * ux, F * uy, F * uz],
-          k, len, stretch, F,
-          aName: ba.entity.name, bName: bb.entity.name,
-        });
+        const it = POOL_SPRING.next();
+        it.aPos[0] = pa.x; it.aPos[1] = pa.y; it.aPos[2] = pa.z;
+        it.bPos[0] = pb.x; it.bPos[1] = pb.y; it.bPos[2] = pb.z;
+        it.fA[0] = F * ux; it.fA[1] = F * uy; it.fA[2] = F * uz;
+        it.k = k; it.len = len; it.stretch = stretch; it.F = F;
+        it.aName = ba.entity.name; it.bName = bb.entity.name;
       }
-      viewport.updateSpringArrows(sItems);
-      springForceItems = sItems;
+      POOL_SPRING.trim();
+      viewport.updateSpringArrows(POOL_SPRING.list);
+      springForceItems = POOL_SPRING.list;
     }
   }
   // 约束关系可视化：选中实体的 joints 连线（编辑/运行态均显示；多选也画）
   {
-    const jItems = [];
+    POOL_JOINT.reset();
     for (const id of selectedIds.length ? selectedIds : (selectedId ? [selectedId] : [])) {
       const e = getEntity(doc, id);
       const b = runtime.binds.get(id);
       if (!e || !b || !b.mesh) continue;
       for (const j of (e.joints || [])) {
         const tb = runtime.binds.get(j.target);
-        jItems.push({
-          from: b.mesh.position.toArray(),
-          to: tb && tb.mesh ? tb.mesh.position.toArray() : b.mesh.position.toArray(),
-          ok: !!tb,
-        });
+        const it = POOL_JOINT.next();
+        const p = b.mesh.position;
+        it.from[0] = p.x; it.from[1] = p.y; it.from[2] = p.z;
+        if (tb && tb.mesh) { it.to[0] = tb.mesh.position.x; it.to[1] = tb.mesh.position.y; it.to[2] = tb.mesh.position.z; }
+        else { it.to[0] = p.x; it.to[1] = p.y; it.to[2] = p.z; }
+        it.ok = !!tb;
       }
     }
-    viewport.updateJointViz(jItems);
+    POOL_JOINT.trim();
+    viewport.updateJointViz(POOL_JOINT.list);
   }
   if (trailsOn) viewport.updateTrails(runtime.trails);
   const nRep = runtime.collisionReports.length;
@@ -2136,8 +2273,10 @@ function tick() {
     }
     _seenReports = nRep;
   }
+  const _tOv = performance.now();
   viewport.render();     // tickFocus/tickPose 已在脏门槛前统一调用（FEEL-96/PER-83：此前双调致动画 2 倍速收敛）
-  viewport.tickImpacts(performance.now());
+  const _tRnd = performance.now();
+  viewport.tickImpacts(_tRnd);
   roTimer += rawDt;
   if (roTimer > 0.15) {
     roTimer = 0;
@@ -2146,6 +2285,7 @@ function tick() {
     if (curvesOn && mode === 'run') sampleCurves();
     updateScaleReadout();
   }
+  tickPerfHud(rawDt, true, _tPhys - _t0, _tOv - _tPhys, _tRnd - _tOv, performance.now() - _tRnd);
 }
 
 // ============ Agent 题目解析面板 ============
@@ -3390,6 +3530,15 @@ window.MECH = {
   vectorState: () => ({ on: vectorsOn, ...viewport.arrowStats() }),
   selectionState: () => ({ ids: [...selectedIds], main: selectedId }),
   impactCount: () => viewport.impactCount(),
+  // PL-50 帧预算仪表（p34-perf 断言通道）：分段分位摘要 + 原始样本
+  perf: (win) => {
+    const s = perfMon.summary(win || 600);
+    return s ? { ...s, fps: Math.round(_fps), tier: qTier } : null;
+  },
+  perfSamples: (key, win) => perfMon.samples(key || 'frame', win || 1200),
+  setQualityTier: (t) => { qTier = Math.max(0, Math.min(2, t | 0)); viewport.setQualityTier(qTier); return qTier; },
+  qualityTier: () => qTier,
+  perfHud: (on) => setPerfHud(on == null ? !perfHudOn : !!on),
   tensionState: () => ({ on: viewport.tensionsOn, ...viewport.tensionStats() }),
   forceState: () => ({ on: forcesOn, decompose: viewport.decompose, normals: runtime.contactNormals.size, ...viewport.forceArrowStats() }),
   springForceState: () => ({

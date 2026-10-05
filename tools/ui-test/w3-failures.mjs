@@ -6,7 +6,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
-const BASE = 'http://127.0.0.1:8721';
+const BASE = process.env.MECH_BASE || 'http://127.0.0.1:8721';
 const QUESTION_IMG = resolve(dirname(fileURLToPath(import.meta.url)), '../fixtures/question-incline.png');
 
 mkdirSync('shots/w3', { recursive: true });
