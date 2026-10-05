@@ -254,17 +254,22 @@ try {
   await page.waitForTimeout(200);
 
   // ===== A18 连续建第二/第三个场景（重复使用）=====
+  // （放置防穿模后相邻默认槽位可能互相阻挡——每场景首件必空，测「连续建场景目录复用」本身）
   await page.locator('.comp-item', { hasText: '斜坡' }).first().click();
+  await page.waitForTimeout(200);
+  const scene2N = (await page.evaluate(() => window.MECH.doc())).entities.length;
+  await page.click('#btnNew');
   await page.waitForTimeout(200);
   await page.locator('.comp-item', { hasText: '球' }).first().click();
   await page.waitForTimeout(200);
-  const scene2N = (await page.evaluate(() => window.MECH.doc())).entities.length;
+  const scene2bN = (await page.evaluate(() => window.MECH.doc())).entities.length;
   await page.click('#btnNew');
   await page.waitForTimeout(200);
   await page.locator('.comp-item', { hasText: '方块' }).first().click();
   await page.waitForTimeout(200);
   const scene3N = (await page.evaluate(() => window.MECH.doc())).entities.length;
-  check('A18 连续第二/第三场景创建', scene2N === 2 && scene3N === 1, `s2=${scene2N} s3=${scene3N}`);
+  check('A18 连续多场景创建（目录复用）', scene2N === 1 && scene2bN === 1 && scene3N === 1,
+    `s2=${scene2N} s2b=${scene2bN} s3=${scene3N}`);
 
   // ===== B. 三大教学预置（打开→改参数→运行→暂停/单步/重置→守恒量→保存重开）=====
   // 动量守恒（预置自动开矢量/守恒条）

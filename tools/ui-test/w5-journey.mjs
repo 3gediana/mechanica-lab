@@ -141,11 +141,13 @@ try {
   await page.waitForTimeout(1200);
   const j6a = await page.evaluate(() => window.MECH.state().count);
   check('J6a 刷新后 autosave 恢复(解析建场场景保留)', j6a >= 2, `n=${j6a}`);
-  // 继续编辑：加一个方块
-  await page.locator('.comp-item', { hasText: '方块' }).first().click();
+  // 继续编辑：恢复场景可能已占默认槽位（放置防穿模会拒）——开新场景验证「还能加件」本身
+  await page.click('#btnNew');
+  await page.waitForTimeout(250);
+  await page.locator('.comp-item', { hasText: '圆柱' }).first().click();
   await page.waitForTimeout(300);
   const j6b = await page.evaluate(() => window.MECH.state().count);
-  check('J6b 恢复后继续编辑', j6b === j6a + 1, `n=${j6b}`);
+  check('J6b 恢复后仍可继续编辑（新场景加圆柱）', j6b === 1, `n=${j6b}`);
   // 第二个场景
   await page.click('#btnNew');
   await page.waitForTimeout(250);

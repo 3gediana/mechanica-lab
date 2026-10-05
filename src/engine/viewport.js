@@ -296,6 +296,16 @@ export class Viewport {
       if (this._snapMarker) this._snapMarker.visible = false;
       this._ghostSnapHit = false;
     }
+    // 放置防穿模：当前位置的碰撞箱穿透探针（节流：位移 >2cm 或旋转变化才重查）→ ghost 红色警示
+    const gp = this._ghost.position.toArray();
+    const rotY = this._ghostRotY || 0;
+    const movedProbe = !this._probeP || (this._probeRot || 0) !== rotY
+      || Math.hypot(gp[0] - this._probeP[0], gp[1] - this._probeP[1], gp[2] - this._probeP[2]) > 0.02;
+    if (movedProbe) {
+      this._probeP = gp; this._probeRot = rotY;
+      this._ghostOverlap = this.cb.ghostProbe ? this.cb.ghostProbe(gp, rotY) : false;
+    }
+    if (this._ghost.material) this._ghost.material.color.set(this._ghostOverlap ? 0xc96a5a : 0xd9a441);
     this.markDirty();
   }
 
@@ -305,6 +315,7 @@ export class Viewport {
       snapMode: this._ghostSnapMode || 'grid',
       snapped: !!this._ghostSnapHit,
       marker: this._snapMarker ? this._snapMarker.visible : false,
+      overlap: !!this._ghostOverlap,
       pos: this._ghost ? this._ghost.position.toArray().map((v) => +v.toFixed(3)) : null,
     };
   }
@@ -331,6 +342,8 @@ export class Viewport {
       this._ghostRotY = 0;
       this.markDirty();
     }
+    this._ghostOverlap = false;
+    this._probeP = null;
   }
 
   // ============ 受力/加速度箭头 ============

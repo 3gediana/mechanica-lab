@@ -44,6 +44,10 @@ try {
   await page.waitForTimeout(200);
   await page.fill('#catalogSearch', '');
   await page.waitForTimeout(150);
+  // 放置防穿模后默认槽位可能被拒（incline 高端槽位落在坡体内）——先开空场景保证槽位必空，
+  // 测的是「添加→最近使用分组」这条链路本身
+  await page.click('#btnNew');
+  await page.waitForTimeout(250);
   await page.locator('.comp-item', { hasText: '球' }).first().click();   // 触发最近使用记录
   await page.waitForTimeout(250);
   await page.fill('#catalogSearch', '');

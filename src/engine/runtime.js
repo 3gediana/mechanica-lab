@@ -947,6 +947,9 @@ export class Runtime {
     this._createEntity(e);
     return true;
   }
+
+
+
 }
 
 // 注册表通过独立 setter 注入，避免构造参数序依赖

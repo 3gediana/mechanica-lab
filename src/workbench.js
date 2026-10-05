@@ -74,6 +74,13 @@ const AUTOSAVE_KEY = 'mechanica.autosave.v1';
     setLoad('正在初始化视口');
     viewport = new Viewport($('stage'), {
       onSelect: (id, additive) => selectEntity(id, additive),
+      // 放置防穿模（用户需求）：ghost 跟随点的碰撞箱穿透探针（viewport 内节流），红色警示用
+      ghostProbe: (pos, rotY) => {
+        if (mode !== 'edit' || !viewport._ghostComponent) return false;
+        const comp = viewport._ghostComponent;
+        const isDynamic = comp.defaults.physics?.body === 'dynamic';
+        return placementLiftFor(comp.id, comp.defaults.params, pos, rotY, null, isDynamic) !== 0;   // 原位被占=红
+      },
       onBoxSelect: (ids) => {
         selectedIds = ids;
         selectedId = ids.length ? ids[ids.length - 1] : null;
@@ -258,7 +265,92 @@ function updateOutlineSelection() {
 }
 
 // ============ 实体操作（UI 与 Agent 共用） ============
-function opAddComponent(typeId, overrides = {}) {
+// 放置防穿模（用户需求「根据物体碰撞箱阻挡」）：纯 three.js AABB 判定——保守（AABB 不交
+// 则形状必不交=零穿模保证）、零 Rapier 查询（本版 compat 成对查询对未 step 世界全哑、
+// contactDist 对新建 pair 报伪深、speculative 对近距对持续误推——全部绕开）。
+// 拦截规则（精化）：只拦「涉及动态体」的重叠——动态体嵌入任何东西、或新体嵌入动态体
+// （运行时会爆/抖，用户抱怨的正是这个）；固定体×固定体放行（坡嵌进地板是合法视觉摆法，
+// 静态间无物理冲突）。返回 0=原位可用；>0=需抬升该高度；null=抬无可抬（拒绝）。
+const _plcProbeCache = new Map();   // typeId+params JSON → geometry（探针复用，勿与 ghost 混用）
+function placementLiftFor(typeId, params, pos, rotY, excludeId = null, isDynamic = false) {
+  const EPS = 0.002;
+  const key = typeId + '|' + JSON.stringify(params);
+  let geo = _plcProbeCache.get(key);
+  if (!geo) {
+    const c = registry.getComponent(typeId);
+    if (!c || !c.buildGeometry) return 0;
+    try { geo = c.buildGeometry(params); } catch { return 0; }
+    _plcProbeCache.set(key, geo);
+  }
+  const probe = new THREE.Mesh(geo);
+  probe.position.set(pos[0], pos[1], pos[2]);
+  probe.rotation.y = rotY;
+  probe.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(probe);
+  box.expandByScalar(-EPS);
+  const others = [];
+  for (const [id, bind] of runtime.binds) {
+    if (excludeId != null && id === excludeId) continue;
+    const e = bind.entity;
+    if (!bind.mesh || e.physics.body === 'none' || e.physics.gravitating) continue;
+    if (e.params && e.params.noCollide) continue;
+    const otherDynamic = e.physics.body === 'dynamic';
+    if (!isDynamic && !otherDynamic) continue;   // 固定×固定放行
+    const ob = new THREE.Box3().setFromObject(bind.mesh);
+    ob.expandByScalar(-EPS);
+    others.push(ob);
+  }
+  const hit = (b) => others.some((ob) => b.intersectsBox(ob));
+  if (!hit(box)) return 0;
+  for (const lift of [0.02, 0.05, 0.1, 0.2, 0.35]) {
+    const lifted = new THREE.Box3().setFromObject(probe);
+    lifted.translate(new THREE.Vector3(0, lift, 0));
+    lifted.expandByScalar(-EPS);
+    if (!hit(lifted)) return lift;
+  }
+  return null;
+}
+
+// 目录默认槽位的「最近空位」搜索：原位→抬升阶梯→周边 1.2m 环。全占= null（拒绝）。
+// 保证「目录加一件」一键可用（槽位被场景体占住时自动挪到最近空位，如斜坡旁）。
+function placementFindSpot(typeId, params, pos, rotY, isDynamic = false) {
+  const EPS = 0.002;
+  const key = typeId + '|' + JSON.stringify(params);
+  let geo = _plcProbeCache.get(key);
+  if (!geo) {
+    const c = registry.getComponent(typeId);
+    if (!c || !c.buildGeometry) return [...pos];
+    try { geo = c.buildGeometry(params); } catch { return [...pos]; }
+    _plcProbeCache.set(key, geo);
+  }
+  const probe = new THREE.Mesh(geo);
+  probe.position.set(pos[0], pos[1], pos[2]);
+  probe.rotation.y = rotY;
+  const others = [];
+  for (const [, bind] of runtime.binds) {
+    const e = bind.entity;
+    if (!bind.mesh || e.physics.body === 'none' || e.physics.gravitating) continue;
+    if (e.params && e.params.noCollide) continue;
+    if (!isDynamic && e.physics.body !== 'dynamic') continue;   // 固定×固定放行（与 placementLiftFor 同规则）
+    const ob = new THREE.Box3().setFromObject(bind.mesh);
+    ob.expandByScalar(-EPS);
+    others.push(ob);
+  }
+  const rings = [[0, 0], [1.2, 0], [-1.2, 0], [0, 1.2], [0, -1.2], [1.2, 1.2], [-1.2, 1.2], [1.2, -1.2], [-1.2, -1.2]];
+  for (const [dx, dz] of rings) {
+    for (const lift of (dx === 0 && dz === 0) ? [0, 0.02, 0.05, 0.1, 0.2, 0.35] : [0]) {
+      probe.position.set(pos[0] + dx, pos[1] + lift, pos[2] + dz);
+      probe.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(probe);
+      box.expandByScalar(-EPS);
+      if (!others.some((ob) => box.intersectsBox(ob))) {
+        return [+(pos[0] + dx).toFixed(3), +(pos[1] + lift).toFixed(3), +(pos[2] + dz).toFixed(3)];
+      }
+    }
+  }
+  return null;
+}
+function opAddComponent(typeId, overrides = {}, opts = {}) {
   const c = registry.getComponent(typeId);
   // 观察点（相机和观察点分类）：放置即保存当前相机位姿（位置→transform，注视点→params.target）
   if (c.isViewpoint) {
@@ -356,6 +448,25 @@ function opAddComponent(typeId, overrides = {}) {
   const n = doc.entities.length;
   const base = { transform: { pos: [((n % 3) - 1) * 0.8, c.spawnY(c.defaults.params) + 0.05, ((Math.floor(n / 3) % 3) - 1) * 0.8] } };
   const e = registry.createEntity(typeId, { ...base, ...overrides });
+  // 放置防穿模（仅手动放置通路）：碰撞箱（AABB，2mm 贴面容差）重叠检测。
+  // ghost 落点：指哪放哪——被占先试抬到占位物上方，抬无可抬=拒绝并保留红色预览；
+  // 目录默认槽位：被占自动搜最近空位（原位→抬升→周边环），保证「目录加一件」一键可用
+  if (opts.resolvePlacement && c.buildCollider && e.physics && e.physics.body !== 'none' && !e.physics.gravitating) {
+    const rotY = e.transform.rot[1] || 0;
+    const isDynamic = e.physics.body === 'dynamic';
+    if (opts.ghost) {
+      const lift = placementLiftFor(typeId, e.params, e.transform.pos, rotY, null, isDynamic);
+      if (lift === null) { toast('放置被阻挡：与现有物体碰撞，换个空位再放'); return null; }
+      if (lift > 0) { e.transform.pos = [e.transform.pos[0], +(e.transform.pos[1] + lift).toFixed(3), e.transform.pos[2]]; toast('原位被占，已放在其上方'); }
+    } else {
+      const spot = placementFindSpot(typeId, e.params, e.transform.pos, rotY, isDynamic);
+      if (!spot) { toast('放置被阻挡：与现有物体碰撞，换个空位再放'); return null; }
+      if (spot[1] !== e.transform.pos[1] || spot[0] !== e.transform.pos[0] || spot[2] !== e.transform.pos[2]) {
+        e.transform.pos = spot;
+        toast('原位被占，已放在附近空位');
+      }
+    }
+  }
   addEntity(doc, e);
   rebuildAll();
   commitChange('添加 ' + c.label);
@@ -930,7 +1041,7 @@ function addCatalogRow(box, c, faved = false) {
     badge.textContent = c.isSensor ? '绑 1 实体' : '需两实体';
     row.querySelector('.thumbbox').appendChild(badge);
   }
-  row.onclick = () => { viewport.hideGhost(); opAddComponent(c.id); };
+  row.onclick = () => { viewport.hideGhost(); opAddComponent(c.id, {}, { resolvePlacement: true }); };
   // ghost preview（Round 27 修复：此前 showGhost 从未被调用=死代码）。
   // sticky 语义：hover 选中组件后 ghost 持续跟随鼠标（吸附档位联动），
   // 直到点击放置（hideGhost）或 hover 其他组件替换——移出目录行不消失
@@ -948,12 +1059,13 @@ function addCatalogRow(box, c, faved = false) {
     const rot = viewport._ghost ? viewport._ghost.rotation.y : 0;
     const id = opAddComponent(comp.id, {
       transform: { pos: [+pos.x.toFixed(3), +pos.y.toFixed(3), +pos.z.toFixed(3)], rot: [0, +rot.toFixed(3), 0] },
-    });
+    }, { resolvePlacement: true, ghost: true });
     if (id) {
       viewport.spawnImpact([pos.x, pos.y, pos.z]);   // FZ-4：落点环闪
       toast(`已放置 ${comp.label} @ (${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)})`);
+      viewport.hideGhost();   // 单次放置语义（连续放置 FZ-5 另批实施）
     }
-    viewport.hideGhost();   // 单次放置语义（连续放置 FZ-5 另批实施）
+    // 被阻挡（id=null，放置防穿模）：ghost 留在原地（红色警示态），用户挪到空位再点——不吞掉放置意图
   };
   viewport.cb.onGhostCancel = () => viewport.hideGhost();
   box.appendChild(row);
@@ -3880,9 +3992,12 @@ window.MECH = {
   scaleState: () => ({ step: gridStep, ...viewport.gridInfo(),
     text: document.getElementById('scaleReadout') ? document.getElementById('scaleReadout').textContent : '' }),
   ghostState: () => viewport.ghostState(),
+  // 放置防穿模测试探针：已存在实体按其 type/params/位姿重建假想体，返回当前穿透深度（0=不嵌）
+
   sensorState: (id) => runtime.sensorReadings.get(id) || null,
   __rollDbg: () => runtime._rollLast || null,
   get __vp() { return viewport; },   // 诊断通道（非 Agent 白名单，实时引用）
+  get __rt() { return runtime; },    // 诊断通道（非 Agent 白名单，实时引用）
   cameraPos: () => viewport.camera.position.toArray(),
   forceDecompose: (id) => {
     // 斜面场景支持力/摩擦力数值（理论对照：N=mg·cosθ, f=μN 或实测差分）

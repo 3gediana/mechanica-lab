@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const P_ALL = [...Array.from({ length: 33 }, (_, i) => `p${i}`), 'p33-play'];   // p0-p32 + p33-play（R4 运行态玩感；p34-perf headed 单独跑不入聚合）
+const P_ALL = [...Array.from({ length: 33 }, (_, i) => `p${i}`), 'p33-play', 'p35-placement'];   // p0-p32 + p33-play + p35 放置防穿模（p34-perf headed 单独跑不入聚合）
 const W_NOAPI = ['w1-manual', 'w5-journey', 'w6-depth'];
 const W_API = ['w2-agent', 'w4-mixed', 'w7-presets-explain'];
 
