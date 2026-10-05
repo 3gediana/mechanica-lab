@@ -14,10 +14,10 @@
 ### 放置工具链（城市天际线核心）
 | # | 位置 | 问题→改法 | P | 量 | 风险 | 状态 |
 |---|---|---|---|---|---|---|
-| FZ-1 | viewport.js:687-704 + workbench.js:800 | ghost 跟随暗示「放这里」但视口左键仍是点选（收编 FEEL-103）→ ghost 激活期 `_onUp` 优先放置：调 onGhostPlace(pos)；Shift+点击=保留选择放置；Esc 退出 | P1 | M | ⚠ p 系点击用例需先 Esc | ⬜ |
-| FZ-2 | viewport.js:238,242 | ghost 无旋转预览（收编 FEEL-134，键位按 FB-64 改 [ ]）→ [ ] 绕 y 旋 15°（Shift=90°），放置写进 transform.rot；ghost 激活期键位覆盖 | P2 | S | E 冲突已避（改 [ ]） | ⬜ |
-| FZ-3 | viewport.js:239 | ghost 出生钉 (0,spawnY,0)，鼠标不动预览在视野外（收编 FEEL-97）→ 缓存最近 pointermove，showGhost 立即跟随一次 | P1 | S | 无 | ⬜ |
-| FZ-4 | workbench.js:327-328 | 点击放置无落点反馈（收编 FEEL-98，摆位不动）→ 落点 spawnImpact 环闪+toast 坐标 | P1 | S | 无 | ⬜ |
+| FZ-1 | viewport.js:687-704 + workbench.js:800 | ghost 跟随暗示「放这里」但视口左键仍是点选（收编 FEEL-103）→ ghost 激活期 `_onUp` 优先放置：调 onGhostPlace(pos)；Shift+点击=保留选择放置；Esc 退出 | P1 | M | ⚠ p 系点击用例需先 Esc | ✅ R3-B4：ghost 激活期视口左键=在 ghost 位放置（冒烟实测 placed pos=ghost pos 精确一致） |
+| FZ-2 | viewport.js:238,242 | ghost 无旋转预览（收编 FEEL-134，键位按 FB-64 改 [ ]）→ [ ] 绕 y 旋 15°（Shift=90°），放置写进 transform.rot；ghost 激活期键位覆盖 | P2 | S | E 冲突已避（改 [ ]） | ✅ R3-B4：[ ] 旋转 ghost 15°（Shift=90°），放置写进 transform.rot |
+| FZ-3 | viewport.js:239 | ghost 出生钉 (0,spawnY,0)，鼠标不动预览在视野外（收编 FEEL-97）→ 缓存最近 pointermove，showGhost 立即跟随一次 | P1 | S | 无 | ✅ R3-B4：指针历史缓存，showGhost/setGhostFollow 立即跟随 |
+| FZ-4 | workbench.js:327-328 | 点击放置无落点反馈（收编 FEEL-98，摆位不动）→ 落点 spawnImpact 环闪+toast 坐标 | P1 | S | 无 | ✅ R3-B4：放置落点 spawnImpact+toast 坐标 |
 | FZ-5 | workbench.js:800 | 每次点击放置后工具即失效 → 连续放置模式：ghost 保持激活，每次视口点击放一个；Esc/右键退出；整段合并单 undo | P1 | M | ⚠ 目录点击语义变化 | ⬜ |
 | FZ-6 | workbench.js:800 + viewport.js:671-682 | 无拖拽画排 → 连续放置下按住左键沿方向每网格档放一个（cap 20），rebuildSuspend 批内合并 | P2 | L | ⚠ rebuildAll×N | ⬜ |
 | FZ-7 | viewport.js:237,207 | ghost 无有效性语义 → AABB 相交（仅对 fixed 体）时 ghost 切 danger 色+落点框红；AABB 自 rebuild 缓存 | P2 | M | 不阻断只警示 | ⬜ |
@@ -26,7 +26,7 @@
 | FZ-10 | workbench.js:329 | 无吸取工具 → Alt+点击实体=以该 type+params 为放置默认，ghost 重建预览；Alt+空白取消 | P1 | M | overrides 键级合并现成 | ⬜ |
 | FZ-11 | workbench.js:63-68 + viewport.js:724-729 | 无批量删除工具 → B 键推土机模式：拖框即删未锁定，框内即时红描边+「删 n 跳 m 锁定」角标，Esc 退出 | P2 | M | ⚠ 与框选互斥状态机 | ⬜ |
 | FZ-12 | viewport.js:192-221 | ghost 悬空无落点参照 → 正下方细线十字+外接矩形（hairline 琥珀 0.5），随 _updateGhostFollow 更新 | P2 | S | 无新增 raycast | ⬜ |
-| FZ-13 | workbench.js:746-752 | 右键轻点（位移<5px）=退出放置（OrbitControls 已吞 contextmenu vendor:502） | P2 | S | 与 FZ-35 统一 button 判定 | ⬜ |
+| FZ-13 | workbench.js:746-752 | 右键轻点（位移<5px）=退出放置（OrbitControls 已吞 contextmenu vendor:502） | P2 | S | 与 FZ-35 统一 button 判定 | ✅ R3-B4：右键轻点退出放置（右键拖拽平移不受影响） |
 | FZ-14 | workbench.js:251-267 | 传感器/观察点 ghost 落点与实际不符 → isSensor/isViewpoint 不启动跟随 ghost，toast 提示实际落点语义 | P2 | S | 无 | ⬜ |
 | FZ-15 | workbench.js:806 | 绳/弹簧 hover 无预览 → 已选 2 实体时画连线（虚线池）+中点读数「A→B · 2.34m」 | P2 | S | 事件驱动开关 | ⬜ |
 | FZ-16 | workbench.js:339-348 | 新实体放置后不易定位 → 0.6s BoxHelper 琥珀脉冲（复用 impacts 衰减） | P3 | S | 无 | ⬜ |
@@ -52,7 +52,7 @@
 | FZ-32 | workbench.js:63-68 | 框选 shift=并集（收编 FEEL-108）→ _onUp 透传 shiftKey | P2 | S | 无 | ⬜ |
 | FZ-33 | viewport.js:713-719 | 框选只测原点，大实体漏选（收编 FEEL-100）→ 投影包围盒 8 角+中心任一入框 | P1 | M | ⚠ p61 复跑 | ⬜ |
 | FZ-34 | viewport.js:724-729 | 框选时不 detach gizmo（收编 FEEL-124）→ 进出配对 detach/恢复 | P2 | S | 无 | ⬜ |
-| FZ-35 | viewport.js:659,687-704 | 右键平移松手误换选中（收编 FEEL-123）→ pointerdown/_onUp 开头 button!==0 早退 | P2 | S | 无 | ⬜ |
+| FZ-35 | viewport.js:659,687-704 | 右键平移松手误换选中（收编 FEEL-123）→ pointerdown/_onUp 开头 button!==0 早退 | P2 | S | 无 | ✅ R3-B4：_onUp 非左键早退（右键平移松手不再误换选中） |
 | FZ-36 | workbench.js:746-752 | Esc 级联补清空选择（收编 FEEL-136） | P3 | S | 无 | ⬜ |
 | FZ-37 | workbench.js:733-739 | Ctrl+A 全选未锁定（收编 FEEL-137） | P3 | S | tag 守卫已拦 | ⬜ |
 | FZ-38 | workbench.js（无 contextmenu） | 实体右键直角菜单：聚焦/复制/锁定/隐藏/删除（收编 FEEL-129）→ 全走 op* 通道；按位移阈值与平移区分 | P2 | M | ⚠ 手势冲突 | ⬜ |
@@ -82,7 +82,7 @@
 | FZ-54 | viewport.js（无） | 对齐参考线：拖动中与他实体 x/z<0.03m 画 hairline+分量吸附（Alt 临时禁用）；候选 ≤30 | P2 | L | ⚠ AABB 缓存+节流 | ⬜ |
 | FZ-55 | workbench.js:1168-1170 | 拖拽中检查器 triRow 实时刷新（节流 0.1s，readOnly 防竞态） | P2 | S | 无 | ⬜ |
 | FZ-56 | workbench.js:759-775 | 方向键微调尊重吸附档（snap on 时步长=网格档） | P3 | S | snap 默认 off | ⬜ |
-| FZ-57 | workbench.js:746-752 | Esc 级联最前：gizmo.dragging 时 reset() 不触发提交（收编 FEEL-102） | P1 | S | 级联顺序 | ⬜ |
+| FZ-57 | workbench.js:746-752 | Esc 级联最前：gizmo.dragging 时 reset() 不触发提交（收编 FEEL-102） | P1 | S | 级联顺序 | ✅ R3-B4：Esc 级联最前 gizmo.dragging→reset() 不产生提交 |
 | FZ-58 | viewport.js:794-805 | 缩放拖拽实时钳均匀（收编 FEEL-104） | P1 | M | ⚠ 手感实测 | ⬜ |
 | FZ-59 | workbench.js:69-81 | 多选组平移：主实体位移向量应用到其余（收编 FEEL-107），undo「成组移动」 | P2 | L | ⚠ 大改 | ⬜ |
 | FZ-60 | workbench.js:79 | undo 标签按 gizmoMode 前缀（收编 FEEL-116） | P2 | S | 无 | ⬜ |
@@ -404,6 +404,9 @@
 ## 实施批次记录（R3）
 
 （每批一 commit：完整回归全绿 + check.py 过 + 台账打勾；真实 API 调用继续遵守全轮 ≤40 预算）
+
+### R3-B4 放置工具链核心（FZ-1/2/3/4/13/35/57，7 项）
+点哪放哪（ghost 激活期视口左键=落点放置，替换 n%3 盲放；目录行点击仍=默认摆位，双通路并存）；[ ] 旋转预览写进 rot；指针历史即时跟随；落点环闪+坐标 toast；右键轻点退出；右键松手不再误换选中；Esc 当场弹回 gizmo 拖拽。冒烟：placed pos 与 ghost pos 精确一致、] 旋转 0.2618rad、Esc 退出生效。
 
 ### R3-B3 事件流 MVP（FB-1/2/4/11/12/13/14/16/74，9 项）
 文明6 式右下事件卡：碰撞卡（聚焦动作）+脱轨警告卡（runtime escapeEvents 一次性上报）+同对 0.5s 聚合+epoch 摘要+toast 分级驻留；出生触地噪声按 t<0.15 过滤；curves-on 让位契约。视觉验收过（panel 底/2px 竖线/hairline/无廉价感）。冒烟：momentum 出卡「碰撞 球A × 球B」、reset 出「上一轮：碰撞 3 次」；36 套回归 ALL GREEN。

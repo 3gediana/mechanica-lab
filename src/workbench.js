@@ -866,6 +866,7 @@ function onKey(e) {
     return;
   }
   if (e.code === 'Escape') {
+    if (viewport.gizmo.dragging) { viewport.gizmo.reset(); viewport.markDirty(); return; }   // FZ-57：拖错当场 Esc 弹回，不产生提交
     const help = $('helpOverlay');
     if (help.classList.contains('on')) { help.classList.remove('on'); return; }
     if (viewport.boxSelectMode) { viewport.setBoxSelect(false); $('btnBoxSel').classList.remove('hot'); return; }
@@ -878,6 +879,12 @@ function onKey(e) {
       if (timeScale === 0.1) { setSpeed(_preSlowSpeed || 1); toast(`慢动作退出，恢复 ${timeScale}x`); }
       else { _preSlowSpeed = timeScale; setSpeed(0.1); toast('慢动作 0.1x（Shift+空格 切回）'); }
     } else mode === 'run' ? pauseToggle() : play();
+  }
+  else if (e.code === 'BracketLeft' || e.code === 'BracketRight') {   // FZ-2：ghost 放置预览旋转
+    if (viewport.ghostState().visible) {
+      e.preventDefault();
+      viewport.ghostRotate((e.code === 'BracketRight' ? 1 : -1) * (e.shiftKey ? 90 : 15));
+    }
   }
   else if (e.key === '1' || e.key === '2' || e.key === '3') setSpeed({ 1: 0.5, 2: 1, 3: 2 }[e.key]);   // FB-23：文明6 风格倍率档
   else if (e.code === 'KeyW') setGizmoMode('translate');
@@ -936,6 +943,22 @@ function addCatalogRow(box, c, faved = false) {
     viewport.showGhost(comp);
     viewport.setGhostFollow(true);
   };
+  // FZ-1/13：ghost 激活期视口左键=在 ghost 位放置（点击落点即所得，不再悄悄落 n%3 槽位）；
+  // 右键轻点退出放置。目录行点击仍=默认摆位放置（两条通路并存）
+  viewport.cb.onGhostPlace = (pos) => {
+    const comp = viewport._ghostComponent;
+    if (!comp) return;
+    const rot = viewport._ghost ? viewport._ghost.rotation.y : 0;
+    const id = opAddComponent(comp.id, {
+      transform: { pos: [+pos.x.toFixed(3), +pos.y.toFixed(3), +pos.z.toFixed(3)], rot: [0, +rot.toFixed(3), 0] },
+    });
+    if (id) {
+      viewport.spawnImpact([pos.x, pos.y, pos.z]);   // FZ-4：落点环闪
+      toast(`已放置 ${comp.label} @ (${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)})`);
+    }
+    viewport.hideGhost();   // 单次放置语义（连续放置 FZ-5 另批实施）
+  };
+  viewport.cb.onGhostCancel = () => viewport.hideGhost();
   box.appendChild(row);
 }
 
