@@ -205,7 +205,16 @@ export class Viewport {
   // ghost 跟随鼠标：地面投射 + 吸附档位联动（endpoint/surface/center 吸附 + 琥珀标记）
   setGhostFollow(on) {
     this._ghostFollow = on;
+    if (on && this._ghost && this._lastPointer) this._updateGhostFollow(this._lastPointer[0], this._lastPointer[1]);   // FZ-3
     if (!on && this._snapMarker) this._snapMarker.visible = false;
+  }
+
+  // FZ-2：放置预览旋转（[ ] 键，Shift=90°）；放置时角度写进 transform.rot
+  ghostRotate(deg) {
+    if (!this._ghost) return;
+    this._ghostRotY = ((this._ghostRotY || 0) + deg * Math.PI / 180) % (Math.PI * 2);
+    this._ghost.rotation.y = this._ghostRotY;
+    this.markDirty();
   }
 
   setGhostSnapMode(mode) {
@@ -307,7 +316,10 @@ export class Viewport {
     const mat = new THREE.MeshStandardMaterial({ color: 0xd9a441, transparent: true, opacity: 0.35, roughness: 0.6 });
     this._ghost = new THREE.Mesh(geo, mat);
     this._ghost.position.set(0, component.spawnY ? component.spawnY(component.defaults.params) + 0.02 : 0.5, 0);
+    this._ghost.rotation.y = this._ghostRotY || 0;
+    this._ghostComponent = component;
     this.scene.add(this._ghost);
+    if (this._lastPointer) this._updateGhostFollow(this._lastPointer[0], this._lastPointer[1]);   // FZ-3
     this.markDirty();
   }
   hideGhost() {
@@ -315,6 +327,8 @@ export class Viewport {
       this.scene.remove(this._ghost);
       this._ghost.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
       this._ghost = null;
+      this._ghostComponent = null;
+      this._ghostRotY = 0;
       this.markDirty();
     }
   }
@@ -768,6 +782,7 @@ export class Viewport {
       }
     });
     window.addEventListener('pointermove', (e) => {
+      this._lastPointer = [e.clientX, e.clientY];   // FZ-3：ghost 跟随需指针历史（hover 后鼠标静止也能就位）
       if (this._ghostFollow && this._ghost) this._updateGhostFollow(e.clientX, e.clientY);
       if (this.boxSelectMode && this._boxSel) {
         this._boxSel.x1 = e.clientX;
@@ -793,6 +808,16 @@ export class Viewport {
     if (!this._downPos) return;
     const dx = e.clientX - this._downPos[0], dy = e.clientY - this._downPos[1];
     this._downPos = null;
+    if (e.button !== 0) {   // FZ-35：右/中键松手不触发点选（右键平移松手曾误换选中）
+      if (e.button === 2 && this._ghost && this._ghostFollow && dx * dx + dy * dy <= 25) {
+        this.cb.onGhostCancel && this.cb.onGhostCancel();   // FZ-13：右键轻点退出放置模式
+      }
+      return;
+    }
+    if (this._ghost && this._ghostFollow) {   // FZ-1：ghost 激活期左键轻点=在 ghost 位放置
+      if (dx * dx + dy * dy <= 25) this.cb.onGhostPlace && this.cb.onGhostPlace(this._ghost.position.clone());
+      return;
+    }
     if (this.boxSelectMode && this._boxSel) {
       const sel = this._boxSel;
       this._boxSel = null;
