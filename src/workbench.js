@@ -1797,13 +1797,21 @@ function updateConsbar() {
   if (rotation) { updateRotationCons(); return; }
   if (atwood) { updateAtwoodCons(); return; }
   const live = runtime.systemTotals();
-  if (!momentumBase || momentumBase.epoch !== runtime.epoch) momentumBase = { epoch: runtime.epoch, KE: live.ke };
-  if (momentumBase.KE < 0.05) {
-    // 初始静止场景（KE0≈0）：保持率无意义，隐藏比例条数字
+  if (!momentumBase || momentumBase.epoch !== runtime.epoch) {
+    const en0 = runtime.energyTotals();
+    momentumBase = { epoch: runtime.epoch, KE: en0.ke, E: en0.ke + en0.pe };
+  }
+  // 能量保持口径=总机械能 E/E0（energyTotals：KE+重力势+弹性势，与曲线能量模式同源）：
+  // 纯 KE/KE0 在斜面类增速场景会飙出荒谬读数（能量保持 3044%——视觉门实测），
+  // E 守恒口径天然有界；悬浮对撞场景 PE 恒 0，退化为原 KE 口径不受影响
+  const en = runtime.energyTotals();
+  if (momentumBase.E < 0.05) {
+    // 初始 E≈0（无动态体/全悬浮静止）：保持率无意义，隐藏比例条数字
     setSt($('ebFill'), 'width', '0%');
     setTxt($('ebPct'), '基准≈0');
   } else {
-    updateEnergyBar(live.ke / momentumBase.KE);
+    const keFrac = en.ke + en.pe > 0 ? Math.max(0, Math.min(1, en.ke / (en.ke + en.pe))) : 1;
+    updateEnergyBar((en.ke + en.pe) / momentumBase.E, keFrac);   // KE/PE 分段随实时占比
   }
   setTxt($('cbP'), `${live.p[0].toFixed(3)} N·s`);
   setTxt($('cbKE'), `${live.ke.toFixed(3)} J`);
@@ -3414,7 +3422,7 @@ async function runAndExplain() {
   // 运行前预采守恒基准（初始态），避免首采落在演化中
   if (isRotation) rotationWithDrift();
   if (isAstro) { astroWithDrift(); if (!trailsOn) setTrails(true); }   // 周期/偏心率采样依赖轨迹数据
-  if (isMomentum) { const lv = runtime.systemTotals(); if (!momentumBase || momentumBase.epoch !== runtime.epoch) momentumBase = { epoch: runtime.epoch, KE: lv.ke }; }
+  if (isMomentum) { const en0 = runtime.energyTotals(); if (!momentumBase || momentumBase.epoch !== runtime.epoch) momentumBase = { epoch: runtime.epoch, KE: en0.ke, E: en0.ke + en0.pe }; }
   runtime.startRecording(ball.id);
   play();
   const ramp = doc.entities.find((e) => e.type === 'ramp');

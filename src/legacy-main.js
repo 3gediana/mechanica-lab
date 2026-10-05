@@ -128,8 +128,9 @@ function buildTrough(radius, arcFraction, along, radial) {
     N.set(-T.y, T.x, 0).normalize();                 // 平面曲线的面内法向
     const phiUp = Math.atan2(up.dot(B), up.dot(N));  // 开口对准世界正上方
     const dj = Math.hypot(P.x - J[0], P.y - J[1], P.z - J[2]);
-    let s = Math.min(Math.max((0.42 - dj) / 0.26, 0), 1);
-    s = s * s * (3 - 2 * s);                         // smoothstep：0.42m 处开始收口，0.16m 内全闭
+    let s = Math.min(Math.max((0.26 - dj) / 0.18, 0), 1);
+    s = s * s * (3 - 2 * s);                         // smoothstep：0.26m 起快速收口，0.08m 内全闭
+                                                     // （宽过渡带的半开 mouth 侧看像"开口管端面"——视觉门 c2 实测）
     const openHalf = Math.PI * (1 - (arcFraction + (1 - arcFraction) * s)) / 2;
     for (let j = 0; j <= radial; j++) {
       const phi = phiUp + openHalf + (j / radial) * (2 * Math.PI - 2 * openHalf);
@@ -270,6 +271,16 @@ function buildTrough(radius, arcFraction, along, radial) {
       scene.add(bar);
     }
 
+    // ---- 环底接箍（黄铜套环）：入/出直线与环在环底四股交汇，套箍把交汇读作"有意的接头"而非乱面
+    {
+      const Jc = TRACK_POINTS[TRACK_META.segments.loop[0]];
+      const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(R * 1.18, R * 1.18, 0.13, 28, 1, true), M.brass);
+      sleeve.rotation.z = Math.PI / 2;               // 轴向对准水平直线段
+      sleeve.position.set(Jc[0], Jc[1], 0);
+      sleeve.castShadow = true;
+      scene.add(sleeve);
+    }
+
     // ---- 挡板（抽开式，立在坡上球的前方）
     stopperMesh = new THREE.Mesh(new THREE.BoxGeometry(...TRACK_META.stopper.size), M.brass);
     stopperMesh.position.set(...TRACK_META.slopeStopper);
@@ -291,7 +302,13 @@ function buildTrough(radius, arcFraction, along, radial) {
       .setDensity(7100).setFriction(0.3).setRestitution(0.06).setCollisionGroups(groupsDyn), ballBody);
     trackClosest.idx = nearestTrackIndex(spawn);
 
-    // ---- 橡胶球（用户抛掷用）
+    // ---- 橡胶球（用户抛掷用）+ 器材位托环（黄铜）：托环给它一个"放这儿"的读法，
+    //      否则黑球躺在地上与场景无上下文（视觉门 c1 实测读作游离残留物）
+    const tray = new THREE.Mesh(new THREE.TorusGeometry(0.115, 0.012, 12, 40), M.brass);
+    tray.rotation.x = Math.PI / 2;
+    tray.position.set(3.3, 0.008, 1.3);
+    tray.castShadow = true;
+    scene.add(tray);
     const rubberBallMesh = new THREE.Mesh(new THREE.SphereGeometry(0.09, 40, 28), M.rubber);
     rubberBallMesh.castShadow = true;
     rubberBallMesh.position.set(3.3, 0.09, 1.3);

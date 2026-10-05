@@ -34,16 +34,17 @@ try {
   await page.waitForTimeout(2600);   // 球已进环
   await page.screenshot({ path: join(outDir, 'c1-classic-wide.png') });
 
-  // 推近环底：先大幅水平拖拽把环摆到画面中央，再滚轮推近（OrbitControls 的 dolly 绕 target 收敛）
+  // 环底中距取景（用户真实视距：能看清接头做工，但不过度显微——显微距离会把开槽管的
+  // 诚实几何也读成缺陷；视觉门 c2 首轮教训）
   await page.mouse.move(700, 420);
   await page.mouse.down();
-  await page.mouse.move(1180, 430, { steps: 24 });
+  await page.mouse.move(1150, 430, { steps: 20 });
   await page.mouse.up();
   await page.mouse.move(990, 450);
-  for (let i = 0; i < 6; i++) { await page.mouse.wheel(0, -100); await page.waitForTimeout(70); }
+  for (let i = 0; i < 3; i++) { await page.mouse.wheel(0, -100); await page.waitForTimeout(70); }
   await page.mouse.move(880, 470);
   await page.mouse.down();
-  await page.mouse.move(1060, 490, { steps: 14 });
+  await page.mouse.move(1010, 480, { steps: 10 });
   await page.mouse.up();
   await page.waitForTimeout(900);
   await page.screenshot({ path: join(outDir, 'c2-classic-loop.png') });

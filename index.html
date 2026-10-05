@@ -40,9 +40,11 @@
     background: var(--panel); border-bottom: 1px solid var(--line);
     user-select: none;
   }
-  #topbar .brand { display: flex; align-items: baseline; gap: 9px; margin-right: 4px; }
-  #topbar .brand h1 { font-size: 12px; font-weight: 500; letter-spacing: .34em; color: var(--text); }
-  #topbar .brand .sub { font-size: 10px; color: var(--faint); letter-spacing: .14em; }
+  #topbar .brand { display: flex; align-items: baseline; gap: 9px; margin-right: 4px; flex: none; }
+  #topbar .brand h1 { font-size: 12px; font-weight: 500; letter-spacing: .34em; color: var(--text); white-space: nowrap; }
+  #topbar .brand .sub { font-size: 10px; color: var(--faint); letter-spacing: .14em; white-space: nowrap; }
+  /* 窄顶栏：副标题先让位（1440 下被挤成竖排字形列——视觉门 ts1-ts4 实测） */
+  @media (max-width: 1520px) { #topbar .brand .sub { display: none; } }
   #sceneName {
     background: transparent; border: 1px solid transparent; color: var(--text);
     font-family: var(--sans); font-size: 12px; padding: 4px 8px; width: 130px; border-radius: 2px;
