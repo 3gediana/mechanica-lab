@@ -115,25 +115,31 @@ try {
   await page.screenshot({ path: 'shots/w6/02-param-guard.png' });
 
   // ===== G4. 运行中删除关键对象（斜面）→ 场景继续演化 → 重置恢复 =====
+  // R4 语义升级（Goal PL-12）：运行态删除=只拆运行时（不进文档/undo），重置回初始文档
   await page.click('#btnPlay');
   await page.waitForTimeout(500);
-  await page.locator('#outline .ol-row', { hasText: '斜坡' }).first().click();
+  const rampId = await page.evaluate(() => window.MECH.entities().find((e) => e.type === 'ramp')?.id || null);
+  // 点名字区（行中心可能落在 ⌖/锁 键上——stopPropagation 会吞掉选中）
+  await page.locator('#outline .ol-row', { hasText: '斜坡' }).first().locator('.nm').click();
   await page.waitForTimeout(200);
   await page.keyboard.press('Delete');
   await page.waitForTimeout(900);
-  const g4a = await page.evaluate(() => ({
+  const g4a = await page.evaluate((rid) => ({
     n: window.MECH.doc().entities.length,
+    rampLive: rid ? !!window.MECH.telemetry(rid) : null,   // 文档保留、运行时已拆
     simT: window.MECH.state().simT,
-  }));
-  check('G4 运行中删除斜坡: 不崩溃+时间继续', g4a.n === 2 && g4a.simT > 0.4, `n=${g4a.n} simT=${g4a.simT.toFixed(2)}`);
+  }), rampId);
+  check('G4 运行中删除斜坡: 不崩溃+时间继续（文档保留/运行时移除）', g4a.n === 3 && g4a.rampLive === false && g4a.simT > 0.4,
+    `n=${g4a.n} rampLive=${g4a.rampLive} simT=${g4a.simT.toFixed(2)}`);
   await page.screenshot({ path: 'shots/w6/03-deleted-ramp.png' });
-  // 撤销删除恢复
+  // 重置恢复（运行态删除的恢复通道=重置，非 undo）
   await page.click('#btnReset');
-  await page.waitForTimeout(300);
-  await page.click('#btnUndo');
-  await page.waitForTimeout(300);
-  const g4b = await page.evaluate(() => window.MECH.doc().entities.length);
-  check('G4b 重置+撤销恢复斜坡', g4b === 3, `n=${g4b}`);
+  await page.waitForTimeout(400);
+  const g4b = await page.evaluate((rid) => ({
+    n: window.MECH.doc().entities.length,
+    rampBack: rid ? !!window.MECH.telemetry(rid) : false,
+  }), rampId);
+  check('G4b 重置恢复斜坡', g4b.n === 3 && g4b.rampBack, `n=${g4b.n} rampBack=${g4b.rampBack}`);
 
   // ===== G5. 图片内容无法识别（真实调用 1 次：噪声图 → 模型 → 规范化拒绝）=====
   await page.click('#tabAgent');

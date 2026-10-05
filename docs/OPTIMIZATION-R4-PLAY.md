@@ -41,39 +41,65 @@
 
 | # | 条目 | P | 落点 | 状态 | 证据/备注 |
 |---|------|---|------|------|-----------|
-| PL-1..8 | 碰撞音（ΔKE→音量、材质三音色、限流/衰减/pan）、状态音、静音开关持久化、autoplay 合规 | — | 待实施 | ☐ | 廉价感红线：禁裸方波，body 共振+瞬态包络；人耳走查入 LEDGER |
+| PL-1 | 碰撞音触发链：runtime 每碰撞事件算冲量 J=Σm·\|Δv\|（碰前 `_prevVel`→碰后 linvel）→ `impactSounds` 缓冲 → workbench tick drain → 声音引擎。冲量口径（非 ΔKE）：理想弹性碰的脆响不漏 | P0 | `src/engine/runtime.js` stepOnce；`src/sound.js` | ☑ | p33「碰撞触发发声」断言 |
+| PL-2 | ΔKE→音量（实为冲量→音量）：strength=J/2.2 满标，gain=strength^0.7×0.55×距离衰减——单调、小撞可闻大撞不炸 | P0 | `src/sound.js` gainOf | ☑ | p33「gain 随冲量单调」（m0.15→m0.6：s 0.38→1.52，g 0.256→0.504） |
+| PL-3 | 材质三音色（程序合成零资产）：wood（165+330Hz 双模态空响）/ ceramic（1040·2413·4805Hz 非谐模态簇，比 1:2.32:4.62）/ rubber（62Hz 单模态闷噗）；每音色=带通噪声瞬态+模态共振簇（body 共振，非裸方波）。两体取更软方（接触刚度由柔体主导） | P0 | `src/sound.js` TIMBRES/_scheduleVoice | ☑ | p33 三音色特征断言：wood bands[188,656]Hz、ceramic bands[1031,2391,4828]+非谐对、rubber 质心 134Hz；wav 样本 shots/sound-*.wav |
+| PL-4 | 限流：全局 20ms 最小区隔 + 实体对 70ms 冷却 + 单帧 drain 全部但引擎侧限速 + 主链 DynamicsCompressor（-18dB/6:1 限幅护耳） | P0 | `src/sound.js` impact | ☑ | p33「限流生效」10 球同落风暴 dropped>0 且 emitted 封顶 |
+| PL-5 | 衰减/pan：听点=相机 target，pan=(x−target)/视野 span（±0.85 钳位），att=1/(1+d/1.2span) | P1 | workbench drain | ☑ | 实现级（听感走查覆盖） |
+| PL-6 | 状态音：运行/暂停/重置 三档瓷音短 tick（同模态合成口径，quiet） | P2 | `src/sound.js` ui() | ☑ | 人耳走查覆盖 |
+| PL-7 | 静音开关持久化：simbar `音效/静音` 按钮，localStorage `mech.sound`，刷新保持 | P1 | workbench setSound | ☑ | p33：文案切换+ls+刷新保持+静音期零发声 |
+| PL-8 | autoplay 合规：AudioContext 只在可信手势（pointerdown/keydown）创建/resume；评估脚本触发 play 保持完全静默 | P0 | workbench 手势接线 | ☑ | p33：无手势 ctx=none+emitted=0 → 点击后 running |
+
+**听感人工走查（E4）**：机器代理已固化（p33 离线渲染=实时同路径：包络瞬态 <15ms 达峰、衰减尾 <0.35%、三音色频谱特征、非谐比 2.32 排除谐波哔哔）；wav 样本落 `tools/ui-test/shots/sound-{wood,ceramic,rubber}.wav` 待人耳抽听定稿——**此项 PARTIAL（待用户），不阻塞层 2 开工**。
 
 ## 层 2：运行中交互（PL-10..14）
 
 | # | 条目 | P | 落点 | 状态 | 证据/备注 |
 |---|------|---|------|------|-----------|
-| PL-10 | 抓取拖拽：速度伺服（禁 setTranslation 跟手），松手零操作速度继承；~80ms 指针轨迹惯性混入；力上限按质量缩放 | P0 | 待实施 | ☐ | p33 断言：甩出方向/量级、松手仅重力、按住不动松手直掉对照 |
-| PL-11..14 | 运行态增量添加（动态体+传感器白名单）、图钉/运行态删除、暂停态 gizmo 摆姿势；运行态操作不进 undo | — | 待实施 | ☐ | |
+| PL-10 | 抓取拖拽（铁律=速度伺服禁 setTranslation）：`runtime.grabBody/moveGrabTarget/releaseGrab` + `_stepGrab`（β=0.25/步收敛 + Δv≤F·h/m，F_MAX=120N 按质量缩力=沉感，重物超重悬吊自然下垂）；拖拽目标=指针射线∩「过抓取点·法向=视线」平面；容器捕获级 pointerdown 命中动态体才 stopPropagation（空处拖拽仍转视角） | P0 | `src/engine/runtime.js`；`src/workbench.js` onRunPointerDown | ☑ | p33：抓取启动/伺服跟手 err=0.002m |
+| PL-10b | 甩出惯性：最近 ~80ms 指针世界轨迹（≥25ms 跨度有效）×0.7 + 体当前速度×0.3 混合，VMAX=14 钳位；指针几乎没动=零操作继承（按住不动松手直掉对照成立） | P0 | workbench releaseGrabAt | ☑ | p33：\|vPtr\|=14 捕获、夹角 0.0°、混合比 0.70、仅重力、按住不动 4.51→0.036 直掉 drift=0 |
+| PL-11 | 运行态增量添加：`runtime.addLive`（动态体直接建进现有世界，不重建不进 undo），MECH.liveAdd 白名单组件 | P1 | runtime.addLive | ☑ | p33：doc 不进、物理体在跑、重置即清 |
+| PL-12 | 图钉（P 键，dynamic⇄fixed 切换重置即消）+ 运行态删除（Delete，有关联约束的体拒绝并 toast） | P1 | runtime.togglePin/removeLive | ☑ | p33：钉住静止 drift=0、删除后 telemetry 消失、重置恢复 |
+| PL-14 | 暂停态 gizmo 摆姿势：暂停=接管选中体 gizmo，拖动走 setLivePose（写物理体不进文档/undo），继续=交还 | P2 | pauseToggle + onGizmoCommit 分支 | ☑ | p33：pause=gizmo.enabled/resume=off |
+| PL-13 | （并入 PL-11/12 的重置语义：运行态操作全不进 undo，重置回初始文档） | — | — | ☑ | 同上 |
+
+**测试基建教训（本轮新增，三条都是实机撞出来的）**：
+1. **严禁回归运行中改代码**（犯了三次）：dev server 供活文件，运行中编辑=后段套件吃到半成品/新代码。规矩：冻结→跑→改→再跑。
+2. 本机 playwright CDP 每调用 ~200ms 延迟——真实鼠标序列的 80ms 轨迹时序全被拉稀；页面内合成 PointerEvent + performance.now() 自旋是唯一稳定路径；隐藏页 setTimeout 链有 1s 钳制（waitForFunction 的 interval 轮询同样被钳，长等待优先页内 rAF 采样或直接同步断言）；抓飞行中的实体必须读位置与 down 零间隔（同 evaluate 内）。
+3. headless 饿 rAF（项目已知坑）同样饿 waitForFunction 的默认 rAF 轮询——瞬态量（trauma 半衰 0.3s）轮询采样必然竞态，改同步直测机制 + E2E 链路用累积量（spawnedTotal）断言。
 
 ## 层 3：碰撞 juice（PL-20..23）
 
 | # | 条目 | P | 落点 | 状态 | 证据/备注 |
 |---|------|---|------|------|-----------|
-| PL-20/21 | 粒子（对象池，禁像素方块直喷）、镜头微震（可关） | P1 | 待实施 | ☐ | 样张先行双轮评审 |
-| PL-22 | 碰撞环视觉升级（池化地基已落 PL-55） | P2 | 待实施 | ☐ | 同上 |
-| PL-23 | 自动子弹时间（惊喜预算，深试后可删） | P3 | 待实施 | ☐ | |
+| PL-20 | 粒子对象池：`src/engine/juice.js`（新）——Points + 预分配 Float32Array（容量 320 环形分配），径向渐变软精灵（canvas 贴图，禁像素方块），材质 toneMapped=false（ACES 会把加法混合亮粒子滚降成白色——终审教训）；按材质三套参数（ceramic 白瓷火花四散 / wood 暖棕尘雾贴地 / rubber 暖灰闷噗），逐粒子 fadeExp 衰减曲线 | P1 | juice.js spawnImpact/tick/_fadeWrite | ☑ | p33「碰撞生成粒子」；样张三轮评审（见下） |
+| PL-21 | 镜头微震（可关）：trauma² 曲线（trauma 0..1，shake=trauma²×0.055 位移+0.004 滚转，decay 1.4/s），渲染前叠加/渲染后还原（不污染 controls）；simbar `震屏` 按钮 + localStorage 持久；强碰撞才积累（strength>0.12） | P1 | juice.js applyShake/revertShake | ☑ | p33：trauma 累积/关闭门控/1s 衰减 + 关闭期粒子照常；样张 shake-peak vs off 同机位对（位移 5-8px 含滚转） |
+| PL-22 | 碰撞环升级：共享几何 + mesh 池（24 环）；两段式=白芯闪光（150ms 平方淡出）+ 琥珀外环 cubic-out 扩张 0.7s；旧 viewport 单环路径退役（MECH.impactCount 改指新环池，p6 兼容） | P2 | juice.js spawnRing/tickRings | ☑ | p33：环出现/0.7s 淡出；样张 flash/expand 两相位（freezeAt 冻结取证） |
+| PL-23 | 惊喜预算·自动子弹时间：B 键开关（默认关），运行态强碰撞（≥0.45）自动 0.25x 慢放 1.2s 回原档，2.5s 冷却，临时覆盖不碰用户档位，modeChip「子弹时间」徽标 | P3（深试保留） | workbench maybeBulletTime/effectiveTimeScale | ☑ | p33：强碰撞 sawSlow→restored；深试结论=与教学演示（碰撞慢放观察）契合，保留 |
+
+**视觉门（样张双轮+终审）**：`tools/ui-test/juice-samples.mjs`（headed 真 GPU）出 8 张样张 → 独立评审代理逐张像素取证。
+- 轮 1：2/8 PASS——4 硬伤（环闪光缺失/白盘穿模/震屏 0px/材质粒子不可感），根因=CDP 截图延迟 ~200ms 命不中 150ms 闪光等瞬态相位。
+- 修复：juice 增加 `freezeAt` 诊断时钟（环/闪光/震屏可冻结任意相位取证）；粒子按材质重调参。
+- 轮 2：7/8 PASS——wood 粒子仍不可感，根因=**spawnedTotal 跨场景累积**（等待条件被旧计数秒过，拍到撞击前）→ juice.clear() 挂 rebuildAll。
+- 终审：粒子存在后唯一残项=色相被 ACES 滚降裁白 → 材质 toneMapped=false + wood 基色调暗保饱和（0xb08444）+ 密度 20-30。
+- 取证：`shots/juice-*.png`（三材质粒子/环两相位/震屏同机位对/运行态氛围）。
 
 ## 层 4：时间节奏（PL-30..32）
 
 | # | 条目 | P | 落点 | 状态 | 证据/备注 |
 |---|------|---|------|------|-----------|
-| PL-30/31 | `-`/`=` 连续倍率档、`.` 单步（收编 FEEL-17/18、FB-25/26 一套状态机） | P1 | 待实施 | ☐ | p33 时标断言 |
-| PL-32 | 慢动作语义统一 | P2 | 待实施 | ☐ | |
+| PL-30 | `-`/`=` 连续倍率档：SPEEDS=[0.1,0.25,0.5,1,2,4] 单一状态机；selSpeed 下拉双向同步 + 2x/4x 新档（收编 FEEL-18/142：>2x 步上限 8→16，欠载走既有背压） | P1 | workbench setSpeed/speedStep；runtime.advance(maxSteps) | ☑ | p33：1→2→4→2 序列 + 下拉同步 |
+| PL-31 | `.` 单步（收编 FEEL-17/112）：暂停/编辑态推进一个固定步长，与单步按钮同语义 | P1 | onKey Period | ☑ | p33 无回归（btnStep 断言套件全绿） |
+| PL-32 | 慢动作语义统一（收编 FB-25/26）：Shift+Space 0.1x 互切（记忆原档）+ modeChip 倍率角标 + 切入自动开速度矢量（退出不关）；0.5x 实测推进速率 0.40 | P1 | workbench toggleSlowmo | ☑ | p33：切入/恢复/速率三断言 |
 
 ## 层 5：反馈打磨（PL-40..44）
 
 | # | 条目 | P | 落点 | 状态 | 证据/备注 |
 |---|------|---|------|------|-----------|
-| PL-40 | maxPolarAngle 放开 | P2 | viewport.js controls（现 1.54） | ☐ | |
-| PL-41 | zoomToCursor 收编（FZ-45） | P2 | viewport.js controls | ☐ | 主工作区未提交改动已含（另一 agent R3 线）；本分支自行落地 |
-| PL-42 | 缩放平滑 | P2 | 待实施 | ☐ | |
-| PL-43 | 预置带相机位 flyToPose | P2 | presets.js + flyToPose（已有动画机制） | ☐ | |
-| PL-44 | 选中/hover 三态视觉语言统一 | P2 | 待实施 | ☐ | 视觉门 |
+| PL-40 | maxPolarAngle 放开：1.54 → π（可压到地平线以下仰视坡底/装置底面） | P2 | viewport controls | ☑ | 行为级（30 分钟走查覆盖） |
+| PL-41 | zoomToCursor 收编（FZ-45）+ PL-42 缩放平滑：容器捕获级接管滚轮（r186 步进 dolly 无阻尼）——目标距离指数趋近（0.2/帧收敛）+ 缩进时 target 向光标点轻拉 50%；controls.start（用户接管）即取消目标距离；zoomSpeed 0.9 定稿值同 FZ-45 | P2 | viewport wheel 捕获 + tickZoom | ☑ | 行为级；30 分钟走查覆盖 |
+| PL-43 | 预置带相机位 flyToPose：PRESET_CAMERA 收 12 个主推预置教学位（pos/target），载入即平滑飞行；未列出的走 focusScene 自动取景（全实体包围盒） | P2 | presets.js + MECH.loadPreset | ☑ | p33：pendulum pose 飞行到位断言 |
+| PL-44 | 选中/hover 三态视觉语言：hover=淡灰盒 0.28（未选中体）/ 主选中=琥珀 0.9 / 多选其余=灰 0.45；70ms 节流、ghost/框选期/运行态抑制 | P2 | viewport updateHover/clearHover | ☑ | p33：hover 命中断言；三态观感走查覆盖 |
 
 ## 环境与约定（本轮新增）
 

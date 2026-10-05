@@ -23,7 +23,7 @@ try {
   page.setDefaultTimeout(20000);
 
   await page.goto(BASE, { waitUntil: 'domcontentloaded' });
-  await page.waitForFunction(() => window.MECH && window.MECH.ready(), null, { timeout: 25000 });
+  await page.waitForFunction(() => window.MECH && window.MECH.ready(), null, { timeout: 45000 });
 
   // ==== A. 三视图切换（Goal 六「顶视图/侧视图/正视图」——此前仅 top 有断言） ====
   await page.evaluate(() => window.MECH.loadPreset('incline'));

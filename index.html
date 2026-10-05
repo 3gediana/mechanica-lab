@@ -267,6 +267,7 @@
     border-radius: 2px; user-select: none; pointer-events: none;
   }
   #btnPerf { font-size: 10px; letter-spacing: .1em; }
+  #modeChip.grab { color: #0b0c0e; background: var(--accent); }
 
   /* 时间曲线面板 */
   #curvePanel {
@@ -487,11 +488,13 @@
     <button id="btnStep" title="推进一个固定步长 1/120s">单步</button>
     <button id="btnReset" title="回到初始态（R）">重置</button>
   </div>
-  <select id="selSpeed" title="时间倍率">
+  <select id="selSpeed" title="时间倍率（- / = 键连续换档，Shift+Space 慢动作互切）">
     <option value="0.1">0.1x</option>
     <option value="0.25">0.25x</option>
     <option value="0.5">0.5x</option>
     <option value="1" selected>1.0x</option>
+    <option value="2">2x</option>
+    <option value="4">4x</option>
   </select>
   <button id="btnVectors" title="速度向量箭头（叠加层）">矢量</button>
   <button id="btnForces" title="受力箭头：重力(红)+接触合力(绿)">受力</button>
@@ -502,6 +505,8 @@
   <button id="btnReplay" title="回放录制的帧序列" disabled>回放</button>
   <input type="range" id="replayBar" min="0" max="100" value="0" step="1" title="回放时间轴（拖动逐帧检查）" style="display:none;width:120px">
   <button id="btnCons" title="守恒量读数">守恒</button>
+  <button id="btnSound" title="碰撞与状态音效（程序合成，静音状态刷新后保持）">音效</button>
+  <button id="btnShake" title="碰撞镜头微震（trauma² 曲线，重击才抖；关闭状态刷新后保持）">震屏</button>
   <span class="ro">t=<b id="roT">0.000</b>s</span>
   <span class="ro">步长 <b>1/120s</b></span>
   <span class="ro">实体 <b id="roN">0</b></span>
@@ -572,7 +577,12 @@
     <h2>快捷键速查</h2>
     <table>
       <tr><td class="k">空格</td><td>运行 / 暂停</td></tr>
+      <tr><td class="k">Shift+空格</td><td>慢动作 0.1x 互切（记忆原档）</td></tr>
+      <tr><td class="k">- / =</td><td>时间倍率降 / 升档（0.1~4x）</td></tr>
+      <tr><td class="k">.</td><td>单步推进一个固定步长</td></tr>
       <tr><td class="k">R</td><td>重置到初始态</td></tr>
+      <tr><td class="k">B</td><td>自动子弹时间开关（强碰撞慢放）</td></tr>
+      <tr><td class="k">P（运行态）</td><td>图钉：钉住 / 放开选中体</td></tr>
       <tr><td class="k">W / E</td><td>移动 / 旋转 gizmo</td></tr>
       <tr><td class="k">F</td><td>聚焦选中对象</td></tr>
       <tr><td class="k">Ctrl+Z / Ctrl+Shift+Z</td><td>撤销 / 重做</td></tr>

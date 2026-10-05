@@ -11,6 +11,8 @@ const ACCENT = 0xd9a441;
 // 稳定 GC 来源；setDirection/normalize 只读传入值，不持有引用，复用安全。
 const _sv3 = new THREE.Vector3();
 const _sv3b = new THREE.Vector3();
+const _zoomN = new THREE.Vector3();   // 平滑缩放光标拉引 scratch
+const _zoomV = new THREE.Vector3();
 
 export class Viewport {
   // cb: {onSelect(id|null), onGizmoCommit(), onEnvReady()}
@@ -47,6 +49,60 @@ export class Viewport {
     this.projection = 'persp';
     this._rubber = document.getElementById('rubber');
   }
+
+  // PL-42：平滑缩放收敛（workbench tick 每帧调用；外部改相机位置安全——OrbitControls
+  // 每次 update 从 camera.position 重算 offset）
+  tickZoom() {
+    if (this._zoomTarget == null) return;
+    const cam = this.camera, t = this.controls.target;
+    const cur = cam.position.distanceTo(t);
+    const next = cur + (this._zoomTarget - cur) * 0.2;
+    const k = (Math.abs(this._zoomTarget - next) < 0.004 * this._zoomTarget) ? this._zoomTarget / cur : next / cur;
+    if (Number.isFinite(k) && k > 0) {
+      cam.position.sub(t).multiplyScalar(k).add(t);
+      this.markDirty();
+    }
+    if (Math.abs(this._zoomTarget - cam.position.distanceTo(t)) < 0.004 * this._zoomTarget) this._zoomTarget = null;
+  }
+
+  // ============ PL-44 选中/hover 三态视觉语言 ============
+  // hover=淡灰盒 0.28 / 主选中=琥珀 0.9 / 多选其余=灰 0.45。hover 不抢占选中，仅在编辑态。
+  updateHover(clientX, clientY) {
+    if (this.boxSelectMode || !this._bindLookup) { this.clearHover(); return; }
+    const hit = this.pickDynamic(clientX, clientY);
+    const id = hit ? hit.id : null;
+    const sel = new Set(this.highlightIds || []);
+    if (id && sel.has(id)) { this.clearHover(); return; }   // 已选中体不重复画 hover 态
+    if (this._hoverId === id) return;
+    this._hoverId = id;
+    if (!this._hoverHelper) {
+      this._hoverHelper = new THREE.BoxHelper(this.scene, 0x9aa0a6);
+      this._hoverHelper.material.transparent = true;
+      this._hoverHelper.material.opacity = 0.28;
+      this._hoverHelper.visible = false;
+      this.scene.add(this._hoverHelper);
+    }
+    if (id) {
+      const bind = this._bindLookup(id);
+      if (bind && bind.mesh) {
+        this._hoverHelper.setFromObject(bind.mesh);
+        this._hoverHelper.visible = true;
+      } else this._hoverHelper.visible = false;
+    } else {
+      this._hoverHelper.visible = false;
+    }
+    this.markDirty();
+  }
+
+  clearHover() {
+    if (this._hoverId != null) {
+      this._hoverId = null;
+      if (this._hoverHelper) this._hoverHelper.visible = false;
+      this.markDirty();
+    }
+  }
+
+  hoverState() { return { id: this._hoverId || null }; }
 
   // ============ 选中对象定位：相机 target/距离平滑移向实体（第六章「选中对象定位」） ============
   // 场景全景取景（UI-49）：建场/载入后把相机平滑移到全部实体的包围盒
@@ -602,8 +658,32 @@ export class Viewport {
     controls.dampingFactor = 0.07;
     controls.minDistance = 0.4;
     controls.maxDistance = 100;   // 大场景（天体系）与 5m 刻度档可达
-    controls.maxPolarAngle = 1.54;
+    controls.maxPolarAngle = Math.PI;   // PL-40 放开：允许压到地平线以下仰视（坡底/装置底面检查）
+    controls.zoomSpeed = 0.9;           // 近景手感（FZ-45 同款定稿值）
     controls.addEventListener('change', () => this.markDirty());   // 阻尼收尾帧持续置脏，静止后停渲染
+    // FZ-47：用户接管相机即中断取景/飞行动画（此前拖一下视角又被动画拽回去）
+    controls.addEventListener('start', () => { this._focusAnim = null; this._poseAnim = null; this._zoomTarget = null; });
+    // PL-41/42 平滑光标缩放：容器捕获级接管滚轮（r186 的步进 dolly 无阻尼）——
+    // 目标距离指数趋近 + 缩进时 target 向光标点轻拉（zoomToCursor 语义自实现）
+    this._zoomTarget = null;
+    this.container.addEventListener('wheel', (e) => {
+      if (!controls.enableZoom) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const cur = this.camera.position.distanceTo(controls.target);
+      if (this._zoomTarget == null) this._zoomTarget = cur;
+      const factor = Math.exp(e.deltaY * 0.0011);
+      this._zoomTarget = Math.max(controls.minDistance, Math.min(controls.maxDistance, this._zoomTarget * factor));
+      // 光标拉引：射线与「过 target、⊥视线」平面求交，缩进量的一半拉 target
+      if (factor < 1) {
+        const hit = this.rayOnPlane(e.clientX, e.clientY, this.camera.getWorldDirection(_zoomN), controls.target);
+        if (hit) {
+          _zoomV.set(hit[0], hit[1], hit[2]);
+          controls.target.lerp(_zoomV, (1 - factor) * 0.5);
+        }
+      }
+      this.markDirty();
+    }, { passive: false, capture: true });
     this.controls = controls;
 
     // 环境：HDRI 失败降级 RoomEnvironment（材质复用 materials.js，光照环境必须先就绪）
@@ -695,8 +775,14 @@ export class Viewport {
         const rb = document.getElementById('rubber');
         rb.style.left = Math.min(this._boxSel.x0, e.clientX) + 'px';
         rb.style.top = Math.min(this._boxSel.y0, e.clientY) + 'px';
-        rb.style.width = Math.abs(e.clientX - this._boxSel.x0) + 'px';
-        rb.style.height = Math.abs(e.clientY - this._boxSel.y0) + 'px';
+        rb.style.width = Math.abs(this._boxSel.x1 - this._boxSel.x0) + 'px';
+        rb.style.height = Math.abs(this._boxSel.y1 - this._boxSel.y0) + 'px';
+      }
+      // PL-44 hover 三态（编辑态、非 ghost/框选期），70ms 节流
+      const now = performance.now();
+      if (now - (this._hoverT || 0) > 70) {
+        this._hoverT = now;
+        if (this.gizmoEnabled !== false && !this._ghostFollow) this.updateHover(e.clientX, e.clientY);
       }
     });
     renderer.domElement.addEventListener('pointerup', (e) => this._onUp(e));
@@ -770,6 +856,49 @@ export class Viewport {
   // ============ 选择与 gizmo ============
   // workbench 注入 id→bind 查询（viewport 不持有 runtime 引用）
   setBindLookup(fn) { this._bindLookup = fn; }
+
+  // 运行态抓取拾取（层 2）：射线找最近可见实体网格，命中返回 {id, point:[x,y,z]}
+  pickDynamic(clientX, clientY) {
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(
+      ((clientX - r.left) / r.width) * 2 - 1,
+      -((clientY - r.top) / r.height) * 2 + 1
+    );
+    this.raycaster.setFromCamera(ndc, this.camera);
+    const roots = [];
+    for (const o of this.scene.children) {
+      if (o.userData && o.userData.entityId && o.visible) roots.push(o);
+    }
+    const hits = this.raycaster.intersectObjects(roots, true);
+    if (!hits.length) return null;
+    const h = hits[0];
+    let o = h.object;
+    while (o && !o.userData.entityId) o = o.parent;
+    return o ? { id: o.userData.entityId, point: [h.point.x, h.point.y, h.point.z] } : null;
+  }
+
+  // 世界点 → 屏幕像素（测试/调试投影用）
+  screenPosOf(x, y, z) {
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const v = new THREE.Vector3(x, y, z).project(this.camera);
+    return [(v.x + 1) / 2 * r.width + r.left, (-v.y + 1) / 2 * r.height + r.top];
+  }
+
+  // 指针射线与平面（normal, point）求交 → 世界坐标拖拽目标
+  rayOnPlane(clientX, clientY, normal, planePt) {
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(
+      ((clientX - r.left) / r.width) * 2 - 1,
+      -((clientY - r.top) / r.height) * 2 + 1
+    );
+    this.raycaster.setFromCamera(ndc, this.camera);
+    const denom = this.raycaster.ray.direction.dot(normal);
+    if (Math.abs(denom) < 1e-6) return null;
+    const t = planePt.clone().sub(this.raycaster.ray.origin).dot(normal) / denom;
+    if (t <= 0) return null;
+    const p = this.raycaster.ray.origin.clone().addScaledVector(this.raycaster.ray.direction, t);
+    return [p.x, p.y, p.z];
+  }
 
   setSelected(mesh) {
     // 兼容旧单选接口：委托 setHighlights（mesh 为空=清空）
@@ -886,6 +1015,8 @@ export class Viewport {
   // ============ 相机 ============
   focus(mesh) {
     if (!mesh) return;
+    this._poseAnim = null;   // 程序化聚焦=用户意图：打断飞行动画
+    this._zoomTarget = null;
     const box = new THREE.Box3().setFromObject(mesh);
     const center = box.getCenter(new THREE.Vector3());
     const size = Math.max(box.getSize(new THREE.Vector3()).length(), 0.25);
@@ -896,12 +1027,19 @@ export class Viewport {
   }
 
   resetView() {
+    this._poseAnim = null;   // 同 setViewPreset：打断动画
+    this._focusAnim = null;
+    this._zoomTarget = null;
     this.camera.position.set(3.4, 2.6, 5.2);
     this.controls.target.set(0, 0.5, 0);
     this.controls.update();
   }
 
   setViewPreset(p) {
+    // 程序化视角=用户意图：打断取景/飞行/缩放动画（否则 flyToPose 会把视角拽回去——p29 回归）
+    this._poseAnim = null;
+    this._focusAnim = null;
+    this._zoomTarget = null;
     const t = this.controls.target;
     const d = this.camera.position.distanceTo(t);
     const dirs = {

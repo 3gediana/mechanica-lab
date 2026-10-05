@@ -9,12 +9,14 @@ import {
 } from './engine/scene-doc.js';
 import { Runtime, FIXED_H, attachRegistry } from './engine/runtime.js';
 import { Viewport } from './engine/viewport.js';
-import { getPreset, PRESETS } from './engine/presets.js';
+import { getPreset, PRESETS, PRESET_CAMERA } from './engine/presets.js';
 import { createMaterials } from './materials.js';
 import { normalizeParse, planToOverrides } from './engine/parse-schema.js';
 import { explainRun } from './engine/explain.js';
 import { renderThumb } from './engine/thumbs.js';
 import { PerfMon } from './perfmon.js';
+import { SoundEngine } from './sound.js';
+import { JuiceFX } from './engine/juice.js';
 
 const $ = (id) => document.getElementById(id);
 const veil = $('veil'), veilStatus = $('veilStatus'), errbar = $('errbar');
@@ -81,6 +83,12 @@ const AUTOSAVE_KEY = 'mechanica.autosave.v1';
       onGizmoCommit: () => {
         const e = getEntity(doc, selectedId);
         if (!e) return;
+        // 暂停态 gizmo 摆姿势（PL-14）：只写物理体不进文档/undo，重置回初始文档
+        if (mode === 'run') {
+          const bind = runtime.binds.get(selectedId);
+          if (bind && bind.mesh) runtime.setLivePose(selectedId, bind.mesh.position.toArray(), [bind.mesh.rotation.x, bind.mesh.rotation.y, bind.mesh.rotation.z]);
+          return;
+        }
         // 平移释放时按当前吸附档位归位（endpoint/surface/center；grid 档由 gizmo 拖动内建吸附）
         if (viewport.gizmoMode === 'translate') {
           const bind = runtime.binds.get(selectedId);
@@ -110,6 +118,9 @@ const AUTOSAVE_KEY = 'mechanica.autosave.v1';
     doc = saved || getPreset('incline');
     rebuildAll();
     bindUI();
+    bindRunGrab();
+    juice = new JuiceFX(viewport.scene);
+    setShake(juice.shakeOn);
     {
       let hudPref = true;
       try { hudPref = localStorage.getItem('mech.perfhud') !== '0'; } catch (e) { /* 隐私模式默认开 */ }
@@ -161,6 +172,7 @@ function endHistoryBatch(label) {
 function rebuildAll(rerenderInspector = true) {
   if (rebuildSuspend > 0) return;   // 批内挂起：suspendRebuild 收尾统一重建一次
   runtime.rebuild(doc);
+  if (juice) juice.clear();         // 瞬时 FX 与计数随场景换代清空
   viewport.markDirty();   // 全量重建=视觉必然变化（静止帧跳渲染必须感知）
   rotationBase = null; momentumBase = null; astroBase = null;   // 基准必须在初始态重采
   selectedIds = selectedIds.filter((x) => runtime.binds.has(x));
@@ -435,17 +447,74 @@ function opDuplicate(id) {
   return copy.id;
 }
 
+// ============ 时间节奏（层 4，PL-30..32；收编 FEEL-17/18、FB-25/26 一套状态机） ============
+const SPEEDS = [0.1, 0.25, 0.5, 1, 2, 4];
+let _slowmoSaved = null;       // Shift+Space 互切记忆（原档位）
+function setSpeed(v) {
+  timeScale = v;
+  const sel = $('selSpeed');
+  if (sel && sel.value !== String(v)) sel.value = String(v);
+  _slowmoSaved = null;         // 手动换档=退出慢动作互切态
+  updateSimbarStatic();
+}
+function speedStep(dir) {
+  const i = SPEEDS.indexOf(timeScale);
+  const j = Math.max(0, Math.min(SPEEDS.length - 1, (i < 0 ? 3 : i) + dir));
+  setSpeed(SPEEDS[j]);
+  toast(`时间倍率 ${SPEEDS[j]}x`);
+}
+function toggleSlowmo() {
+  if (_slowmoSaved == null) {
+    if (timeScale === 0.1) { toast('已是慢动作（0.1x）'); return; }
+    _slowmoSaved = timeScale;
+    timeScale = 0.1;
+    $('selSpeed').value = '0.1';
+    setVectors(true);          // FB-26：切入慢动作自动开速度矢量（退出不关）
+    toast('慢动作 0.1x（Shift+Space 恢复）');
+  } else {
+    setSpeed(_slowmoSaved);
+    toast(`已恢复 ${_slowmoSaved}x`);
+  }
+  updateSimbarStatic();
+}
+// 4x 需要更多物理步预算（FEEL-18/142）：>2x 时步上限 8→16，仍欠载走既有背压丢步
+function maxStepsPerFrame(ts = timeScale) { return ts > 2 ? 16 : 8; }
+
+// ============ 惊喜预算（PL-23）：自动子弹时间 ============
+// B 键开关（默认关）。开启后运行态遇强碰撞（强度≥0.45）自动 0.25x 慢放 1.2s 后回原档，
+// 2.5s 冷却防连环触发；不碰用户档位（临时覆盖，state().timeScale 报生效值）。
+let autoBPT = false;
+let _bptUntil = 0, _bptLast = 0;
+function effectiveTimeScale() {
+  return (autoBPT && mode === 'run' && !paused && performance.now() < _bptUntil) ? 0.25 : timeScale;
+}
+function maybeBulletTime(strength) {
+  if (!autoBPT || mode !== 'run' || paused) return;
+  const now = performance.now();
+  if (now < _bptLast + 2500 || now < _bptUntil) return;   // 冷却中/已在慢放
+  if (strength < 0.45 || effectiveTimeScale() !== timeScale || timeScale !== 1) return;
+  _bptLast = now;
+  _bptUntil = now + 1200;
+  const chip = $('modeChip');
+  chip.textContent += ' · 子弹时间';
+  chip.classList.add('grab');       // 同款琥珀高亮（复用 grab 反白样式）
+}
+
 // ============ 模拟控制 ============
 function play() {
   if (mode === 'run' && !paused) return;
   if (doc.entities.length === 0) toast('空场景：无实体可演化，从目录添加组件后再运行');
   mode = 'run'; paused = false;
   viewport.setGizmoEnabled(false);
+  sound.ui('play');
   updateSimbarStatic();
 }
 function pauseToggle() {
   if (mode !== 'run') return;
   paused = !paused;
+  // 暂停态 gizmo 摆姿势（PL-14）：暂停=接管摆位，继续=交还运行
+  viewport.setGizmoEnabled(paused && !!selectedId);
+  sound.ui('pause');
   updateSimbarStatic();
 }
 function stepOnce() {
@@ -457,6 +526,7 @@ function resetSim() {
   mode = 'edit'; paused = false;
   viewport.setGizmoEnabled(true);
   rebuildAll();                    // 全量重建 = 回到文档初始态
+  sound.ui('reset');
   updateSimbarStatic();
   toast('已重置到初始态');
 }
@@ -480,7 +550,7 @@ function updateSimbarStatic() {
     $('btnBoxSel').classList.remove('hot');
   }
   const chip = $('modeChip');
-  chip.textContent = mode === 'edit' ? '编辑态' : (paused ? '暂停态' : '运行态');
+  chip.textContent = mode === 'edit' ? '编辑态' : (paused ? '暂停态' : '运行态') + (timeScale !== 1 ? ` ${timeScale}x` : '');
   const dropped = runtime.dropped > 0.1;   // 性能欠载透明化（UI-61）
   chip.className = 'chip ' + (mode === 'edit' ? '' : (paused ? 'pause' : 'run')) + (dropped ? ' warn' : '');
   chip.title = dropped
@@ -632,7 +702,7 @@ function bindUI() {
   $('btnPause').onclick = pauseToggle;
   $('btnStep').onclick = stepOnce;
   $('btnReset').onclick = resetSim;
-  $('selSpeed').onchange = (e) => { timeScale = parseFloat(e.target.value); };
+  $('selSpeed').onchange = (e) => { setSpeed(parseFloat(e.target.value) || 1); };
   $('btnVectors').onclick = () => setVectors(!vectorsOn);
   $('btnForces').onclick = () => setForces(!forcesOn);
   $('btnDecompose').onclick = () => {
@@ -646,6 +716,9 @@ function bindUI() {
   $('curveTabEnergy').onclick = () => setCurveMode('energy');
   $('btnCons').onclick = () => setCons(!consOn);
   $('btnPerf').onclick = () => setPerfHud(!perfHudOn);
+  $('btnSound').onclick = () => { sound.unlock(); setSound(sound.muted); };
+  setSound(!sound.muted);
+  $('btnShake').onclick = () => setShake(!(juice && juice.shakeOn));
 
   $('sceneName').onchange = (e) => { doc.name = e.target.value || '未命名场景'; e.target.value = doc.name; autosave(); };
 
@@ -768,12 +841,45 @@ function onKey(e) {
     viewport.hideGhost();
     return;
   }
-  if (e.code === 'Space') { e.preventDefault(); mode === 'run' ? pauseToggle() : play(); }
+  if (e.code === 'Space') {
+    e.preventDefault();
+    if (e.shiftKey) { if (mode === 'run' && !paused) toggleSlowmo(); }
+    else mode === 'run' ? pauseToggle() : play();
+  }
+  else if (e.key === '-' || e.key === '_') { e.preventDefault(); speedStep(-1); }
+  else if (e.key === '=' || e.key === '+') { e.preventDefault(); speedStep(1); }
+  else if (e.code === 'Period') {
+    // FEEL-17/112 收编：`.` 单步——运行暂停态直接推进；编辑态与单步按钮同语义
+    if (mode !== 'run' || paused) { e.preventDefault(); stepOnce(); }
+  }
   else if (e.code === 'KeyW') setGizmoMode('translate');
   else if (e.code === 'KeyE') setGizmoMode('rotate');
   else if (e.code === 'KeyF') viewport.focusOn(selectedId ? runtime.binds.get(selectedId).mesh : null);
   else if (e.code === 'KeyR') resetSim();
-  else if (e.code === 'Delete' || e.code === 'Backspace') { if (selectedId) opRemoveEntity(selectedId); }
+  else if (e.code === 'KeyB') {
+    autoBPT = !autoBPT;
+    toast(autoBPT ? '自动子弹时间开：强碰撞自动 0.25x 慢放' : '自动子弹时间关');
+  }
+  else if (e.code === 'KeyP' && mode === 'run' && selectedId) {
+    // 运行态图钉（PL-12）：钉住/放开动态体（物理体级操作，重置即消）
+    const pin = runtime.togglePin(selectedId);
+    toast(pin ? '已钉住（重置后恢复）' : '已放开图钉');
+  }
+  else if (e.code === 'Delete' || e.code === 'Backspace') {
+    if (mode === 'run' && selectedId) {
+      // 运行态删除（PL-12）：只拆运行时，重置回初始文档；有关联约束的体拒绝
+      if (runtime.removeLive(selectedId)) {
+        selectedIds = selectedIds.filter((x) => x !== selectedId);
+        selectedId = selectedIds.length ? selectedIds[selectedIds.length - 1] : null;
+        viewport.setHighlights(selectedIds);
+        toast('已从运行中移除（重置后恢复）');
+      } else {
+        toast('该实体有绳/弹簧/约束关联，运行中不可移除（可暂停后在编辑态删）');
+      }
+      return;
+    }
+    if (selectedId) opRemoveEntity(selectedId);
+  }
   else if (e.code.startsWith('Arrow') && selectedId && mode === 'edit') {
     // 方向键微调（FEEL-4）：0.1m 步进，Shift=1m；写回文档走 undo 主通道
     const step = e.shiftKey ? 1 : 0.1;
@@ -1843,6 +1949,12 @@ function sampleCurves() {
     curveData.t.shift(); curveData.ke.shift(); curveData.pe.shift();
     for (const sr of curveData.byId.values()) { sr.speed.shift(); sr.height.shift(); }
   }
+  // 图例跟数据走（采样侧即时刷新——PL-52 解耦后画布 0.45s 节流不再携带图例更新）
+  const legendKey = curveMode + ':' + curveData.byId.size;
+  if (curveData.legendN !== legendKey) {
+    curveData.legendN = legendKey;
+    updateCurveLegend();
+  }
   // PL-52：采样（0.15s，数据必须连续）与重绘（0.45s，canvas 全幅重画贵）解耦节流
   _curveDrawT += 0.15;
   if (_curveDrawT >= 0.45) { _curveDrawT = 0; drawCurves(); }
@@ -1898,11 +2010,6 @@ function drawCurves() {
       i++;
     }
     trace((j) => curveData.ke[j], '#7dc87d');    // 系统KE：绿实线
-  }
-  const legendKey = curveMode + ':' + curveData.byId.size;
-  if (curveData.legendN !== legendKey) {
-    curveData.legendN = legendKey;
-    updateCurveLegend();
   }
 }
 
@@ -2013,6 +2120,103 @@ function stopReplay() {
   updateSimbarStatic();
 }
 
+// ============ 声音（层 1，PL-1..8） ============
+const sound = new SoundEngine();
+// autoplay 合规：AudioContext 只在可信手势里创建/resume——评估脚本触发的 play() 保持静默
+window.addEventListener('pointerdown', () => sound.unlock());
+window.addEventListener('keydown', () => sound.unlock());
+function setSound(on) {
+  sound.setMuted(!on);
+  const btn = $('btnSound');
+  btn.classList.toggle('hot', sound.muted === false);
+  btn.textContent = sound.muted ? '静音' : '音效';
+}
+// 碰撞 juice（层 3，PL-20..22）：粒子池 + 震屏 + 升级碰撞环；场景就绪后在 init 里构造
+let juice = null;
+function setShake(on) {
+  if (juice) juice.setShake(on);
+  const btn = $('btnShake');
+  if (btn) btn.classList.toggle('hot', juice ? juice.shakeOn === true : false);
+}
+
+// ============ 运行中交互（层 2，PL-10..14） ============
+// 抓取：容器捕获级 pointerdown 先于 OrbitControls（canvas 子元素监听）——命中动态体即
+// stopPropagation 独占手势；拖拽目标 = 指针射线与「过抓取点、法向=视线」平面的交点。
+// 甩出：最近 ~80ms 指针轨迹速度 0.7 + 体当前速度 0.3 混合（按住不动松手=直掉对照组）。
+let grab = null;          // {id, planeNormal, planePt}；runtime._grab 持物理态
+let _ptrTrail = [];       // [{t, x,y,z}] 80ms 指针世界轨迹环
+let lastThrow = null;     // 最近一次松手诊断 {vPtr, vBody, vFinal}（p33 断言/调参用）
+const THROW_BLEND = 0.7;
+const THROW_VMAX = 14;
+function releaseGrabAt() {
+  if (!grab) return;
+  const g = grab;
+  grab = null;
+  viewport.container.style.cursor = '';
+  document.getElementById('modeChip').classList.remove('grab');
+  // 80ms 指针轨迹速度（采样跨度 ≥25ms 才有效；几乎没动=零操作继承，按住不动松手=直掉）
+  const now = performance.now() / 1000;
+  while (_ptrTrail.length && now - _ptrTrail[0].t > 0.08) _ptrTrail.shift();
+  const tel = runtime.telemetry(g.id);
+  const vb = tel ? tel.vel : [0, 0, 0];
+  let vPtr = null;
+  let vThrow = null;
+  if (_ptrTrail.length >= 2) {
+    const a = _ptrTrail[0], b = _ptrTrail[_ptrTrail.length - 1];
+    const dt = b.t - a.t;
+    if (dt >= 0.025) {
+      const cand = [(b.x - a.x) / dt, (b.y - a.y) / dt, (b.z - a.z) / dt];
+      const sp = Math.hypot(cand[0], cand[1], cand[2]);
+      if (sp > THROW_VMAX) { const k = THROW_VMAX / sp; vPtr = [cand[0] * k, cand[1] * k, cand[2] * k]; }
+      else if (sp >= 0.3) vPtr = cand;
+      if (vPtr) vThrow = [0, 1, 2].map((i) => vPtr[i] * THROW_BLEND + vb[i] * (1 - THROW_BLEND));
+    }
+  }
+  _ptrTrail = [];
+  lastThrow = { vPtr, vBody: vb, vFinal: vThrow || vb, t: now };
+  runtime.releaseGrab(vThrow);
+  // 抓取高亮清掉，恢复选中高亮
+  viewport.setHighlights(selectedIds.length ? selectedIds : []);
+}
+function onRunPointerDown(ev) {
+  if (mode !== 'run' || paused || ev.button !== 0) return;
+  const hit = viewport.pickDynamic(ev.clientX, ev.clientY);
+  if (!hit) return;                                  // 空处拖拽=转视角（不拦截）
+  const b = runtime.binds.get(hit.id);
+  if (!b || !b.body || b.entity.physics.body !== 'dynamic') return;
+  if (!runtime.grabBody(hit.id)) return;
+  ev.stopPropagation();                              // 独占：本轮拖拽不转相机不触发选择
+  ev.preventDefault();
+  viewport.controls.enabled = false;
+  const n = new THREE.Vector3();
+  viewport.camera.getWorldDirection(n);
+  const pt = new THREE.Vector3(hit.point[0], hit.point[1], hit.point[2]);
+  grab = { id: hit.id, normal: n, planePt: pt };
+  _ptrTrail = [];
+  viewport.container.style.cursor = 'grabbing';
+  document.getElementById('modeChip').classList.add('grab');
+  viewport.setHighlights([hit.id]);
+  const move = (e2) => {
+    if (!grab) return;
+    const p = viewport.rayOnPlane(e2.clientX, e2.clientY, grab.normal, grab.planePt);
+    if (!p) return;
+    runtime.moveGrabTarget(p);
+    _ptrTrail.push({ t: performance.now() / 1000, x: p[0], y: p[1], z: p[2] });
+    viewport.markDirty();
+  };
+  const up = (e2) => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    viewport.controls.enabled = true;
+    releaseGrabAt();
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+}
+function bindRunGrab() {
+  viewport.container.addEventListener('pointerdown', onRunPointerDown, true);   // 捕获级：先于 canvas 上的 OrbitControls
+}
+
 // ============ 叠加层条目池（PL-53/54 零分配） ============
 // tick 每帧为各叠加层构建 items——原先每帧 new 数组/对象/Vector3 是 GC 稳定来源，
 // 表现为秒级周期性帧尖峰。池条目跨帧复用，帧首 reset、帧尾 trim。
@@ -2105,14 +2309,18 @@ function tick() {
     }
     viewport.markDirty();
   } else if (mode === 'run' && !paused) {
-    runtime.advance(rawDt * timeScale);
+    const tsEff = effectiveTimeScale();
+    runtime.advance(rawDt * tsEff, maxStepsPerFrame(tsEff));
     viewport.markDirty();
+    // 子弹时间窗口收尾：恢复徽标
+    if (_bptUntil && performance.now() >= _bptUntil) { _bptUntil = 0; updateSimbarStatic(); }
   }
   const _tPhys = performance.now();
+  viewport.tickZoom();            // PL-42 平滑缩放收敛（在 controls.update 前，阻尼不冲突）
   viewport.controls.update();     // 阻尼收敛期持续触发 change→脏（render 内不再重复调用）
   viewport.tickFocus();
   viewport.tickPose();
-  if (viewport._focusAnim || viewport._poseAnim || viewport.impactCount() > 0) viewport.markDirty();
+  if (viewport._focusAnim || viewport._poseAnim || (juice && juice.needsFrame())) viewport.markDirty();
   // 叠加层的状态字必须每帧同步（不能落进脏区：静止帧跳过会让 wantContactNormals 停摆）
   runtime.wantContactNormals = viewport.decompose;
   // 静止帧跳渲染仅限有焦点的真实窗口：headless/后台页无帧提交会被合成器降频，
@@ -2264,19 +2472,45 @@ function tick() {
     viewport.updateJointViz(POOL_JOINT.list);
   }
   if (trailsOn) viewport.updateTrails(runtime.trails);
-  const nRep = runtime.collisionReports.length;
-  if (nRep < _seenReports) _seenReports = 0;
-  if (nRep > _seenReports) {
-    for (let i = _seenReports; i < nRep; i++) {
-      const r = runtime.collisionReports[i];
-      if (r.pos) viewport.spawnImpact(r.pos);
+  // 声音（层 1）+ 碰撞 juice（层 3）：撞击冲量 → 三音色合成 + 粒子/震屏/升级环。
+  // 听点 = 相机 target（pan 按横偏、衰减按距离）；强度与音色两路共用一次冲量换算。
+  {
+    const nS = runtime.impactSounds.length;
+    if (nS) {
+      const target = viewport.controls.target;
+      const span = Math.max(viewport.camera.position.distanceTo(target) * 0.9, 2);
+      for (let i = 0; i < nS; i++) {
+        const s = runtime.impactSounds[i];
+        const ba = runtime.binds.get(s.a), bb = runtime.binds.get(s.b);
+        const matA = ba ? ba.entity.render.material : null;
+        const matB = bb ? bb.entity.render.material : null;
+        const timbre = SoundEngine.timbreOf(matA, matB);
+        const strength = Math.min(1, s.j / 2.2);
+        sound.impact({
+          j: s.j,
+          matA, matB,
+          pair: s.a < s.b ? s.a + '|' + s.b : s.b + '|' + s.a,
+          pan: (s.pos[0] - target.x) / span,
+          att: 1 / (1 + Math.hypot(s.pos[0] - target.x, s.pos[1] - target.y, s.pos[2] - target.z) / (span * 1.2)),
+        });
+        if (juice) {
+          juice.spawnImpact(s.pos, strength, timbre);
+          if (strength > 0.08) juice.spawnRing(s.pos, strength);
+        }
+        maybeBulletTime(strength);
+      }
+      runtime.impactSounds.length = 0;
     }
-    _seenReports = nRep;
   }
   const _tOv = performance.now();
+  const shook = juice ? juice.applyShake(viewport.camera, _tOv / 1000) : false;
   viewport.render();     // tickFocus/tickPose 已在脏门槛前统一调用（FEEL-96/PER-83：此前双调致动画 2 倍速收敛）
+  if (shook) juice.revertShake(viewport.camera);
   const _tRnd = performance.now();
-  viewport.tickImpacts(_tRnd);
+  if (juice) {
+    juice.tick(rawDt);
+    juice.tickRings(_tRnd / 1000);
+  }
   roTimer += rawDt;
   if (roTimer > 0.15) {
     roTimer = 0;
@@ -3469,7 +3703,13 @@ window.MECH = {
   duplicate: (id) => opDuplicate(id),
   play, pause: pauseToggle, step: stepOnce, resetSim,
   undo, redo,
-  loadPreset: (id) => applyDoc(getPreset(id), '载入预置'),
+  loadPreset: (id) => {
+    applyDoc(getPreset(id), '载入预置');
+    // PL-43 预置相机位：显式 pose 优先，无则自动取景（全实体包围盒平滑飞行）
+    const cam = PRESET_CAMERA[id];
+    if (cam) viewport.flyToPose(cam.pos, cam.target);
+    else viewport.focusScene();
+  },
   // 重力用正数表示向下的模长（存 doc.gravity 为负）；越界抛错由调用方处理
   setG: (g) => {
     const v = Number(g);
@@ -3496,7 +3736,7 @@ window.MECH = {
     commitChange('记录 Agent 解析元数据');
     return cloneDoc(doc.meta);
   },
-  state: () => ({ mode, paused, simT: runtime.simT, timeScale, count: doc.entities.length, fixedH: FIXED_H }),
+  state: () => ({ mode, paused, simT: runtime.simT, timeScale: effectiveTimeScale(), timeScaleBase: timeScale, autoBPT, count: doc.entities.length, fixedH: FIXED_H }),
   telemetry: (id) => runtime.telemetry(id || selectedId),
   accel: (id) => runtime.accels.get(id || selectedId) || null,
   collisions: () => [...runtime.collisions],
@@ -3529,7 +3769,10 @@ window.MECH = {
   }),
   vectorState: () => ({ on: vectorsOn, ...viewport.arrowStats() }),
   selectionState: () => ({ ids: [...selectedIds], main: selectedId }),
-  impactCount: () => viewport.impactCount(),
+  impactCount: () => (juice ? juice.state().rings : 0),
+  juiceState: () => (juice ? juice.state() : null),
+  setShake: (on) => { setShake(!!on); return juice ? juice.shakeOn : null; },
+  get __juice() { return juice; },   // 诊断通道（同步直测 juice 机制用）
   // PL-50 帧预算仪表（p34-perf 断言通道）：分段分位摘要 + 原始样本
   perf: (win) => {
     const s = perfMon.summary(win || 600);
@@ -3539,6 +3782,29 @@ window.MECH = {
   setQualityTier: (t) => { qTier = Math.max(0, Math.min(2, t | 0)); viewport.setQualityTier(qTier); return qTier; },
   qualityTier: () => qTier,
   perfHud: (on) => setPerfHud(on == null ? !perfHudOn : !!on),
+  // 层1 声音（p33 断言通道）：引擎状态含 voices 最近发声记录（strength/gain/timbre/pan）
+  soundState: () => sound.state(),
+  clearSoundLog: () => sound.clearLog(),
+  // 离线渲染撞击样本（听感机器代理 + wav 导出，与实时同路径）
+  renderSample: (timbre, j) => sound.renderSample(timbre, j),
+  // 层2 运行中交互（p33 断言通道）
+  grabState: () => {
+    const g = runtime.grabState();
+    return g ? { ...g, trailN: _ptrTrail.length, trailSpan: _ptrTrail.length > 1 ? +(_ptrTrail[_ptrTrail.length - 1].t - _ptrTrail[0].t).toFixed(3) : 0 } : null;
+  },
+  lastThrowState: () => lastThrow ? { vPtr: lastThrow.vPtr, vBody: lastThrow.vBody, vFinal: lastThrow.vFinal } : null,
+  pinState: () => runtime.pinState(),
+  togglePin: (id) => runtime.togglePin(id || selectedId),
+  liveAdd: (type, overrides) => {
+    // 运行态增量添加（PL-11）：直接建进现有世界，不重建不进 undo；重置即消
+    const e = registry.createEntity(type, overrides || {});
+    return runtime.addLive(e) ? e.id : null;
+  },
+  liveRemove: (id) => runtime.removeLive(id || selectedId),
+  // 层4/5 断言通道
+  setAutoBPT: (on) => { autoBPT = !!on; return autoBPT; },
+  hoverState: () => viewport.hoverState(),
+  setMuted: (m) => { sound.setMuted(!!m); setSound(!sound.muted); return sound.state().muted; },
   tensionState: () => ({ on: viewport.tensionsOn, ...viewport.tensionStats() }),
   forceState: () => ({ on: forcesOn, decompose: viewport.decompose, normals: runtime.contactNormals.size, ...viewport.forceArrowStats() }),
   springForceState: () => ({

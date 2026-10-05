@@ -6,6 +6,10 @@ import { TRACK_POINTS, TRACK_META } from '../track-curve.js';
 
 export const FIXED_H = 1 / 120;
 const MAX_STEPS_PER_FRAME = 8;
+// 抓取伺服参数（层 2，PL-10）：β=每步收敛 25% 位置误差（跟手无超调）；
+// F_MAX=单步速度增量上限的力换算（Δv≤F·h/m）——重物加速慢、悬吊超重下垂，即"沉感"。
+const GRAB_BETA = 0.25;
+const GRAB_F_MAX = 120;
 // 滑槽约束临时向量（模块级复用，避免 120Hz 下 GC 抖动）
 const _sq = new THREE.Quaternion(), _sqInv = new THREE.Quaternion();
 const _sv = new THREE.Vector3(), _sw = new THREE.Vector3(), _ax = new THREE.Vector3();
@@ -26,6 +30,7 @@ export class Runtime {
     this.dropped = 0;            // 因背压丢弃的模拟秒数（诊断）
     this.collisions = [];        // [{t, a, b}] 碰撞事件（动量等场景用），上限 200
     this.collisionReports = [];  // [{t, pBefore, pAfter, keBefore, keAfter}] 碰撞步前后系统守恒量快照，上限 50
+    this.impactSounds = [];      // [{t, j, a, b, pos}] 撞击冲量缓冲（声音/juice 消费，帧级 drain），上限 160
     this.jointFailures = [];     // 约束创建失败记录（UI/Agent 可见）
     this.recording = null;       // 轨迹采样 {id, points:[{t,pos,speed,vel}], every, n}（解释器用，单实体）
     this.trailsOn = false;
@@ -43,6 +48,8 @@ export class Runtime {
     this.sensorReadings = new Map();  // 传感器读数（id → {speed/crossedT,...}），运行态数据不进文档
     this._colOwner = new Map();       // collider.handle → 实体 id（碰撞事件 O(1) 归属，PER-4）
     this._bindDocs = null;
+    this._grab = null;                // 抓取态 {id, body, target:[x,y,z]}（层 2 运行中交互）
+    this.pinned = new Set();          // 运行态图钉（body 固定，重置即消）
     this._gravBufs = [[], []];        // 天体加速度乒乓缓冲（PL-57，见 _gravAccel）
     this._gravBufIdx = 0;
   }
@@ -69,6 +76,7 @@ export class Runtime {
     this.dropped = 0;
     this.collisions.length = 0;
     this.collisionReports.length = 0;
+    this.impactSounds.length = 0;
     this.jointFailures.length = 0;
     this.trails.clear();
     this.contactForces.clear();
@@ -472,6 +480,7 @@ export class Runtime {
   // ============ 步进 ============
   stepOnce() {
     if (!this.world) return;
+    this._stepGrab();
     const nCol0 = this.collisions.length;
     const pre = this.systemTotals();          // 上一步末速度 = 本次碰撞前状态
     for (const [id, b] of this.binds) {
@@ -509,6 +518,19 @@ export class Runtime {
       const ca = lastEvt.a && this.binds.get(lastEvt.a), cb = lastEvt.b && this.binds.get(lastEvt.b);
       if (ca && ca.mesh && cb && cb.mesh) {
         pos = [(ca.mesh.position.x + cb.mesh.position.x) / 2, (ca.mesh.position.y + cb.mesh.position.y) / 2, (ca.mesh.position.z + cb.mesh.position.z) / 2];
+      }
+      // 撞击冲量（声音/碰撞 juice 的强度源）：J = Σ m·|Δv|，碰前取 _prevVel（步前刷新=
+      // 碰撞前瞬时）、碰后取当前 linvel。冲量口径对理想弹性碰撞照样响（ΔKE 口径会把
+      // 无能量损耗的脆响漏成静音）；< 0.04 视为静默微接触不记。
+      if (pos && ca && cb) {
+        let J = 0;
+        const va0 = _prevVel.get(lastEvt.a), vb0 = _prevVel.get(lastEvt.b);
+        if (ca.body && va0) { const v = ca.body.linvel(); J += ca.body.mass() * Math.hypot(v.x - va0[0], v.y - va0[1], v.z - va0[2]); }
+        if (cb.body && vb0) { const v = cb.body.linvel(); J += cb.body.mass() * Math.hypot(v.x - vb0[0], v.y - vb0[1], v.z - vb0[2]); }
+        if (J > 0.04) {
+          this.impactSounds.push({ t: this.simT, j: J, a: lastEvt.a, b: lastEvt.b, pos });
+          if (this.impactSounds.length > 160) this.impactSounds.shift();
+        }
       }
       this.collisionReports.push({ t: this.simT, pBefore: pre.p, keBefore: pre.ke, pAfter: post.p, keAfter: post.ke, postVels, preVels, pos });
       if (this.collisionReports.length > 50) this.collisionReports.shift();
@@ -643,15 +665,15 @@ export class Runtime {
     return true;
   }
 
-  advance(dt) {
+  advance(dt, maxSteps = MAX_STEPS_PER_FRAME) {
     this.acc += dt;
     let n = 0;
-    while (this.acc >= FIXED_H && n < MAX_STEPS_PER_FRAME) {
+    while (this.acc >= FIXED_H && n < maxSteps) {
       this.stepOnce();
       this.acc -= FIXED_H;
       n++;
     }
-    if (this.acc > FIXED_H * MAX_STEPS_PER_FRAME) {
+    if (this.acc > FIXED_H * maxSteps) {
       this.dropped += this.acc;
       this.acc = 0;                // 背压：丢弃积压而不是无限追赶
     }
@@ -813,6 +835,117 @@ export class Runtime {
       if (c.a === id || c.b === id) return c;
     }
     return null;
+  }
+
+  // ============ 抓取拖拽（层 2，PL-10）：速度伺服——铁律禁 setTranslation 跟手 ============
+  // setTranslation 直接搬运会吞掉速度语义（松手直掉、碰撞不交换动量）；伺服只在每步
+  // 改写 linvel：位置误差按 β 收敛 + Δv 上限 F·h/m（质量缩力=沉感），松手零操作即继承当前速度。
+  grabBody(id) {
+    const b = this.binds.get(id);
+    if (!b || !b.body || b.entity.physics.body !== 'dynamic') return false;
+    const p = b.body.translation();
+    this._grab = { id, body: b.body, target: [p.x, p.y, p.z] };
+    return true;
+  }
+
+  moveGrabTarget(pos) {
+    if (this._grab) this._grab.target = [pos[0], pos[1], pos[2]];
+  }
+
+  // 松手：vOverride 为指针轨迹推出的投掷速度（null=按住不动，保持当前速度=零操作继承/直掉）
+  releaseGrab(vOverride) {
+    const g = this._grab;
+    if (!g) return null;
+    this._grab = null;
+    const v = g.body.linvel();
+    if (vOverride) g.body.setLinvel({ x: vOverride[0], y: vOverride[1], z: vOverride[2] }, true);
+    return [v.x, v.y, v.z];
+  }
+
+  grabState() {
+    if (!this._grab) return null;
+    const v = this._grab.body.linvel();
+    const p = this._grab.body.translation();
+    return { id: this._grab.id, target: [...this._grab.target], vel: [v.x, v.y, v.z], pos: [p.x, p.y, p.z] };
+  }
+
+  _stepGrab() {
+    const g = this._grab;
+    if (!g) return;
+    if (!this.binds.has(g.id)) { this._grab = null; return; }
+    const body = g.body;
+    const p = body.translation();
+    const kv = GRAB_BETA / FIXED_H;
+    const wantX = (g.target[0] - p.x) * kv;
+    const wantY = (g.target[1] - p.y) * kv;
+    const wantZ = (g.target[2] - p.z) * kv;
+    const m = body.mass() || 1;
+    const dvMax = (GRAB_F_MAX * FIXED_H) / m;   // 沉感：重物每步可获得的 Δv 更小
+    const v = body.linvel();
+    const clamped = (want, cur) => Math.max(cur - dvMax, Math.min(cur + dvMax, want));
+    body.setLinvel({ x: clamped(wantX, v.x), y: clamped(wantY, v.y), z: clamped(wantZ, v.z) }, true);
+  }
+
+  // ============ 运行态图钉（PL-12）：dynamic ⇄ fixed 切换，重置（rebuild）即消 ============
+  togglePin(id) {
+    const b = this.binds.get(id);
+    if (!b || !b.body || b.entity.physics.body !== 'dynamic') return false;
+    const pin = !this.pinned.has(id);
+    if (pin) {
+      b.body.setBodyType(this.RAPIER.RigidBodyType.Fixed, true);
+      b.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      b.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+      this.pinned.add(id);
+    } else {
+      b.body.setBodyType(this.RAPIER.RigidBodyType.Dynamic, true);
+      this.pinned.delete(id);
+    }
+    return pin;
+  }
+
+  pinState() { return [...this.pinned]; }
+
+  // ============ 暂停态 gizmo 摆姿势（PL-14）：直接写物理体，不进文档/undo，重置即消 ============
+  setLivePose(id, pos, rotEuler) {
+    const b = this.binds.get(id);
+    if (!b || !b.body) return false;
+    b.body.setTranslation({ x: pos[0], y: pos[1], z: pos[2] }, true);
+    if (rotEuler) b.body.setRotation(quatFromEuler(this.RAPIER, [rotEuler[0], rotEuler[1], rotEuler[2]]), true);
+    b.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    b.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    return true;
+  }
+
+  // ============ 运行态删除（PL-12）：只拆运行时，文档不动，重置即回 ============
+  // 有 joint/attach 关联的体不允许（impulse joint 悬空会拖垮求解器），轻量拒绝。
+  removeLive(id) {
+    const b = this.binds.get(id);
+    if (!b || !b.entity) return false;
+    const e = b.entity;
+    const linked = (e.joints && e.joints.length) || (Array.isArray(e.attach) && e.attach.length);
+    if (linked || e.physics.gravitating) return false;
+    for (const other of this._bindDocs ? this._bindDocs.entities : []) {
+      if (other.joints && other.joints.some((j) => j.target === id)) return false;
+      if (Array.isArray(other.attach) && other.attach.includes(id)) return false;
+    }
+    if (this._grab && this._grab.id === id) this._grab = null;
+    if (b.body) this.world.removeRigidBody(b.body);
+    if (b.mesh) {
+      this.scene.remove(b.mesh);
+      b.mesh.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+    }
+    this.binds.delete(id);
+    this.trails.delete(id);
+    return true;
+  }
+
+  // ============ 运行态增量添加（PL-11）：直接建进现有世界，文档不动，重置即消 ============
+  addLive(e) {
+    if (!this.world) return false;
+    const c = this._reg.getComponent(e.type);
+    if (!c || c.isLink || c.isSensor || c.isMeasure || c.isViewpoint) return false;
+    this._createEntity(e);
+    return true;
   }
 }
 

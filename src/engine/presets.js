@@ -1427,3 +1427,20 @@ export function getPreset(id) {
   if (!p) throw new Error(`未知预置: ${id}`);
   return p.build();
 }
+
+// PL-43 预置相机位：教学动线的主视角（pos=相机位，target=注视点）。
+// 只收主推教学预置；未列出的预置走 focusScene 自动取景（全实体包围盒平滑飞行）。
+export const PRESET_CAMERA = {
+  incline: { pos: [2.6, 1.9, 3.6], target: [0.5, 0.6, 0] },
+  momentum: { pos: [1.8, 1.5, 4.0], target: [0, 0.4, 0] },
+  momentum2d: { pos: [2.4, 2.0, 3.4], target: [0.2, 0.4, 0] },
+  projectile: { pos: [2.8, 1.8, 4.4], target: [1.4, 0.8, 0] },
+  pendulum: { pos: [1.6, 1.8, 3.2], target: [0, 1.0, 0] },
+  atwood: { pos: [2.0, 3.0, 4.2], target: [0, 2.0, 0] },
+  newtonCradle: { pos: [1.4, 1.6, 3.0], target: [0, 0.8, 0] },
+  ballChain: { pos: [2.2, 1.8, 3.6], target: [0, 0.6, 0] },
+  collLab: { pos: [2.0, 1.7, 4.0], target: [0, 0.6, 0] },
+  classic: { pos: [2.6, 2.0, 4.2], target: [0.4, 0.8, 0] },
+  threeBody: { pos: [0, 10, 18], target: [0, 0, 0] },
+  binaryStar: { pos: [0, 8, 14], target: [0, 0, 0] },
+};

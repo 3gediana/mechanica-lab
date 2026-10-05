@@ -38,12 +38,13 @@ try {
     return window.MECH.telemetry(ball.id);
   });
   check('球沿轨滑行(x 前进)', mid && mid.pos[0] > -1.5, `x=${mid.pos[0].toFixed(2)}`);
-  // 固定 sleep 受 headless 实时率抖动摆布（同代码 y 在 1.0~1.2 波动）：改为等待下坡完成
+  // 固定 sleep 受 headless 实时率抖动摆布（同代码 y 在 1.0~1.2 波动）：改为等待下坡完成。
+  // polling 用 interval：rAF 轮询在 headless 负载下被饿死（本项目已验证坑），interval 不受此限
   await page.waitForFunction(() => {
     const ball = window.MECH.entities().find((e) => e.name === '轨道小球');
     const t = window.MECH.telemetry(ball.id);
     return t && t.pos[1] < 1.0;
-  }, null, { timeout: 8000 });
+  }, null, { timeout: 12000, polling: 200 });
   const late = await page.evaluate(() => {
     const ball = window.MECH.entities().find((e) => e.name === '轨道小球');
     const t = window.MECH.telemetry(ball.id);
@@ -74,6 +75,10 @@ try {
     sel.value = 'celestial';
     sel.dispatchEvent(new Event('change', { bubbles: true }));
   });
+  // 预置真正载入（天体在场）才继续——重负载下 dispatch 竞态曾让 doc 停留旧场景，
+  // 守恒条走动量分支出「基准≈0」，后面的两级断言必超时
+  await page.waitForFunction(() => window.MECH.doc().entities.some((e) => e.physics.gravitating),
+    null, { timeout: 10000, polling: 200 });
   await page.waitForTimeout(300);
   await page.click('#btnCons');
   // 两级断言（UI 写入竞态容忍）：宽度读数是 0.15s UI tick 的 CSS 副产物，批负载下 rAF 偶发
