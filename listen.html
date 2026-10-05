@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MECHANICA · 听感抽检（E4）</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230b0c0e'/%3E%3Ccircle cx='8' cy='8' r='4.2' fill='none' stroke='%23d9a441' stroke-width='1.6'/%3E%3Ccircle cx='8' cy='3.8' r='1.6' fill='%23d9a441'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #0b0c0e; --panel: rgba(13,14,16,.92); --line: rgba(255,255,255,.09);
+    --line-strong: rgba(255,255,255,.18); --text: #e8e6e1; --dim: #82878f;
+    --faint: #565b62; --accent: #d9a441;
+    --mono: "Cascadia Mono", Consolas, ui-monospace, monospace;
+    --sans: system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { min-height: 100vh; background: var(--bg); color: var(--text); font-family: var(--sans);
+    display: flex; flex-direction: column; align-items: center; padding: 64px 20px; }
+  h1 { font-size: 13px; font-weight: 500; letter-spacing: .38em; text-indent: .38em; }
+  .sub { margin-top: 8px; font-size: 11px; color: var(--dim); letter-spacing: .12em; }
+  .rule { width: 44px; height: 1px; background: var(--line-strong); margin: 22px 0 30px; }
+  .grid { display: grid; grid-template-columns: repeat(3, 218px); gap: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--line); padding: 18px 16px 16px; }
+  .card .nm { font-size: 12px; letter-spacing: .2em; color: var(--accent); }
+  .card .desc { margin-top: 8px; font-size: 11px; color: var(--dim); line-height: 1.8; min-height: 60px; }
+  .card audio { width: 100%; margin-top: 12px; height: 32px; }
+  .card .spec { margin-top: 10px; font-family: var(--mono); font-size: 9px; color: var(--faint);
+    letter-spacing: .06em; line-height: 1.9; border-top: 1px solid var(--line); padding-top: 8px; }
+  .live { margin-top: 36px; max-width: 690px; background: var(--panel); border: 1px solid var(--line); padding: 18px 22px; }
+  .live h2 { font-size: 11px; letter-spacing: .24em; color: var(--text); font-weight: 500; }
+  .live ol { margin: 12px 0 0 18px; font-size: 11px; color: var(--dim); line-height: 2.1; }
+  .live a { color: var(--accent); text-decoration: none; }
+  .live a:hover { text-decoration: underline; }
+  .note { margin-top: 26px; font-size: 10px; color: var(--faint); letter-spacing: .06em; text-align: center; line-height: 2; }
+</style>
+</head>
+<body>
+<h1>听感抽检（E4）</h1>
+<div class="sub">程序合成碰撞音 · 三材质 · 离线渲染（与实时同一条合成路径）</div>
+<div class="rule"></div>
+
+<div class="grid">
+  <div class="card">
+    <div class="nm">木 材</div>
+    <div class="desc">中空木响：两个低阶模态（165+330Hz）+ 短噪声瞬态。听点：是否像敲木板，而非电子哔哔声。</div>
+    <audio controls src="./tools/ui-test/shots/sound-wood.wav"></audio>
+    <div class="spec">timbre=wood<br>模态 165/330Hz · 阻尼快</div>
+  </div>
+  <div class="card">
+    <div class="nm">陶 瓷</div>
+    <div class="desc">脆亮瓷音：非谐模态簇（1040/2413/4805Hz，比 1:2.32:4.62）。听点：清脆带"铃"感，不刺耳不炸。</div>
+    <audio controls src="./tools/ui-test/shots/sound-ceramic.wav"></audio>
+    <div class="spec">timbre=ceramic<br>非谐簇 1:2.32:4.62</div>
+  </div>
+  <div class="card">
+    <div class="nm">橡 胶</div>
+    <div class="desc">闷噗：单低模态（62Hz）为主，几乎无高频。听点：钝、软、短，与木材明显可区分。</div>
+    <audio controls src="./tools/ui-test/shots/sound-rubber.wav"></audio>
+    <div class="spec">timbre=rubber<br>单模态 62Hz · 质心低</div>
+  </div>
+</div>
+
+<div class="live">
+  <h2>实 听（实时合成 + 限流/衰减/pan 全链路）</h2>
+  <ol>
+    <li><a href="./index.html" target="_blank">打开工作台</a>（音效默认开启；首次点击页面即解锁音频，符合 autoplay 合规）</li>
+    <li>预置场景选「牛顿摆」或「一维对撞」，点「运行」</li>
+    <li>听：碰撞声随撞击强弱变化（冲量→音量）、碰撞风暴不炸耳（限流）、左右声像随碰撞位置移动（pan）</li>
+    <li>顺手验证手感：运行态按住球拖动（有沉感）、快速甩出（带惯性）、B 键开自动子弹时间看强碰撞慢放</li>
+    <li>右上 perf 按钮可开帧预算仪表（应全程顺滑无红字尖峰）</li>
+  </ol>
+</div>
+
+<div class="note">wav 由 p33 套件经离线 AudioContext 渲染落盘（tools/ui-test/p33-play.mjs）——包络/频谱已过机器断言，<br>此处人耳抽检为 Goal E4 收尾项：三音色可区分、非裸方波、大撞不炸即算过。</div>
+</body>
+</html>

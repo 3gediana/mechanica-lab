@@ -50,7 +50,7 @@
 | PL-7 | 静音开关持久化：simbar `音效/静音` 按钮，localStorage `mech.sound`，刷新保持 | P1 | workbench setSound | ☑ | p33：文案切换+ls+刷新保持+静音期零发声 |
 | PL-8 | autoplay 合规：AudioContext 只在可信手势（pointerdown/keydown）创建/resume；评估脚本触发 play 保持完全静默 | P0 | workbench 手势接线 | ☑ | p33：无手势 ctx=none+emitted=0 → 点击后 running |
 
-**听感人工走查（E4）**：机器代理已固化（p33 离线渲染=实时同路径：包络瞬态 <15ms 达峰、衰减尾 <0.35%、三音色频谱特征、非谐比 2.32 排除谐波哔哔）；wav 样本落 `tools/ui-test/shots/sound-{wood,ceramic,rubber}.wav` 待人耳抽听定稿——**此项 PARTIAL（待用户），不阻塞层 2 开工**。
+**听感人工走查（E4）**：机器代理已固化（p33 离线渲染=实时同路径：包络瞬态 <15ms 达峰、衰减尾 <0.35%、三音色频谱特征、非谐比 2.32 排除谐波哔哔）；**人耳抽检通道已备好**：`listen.html`（dev server 根路径直达）——三材质 wav 一键播放（含合成参数标注）+ 工作台实听引导五步（实时合成全链路：冲量→音量/限流/pan + 抓抛手感/子弹时间/perf 仪表顺带验证）；wav 落 `tools/ui-test/shots/sound-{wood,ceramic,rubber}.wav`。**此项 PARTIAL（待用户点听），不阻塞其余全部条目**。
 
 ## 层 2：运行中交互（PL-10..14）
 
