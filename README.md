@@ -30,9 +30,12 @@ python tools/serve.py            # 或 python -m http.server 8721
 底栏    运行 / 暂停 / 单步(1/120s) / 重置 / 时间倍率 / 模拟时间 / 选中对象读数
 ```
 
-- 键盘：`Space` 运行/暂停 · `W/E` 移动/旋转 gizmo · `F` 聚焦（平滑） · `R` 重置 · `Del` 删除 ·
-  `Ctrl+Z/Y` 撤销重做 · `Ctrl+S` 保存 · `Ctrl+D` 复制 · `方向键` 微调选中对象（Shift 大步） ·
-  `?` 快捷键速查浮层 · `Esc` 关浮层/退框选/清 ghost
+- 键盘：`Space` 运行/暂停 · `Shift+Space` 慢动作 0.1x · `1/2/3` 时间倍率 0.5/1/2x · `W/E` 移动/旋转 gizmo ·
+  `F` 聚焦（平滑） · `R` 重置 · `Del` 删除 · `Ctrl+Z/Y` 撤销重做 · `Ctrl+S` 保存 · `Ctrl+D` 复制 ·
+  `方向键` 微调选中对象（Shift 大步） · `[/]` 旋转放置预览 · `?` 快捷键速查浮层 · `Esc` 关浮层/退框选/弹回拖拽
+  （全部键位与冲突矩阵见 docs/KEYS.md）
+- 放置：hover 目录卡出预览 → **视口点击=落点放置**（点哪放哪），`[/]` 旋转预览，右键轻点取消；点目录卡=默认摆位
+- 事件流：运行中碰撞/脱轨实时出右下事件卡（可点聚焦、同对聚合、重置出上一轮摘要）
 - 题目图片支持三种入口：点击上传 / **拖拽图片到虚线框** / **Ctrl+V 粘贴截图**
 - 场景自动保存到浏览器 localStorage；保存按钮下载 `.mechanica.json`，打开按钮载入
 - 编辑态改参数即时重建物理世界；运行态参数只读；重置 = 从场景文档全量重建回初始态
@@ -74,7 +77,7 @@ python tools/serve.py            # 或 python -m http.server 8721
 | `registry.js` | 组件注册表：几何构建 + 碰撞构建 + 参数 schema（单位/范围/校验）。新组件只在此登记 |
 | `runtime.js` | 文档 → three 网格 + Rapier 刚体全量重建；固定步长 1/120s；每帧步数上限 + 背压丢弃；碰撞事件；遥测 |
 | `viewport.js` | 视口：点选 / gizmo（TransformControls r186）/ 吸附 / 聚焦 / 三视图 |
-| `presets.js` | 预置场景（空场景、斜面小球），与 UI/Agent 同一条 createEntity 路径 |
+| `presets.js` | 预置场景（31 个：基础经典/振动/碰撞/抛体对照/转动·摩擦/天体六组），与 UI/Agent 同一条 createEntity 路径 |
 | `parse-schema.js` | 题图解析结果零信任规范化 + 建场计划（planToOverrides） |
 | `workbench.js` | UI 接线 + `window.MECH` 白名单编程接口（组件/变换/物理/重力/解析元数据） |
 
