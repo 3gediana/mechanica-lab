@@ -126,6 +126,68 @@ try {
   });
   check('API 通路（显式 transform）trusted 不拦', forced.trusted === true, JSON.stringify(forced));
 
+  // ==== F. 挪动防穿模（gizmo 提交/方向键微调同规则）：朝坡体方向微调被挡 ====
+  await page.evaluate(() => window.MECH.loadPreset('incline'));
+  await page.waitForFunction(() => {
+    const vp = window.MECH.__vp;
+    return vp._poseAnim == null && vp._focusAnim == null && vp._zoomTarget == null;
+  }, null, { timeout: 8000, polling: 200 });
+  const f0 = await page.evaluate(() => {
+    const ball = window.MECH.doc().entities.find((e) => e.type === 'sphere');
+    window.MECH.select(ball.id);
+    return { id: ball.id, pos: ball.transform.pos.map((v) => +v.toFixed(2)) };
+  });
+  // 探针口径：坡腹体内包覆=挡；高空自由=不挡（预设球自身贴面微嵌 2cm 属作者口径，self 不作断言）
+  const probe = await page.evaluate((id) => ({
+    belly: window.MECH.poseBlocked(id, [0, 0.4, 0]),
+    air: window.MECH.poseBlocked(id, [-0.3, 2.5, 0]),
+  }), f0.id);
+  check('F 挪动探针：坡腹体内挡/高空自由', probe.belly > 0 && probe.air === 0, JSON.stringify(probe));   // 值=嵌入方向数
+  // E2E：ghost 在坡趾右缘放球（x=1.35），ArrowLeft 连推入坡——推到坡面（x≈0.95）被挡，
+  // 位置停住 + toast「不能穿模」，终位球体保持在坡体 AABB 之外（x_min ≥ 0.8−2mm）
+  await page.evaluate(() => window.MECH.loadPreset('incline'));
+  await page.waitForFunction(() => {
+    const vp = window.MECH.__vp;
+    return vp._poseAnim == null && vp._focusAnim == null && vp._zoomTarget == null;
+  }, null, { timeout: 8000, polling: 200 });
+  const toePt = await page.evaluate(() => window.MECH.__vp.screenPosOf(1.35, 0, 0));   // 地面投影（ghost 射线落 y=0 平面）
+  await page.evaluate(() => {
+    [...document.querySelectorAll('.comp-item .nm')].find((n) => n.textContent.trim() === '球')
+      ?.closest('.comp-item').dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+  });
+  await page.waitForFunction(() => window.MECH.ghostState().visible, null, { timeout: 5000 });
+  await page.mouse.move(toePt[0], toePt[1]);
+  await page.waitForTimeout(250);
+  await page.mouse.click(toePt[0], toePt[1]);
+  await page.waitForTimeout(400);
+  const placed = await page.evaluate(() => {
+    const balls = window.MECH.doc().entities.filter((e) => e.type === 'sphere');
+    const last = balls[balls.length - 1];
+    return last ? { id: last.id, x: +last.transform.pos[0].toFixed(2) } : null;
+  });
+  check('F-E2E ghost 坡趾右缘放球', placed && Math.abs(placed.x - 1.5) < 0.3, JSON.stringify(placed));   // grid 0.5m 吸附 1.35→1.5
+  let stopped = false, lastX = placed ? placed.x : 1.35, lastToast2 = '';
+  for (let k = 0; k < 10; k++) {
+    await page.keyboard.press('ArrowLeft');
+    await page.waitForTimeout(120);
+    const cur = await page.evaluate(() => ({
+      x: +window.MECH.doc().entities.filter((e) => e.type === 'sphere').slice(-1)[0].transform.pos[0].toFixed(3),
+      toast: document.getElementById('toast').textContent,
+    }));
+    if (cur.x === lastX) {
+      if (cur.toast.includes('不能穿模')) { stopped = true; lastToast2 = cur.toast; }
+      break;
+    }
+    lastX = cur.x;
+    lastToast2 = cur.toast;
+  }
+  check('F-E2E 推入坡体被挡（位置停住+toast）', stopped, `lastX=${lastX} toast="${lastToast2}"`);
+  const final = await page.evaluate((id) => {
+    const e = window.MECH.doc().entities.filter((x) => x.type === 'sphere').slice(-1)[0];
+    return { x: +e.transform.pos[0].toFixed(2), clean: !window.MECH.poseBlocked(e.id, e.transform.pos) };
+  }, placed.id);
+  check('F-E2E 终位几何不嵌（meshPenetrates=false）', final.clean, JSON.stringify(final));
+
   // ==== E. 无 console 错误 ====
   check('全程无 console 错误', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));
 

@@ -131,9 +131,18 @@ try {
   });
   await page.mouse.move(scr2.x, scr2.y);
   await page.mouse.down();
-  await page.mouse.move(scr2.x - 60, scr2.y + 30, { steps: 8 });
+  // 放置防穿模后向左下拖会推进斜坡体（正确拦截）——对照组改向右上拖（净空方向），验证拖拽方法本身有效
+  await page.mouse.move(scr2.x + 60, scr2.y - 30, { steps: 8 });
   await page.mouse.up();
   await page.waitForTimeout(500);
+  const dbgT = await page.evaluate(() => {
+    const vp = window.MECH.__vp;
+    const obj = vp.selectedMesh;
+    return { toast: document.getElementById('toast').textContent,
+      meshPos: obj ? obj.position.toArray().map((v) => +v.toFixed(2)) : null,
+      mode: vp.gizmoMode, dragging: vp.gizmo.dragging };
+  });
+  console.log('DBG-A4c', JSON.stringify(dbgT));
   const afterMove = (await page.evaluate(() => window.MECH.doc())).entities[2].transform.pos;
   const moved = Math.abs(afterMove[0] - posBeforeScale[0]) + Math.abs(afterMove[1] - posBeforeScale[1]) > 0.02;
   check('A4c 对照: 同一路径移动 gizmo 生效', moved, `before=${JSON.stringify(posBeforeScale)} after=${JSON.stringify(afterMove)}`);

@@ -90,16 +90,42 @@ const AUTOSAVE_KEY = 'mechanica.autosave.v1';
       onGizmoCommit: () => {
         const e = getEntity(doc, selectedId);
         if (!e) return;
-        // 暂停态 gizmo 摆姿势（PL-14）：只写物理体不进文档/undo，重置回初始文档
+        // 暂停态 gizmo 摆姿势（PL-14）：只写物理体不进文档/undo，重置回初始文档。
+        // 挪动=只拦「加深穿透」：候选嵌入方向数 ≥ 当前才弹回——允许朝逃逸方向挪出
+        // （授权式嵌入体否则被永久冻结，w1 A4c 实测）
         if (mode === 'run') {
           const bind = runtime.binds.get(selectedId);
-          if (bind && bind.mesh) runtime.setLivePose(selectedId, bind.mesh.position.toArray(), [bind.mesh.rotation.x, bind.mesh.rotation.y, bind.mesh.rotation.z]);
+          if (bind && bind.mesh) {
+            const bt = bind.body.translation();
+            const curN = entityPoseBlocked(selectedId, [bt.x, bt.y, bt.z]);
+            const candN = entityPoseBlocked(selectedId, bind.mesh.position.toArray());
+            if (candN > 0 && candN >= curN) {
+              bind.mesh.position.set(bt.x, bt.y, bt.z);
+              viewport.markDirty();
+              toast('不能加深穿透：当前位已与物体重叠');
+              return;
+            }
+            runtime.setLivePose(selectedId, bind.mesh.position.toArray(), [bind.mesh.rotation.x, bind.mesh.rotation.y, bind.mesh.rotation.z]);
+          }
           return;
         }
         // 平移释放时按当前吸附档位归位（endpoint/surface/center；grid 档由 gizmo 拖动内建吸附）
-        if (viewport.gizmoMode === 'translate') {
-          const bind = runtime.binds.get(selectedId);
-          if (bind) applySnapToMesh(bind.mesh);
+        const bind = runtime.binds.get(e.id);
+        if (viewport.gizmoMode === 'translate' && bind) applySnapToMesh(bind.mesh);
+        // 放置防穿模的挪动延伸（用户需求）：拖进现有物体内=弹回不提交。缩放模式跳过
+        // （视觉缩放不改碰撞体/位姿，无穿模含义；弹回须还原 pos+rot+scale 全套，scale 残留
+        // 不清会滚雪球成 ±1e7——w1 A4 实测）。挪动=只拦「加深穿透」（同上）。
+        if (bind && viewport.gizmoMode !== 'scale') {
+          const curN = entityPoseBlocked(e.id, e.transform.pos);
+          const candN = entityPoseBlocked(e.id, bind.mesh.position.toArray());
+          if (candN > 0 && candN >= curN) {
+            bind.mesh.position.fromArray(e.transform.pos);
+            bind.mesh.rotation.set(...e.transform.rot);
+            if (e.transform.scale) bind.mesh.scale.fromArray(e.transform.scale);
+            viewport.markDirty();
+            toast('不能加深穿透：当前位已与物体重叠');
+            return;
+          }
         }
         viewport.applyGizmoToEntity(e);
         rebuildAll();
@@ -265,15 +291,11 @@ function updateOutlineSelection() {
 }
 
 // ============ 实体操作（UI 与 Agent 共用） ============
-// 放置防穿模（用户需求「根据物体碰撞箱阻挡」）：纯 three.js AABB 判定——保守（AABB 不交
-// 则形状必不交=零穿模保证）、零 Rapier 查询（本版 compat 成对查询对未 step 世界全哑、
-// contactDist 对新建 pair 报伪深、speculative 对近距对持续误推——全部绕开）。
-// 拦截规则（精化）：只拦「涉及动态体」的重叠——动态体嵌入任何东西、或新体嵌入动态体
-// （运行时会爆/抖，用户抱怨的正是这个）；固定体×固定体放行（坡嵌进地板是合法视觉摆法，
-// 静态间无物理冲突）。返回 0=原位可用；>0=需抬升该高度；null=抬无可抬（拒绝）。
+// 放置防穿模（用户需求「根据物体碰撞箱阻挡」）：探测=viewport.meshPenetrates（26 向射线
+// 自表面 vs 他表面相对口径——贴面停放放行、嵌入拦截，纯 three.js 几何、零 Rapier 查询）。
+// 返回 0=原位可用；>0=需抬升该高度（放到占位物上方）；null=抬无可抬（拒绝）。
 const _plcProbeCache = new Map();   // typeId+params JSON → geometry（探针复用，勿与 ghost 混用）
 function placementLiftFor(typeId, params, pos, rotY, excludeId = null, isDynamic = false) {
-  const EPS = 0.002;
   const key = typeId + '|' + JSON.stringify(params);
   let geo = _plcProbeCache.get(key);
   if (!geo) {
@@ -285,36 +307,34 @@ function placementLiftFor(typeId, params, pos, rotY, excludeId = null, isDynamic
   const probe = new THREE.Mesh(geo);
   probe.position.set(pos[0], pos[1], pos[2]);
   probe.rotation.y = rotY;
-  probe.updateMatrixWorld(true);
-  const box = new THREE.Box3().setFromObject(probe);
-  box.expandByScalar(-EPS);
-  const others = [];
-  for (const [id, bind] of runtime.binds) {
-    if (excludeId != null && id === excludeId) continue;
-    const e = bind.entity;
-    if (!bind.mesh || e.physics.body === 'none' || e.physics.gravitating) continue;
-    if (e.params && e.params.noCollide) continue;
-    const otherDynamic = e.physics.body === 'dynamic';
-    if (!isDynamic && !otherDynamic) continue;   // 固定×固定放行
-    const ob = new THREE.Box3().setFromObject(bind.mesh);
-    ob.expandByScalar(-EPS);
-    others.push(ob);
-  }
-  const hit = (b) => others.some((ob) => b.intersectsBox(ob));
-  if (!hit(box)) return 0;
+  const hit = () => viewport.meshPenetrates(probe, excludeId, isDynamic);
+  if (!hit()) return 0;
   for (const lift of [0.02, 0.05, 0.1, 0.2, 0.35]) {
-    const lifted = new THREE.Box3().setFromObject(probe);
-    lifted.translate(new THREE.Vector3(0, lift, 0));
-    lifted.expandByScalar(-EPS);
-    if (!hit(lifted)) return lift;
+    probe.position.y = pos[1] + lift;
+    if (!hit()) return lift;
   }
   return null;
 }
 
+// 编辑态挪动（gizmo 拖拽/方向键）的穿模阻挡检查：实体摆到 pos（旋转保持 mesh 现状）
+// 走 26 向射线相对口径（viewport.meshPenetrates）——贴面停放放行、嵌入拦截。
+function entityPoseBlocked(id, pos, isDynamicOverride = null) {
+  const bind = runtime.binds.get(id);
+  if (!bind || !bind.mesh) return false;
+  const isDynamic = isDynamicOverride != null ? isDynamicOverride
+    : (bind.entity.physics.body === 'dynamic');   // 缺省从实体自身推导：动态体被一切他体阻挡
+  const savedP = bind.mesh.position.clone();
+  bind.mesh.position.set(pos[0], pos[1], pos[2]);
+  let count;
+  try { count = viewport.meshPenetrates(bind.mesh, id, isDynamic); }
+  finally { bind.mesh.position.copy(savedP); bind.mesh.updateMatrixWorld(true); }
+  return count;   // 嵌入方向数（0=不嵌）
+}
+
 // 目录默认槽位的「最近空位」搜索：原位→抬升阶梯→周边 1.2m 环。全占= null（拒绝）。
 // 保证「目录加一件」一键可用（槽位被场景体占住时自动挪到最近空位，如斜坡旁）。
+// 探测同 placementLiftFor（26 向射线相对口径；固定体×固定体放行由调用方过滤）。
 function placementFindSpot(typeId, params, pos, rotY, isDynamic = false) {
-  const EPS = 0.002;
   const key = typeId + '|' + JSON.stringify(params);
   let geo = _plcProbeCache.get(key);
   if (!geo) {
@@ -324,7 +344,6 @@ function placementFindSpot(typeId, params, pos, rotY, isDynamic = false) {
     _plcProbeCache.set(key, geo);
   }
   const probe = new THREE.Mesh(geo);
-  probe.position.set(pos[0], pos[1], pos[2]);
   probe.rotation.y = rotY;
   const others = [];
   for (const [, bind] of runtime.binds) {
@@ -332,18 +351,13 @@ function placementFindSpot(typeId, params, pos, rotY, isDynamic = false) {
     if (!bind.mesh || e.physics.body === 'none' || e.physics.gravitating) continue;
     if (e.params && e.params.noCollide) continue;
     if (!isDynamic && e.physics.body !== 'dynamic') continue;   // 固定×固定放行（与 placementLiftFor 同规则）
-    const ob = new THREE.Box3().setFromObject(bind.mesh);
-    ob.expandByScalar(-EPS);
-    others.push(ob);
+    others.push(bind.mesh);
   }
   const rings = [[0, 0], [1.2, 0], [-1.2, 0], [0, 1.2], [0, -1.2], [1.2, 1.2], [-1.2, 1.2], [1.2, -1.2], [-1.2, -1.2]];
   for (const [dx, dz] of rings) {
     for (const lift of (dx === 0 && dz === 0) ? [0, 0.02, 0.05, 0.1, 0.2, 0.35] : [0]) {
       probe.position.set(pos[0] + dx, pos[1] + lift, pos[2] + dz);
-      probe.updateMatrixWorld(true);
-      const box = new THREE.Box3().setFromObject(probe);
-      box.expandByScalar(-EPS);
-      if (!others.some((ob) => box.intersectsBox(ob))) {
+      if (!viewport.meshPenetrates(probe, null)) {
         return [+(pos[0] + dx).toFixed(3), +(pos[1] + lift).toFixed(3), +(pos[2] + dz).toFixed(3)];
       }
     }
@@ -1008,10 +1022,16 @@ function onKey(e) {
     if (!bind || !ent) return;
     e.preventDefault();
     const p = bind.mesh.position;
-    if (e.code === 'ArrowLeft') p.x -= step;
-    else if (e.code === 'ArrowRight') p.x += step;
-    else if (e.code === 'ArrowUp') p.z -= step;
-    else if (e.code === 'ArrowDown') p.z += step;
+    const cand = [p.x, p.y, p.z];
+    if (e.code === 'ArrowLeft') cand[0] -= step;
+    else if (e.code === 'ArrowRight') cand[0] += step;
+    else if (e.code === 'ArrowUp') cand[2] -= step;
+    else if (e.code === 'ArrowDown') cand[2] += step;
+    // 放置防穿模的挪动延伸：微调只拦「加深穿透」——允许朝逃逸方向挪出
+    const curN = entityPoseBlocked(selectedId, [p.x, p.y, p.z]);
+    const candN = entityPoseBlocked(selectedId, cand);
+    if (candN > 0 && candN >= curN) { toast(candN >= curN && curN > 0 ? '不能加深穿透：前方与现有物体重叠' : '不能穿模：前方与现有物体重叠'); return; }
+    p.set(cand[0], cand[1], cand[2]);
     viewport.applyGizmoToEntity(ent);
     rebuildAll();
     commitChange('微调 ' + ent.name);
@@ -3992,6 +4012,7 @@ window.MECH = {
   scaleState: () => ({ step: gridStep, ...viewport.gridInfo(),
     text: document.getElementById('scaleReadout') ? document.getElementById('scaleReadout').textContent : '' }),
   ghostState: () => viewport.ghostState(),
+  poseBlocked: (id, pos) => entityPoseBlocked(id || selectedId, pos),   // 挪动防穿模探针
   // 放置防穿模测试探针：已存在实体按其 type/params/位姿重建假想体，返回当前穿透深度（0=不嵌）
 
   sensorState: (id) => runtime.sensorReadings.get(id) || null,

@@ -895,6 +895,57 @@ export class Viewport {
   // workbench 注入 id→bind 查询（viewport 不持有 runtime 引用）
   setBindLookup(fn) { this._bindLookup = fn; }
 
+  // ============ 放置/挪动防穿模探测（用户需求「根据碰撞箱阻挡」） ============
+  // 26 向射线从假想体质心出射：他体表面比自己表面更近的方向数 ≥5 = 该姿态嵌入。
+  // 相对口径天然放行「贴面停放」（他面 ≈ 自己面，不更近）、拦住「半嵌/深嵌」；
+  // 材质临时双面化——否则体内出射穿背面前逃逸，深嵌探测不到。
+  _penDirs = null;
+  meshPenetrates(mesh, excludeId = null, isDynamic = false) {
+    mesh.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(mesh);
+    const center = box.getCenter(new THREE.Vector3());
+    const far = box.getSize(new THREE.Vector3()).length() * 4 + 2;
+    const others = [];
+    for (const o of this.scene.children) {
+      if (!o.userData || !o.userData.entityId || o === mesh || !o.visible) continue;
+      if (excludeId != null && o.userData.entityId === excludeId) continue;
+      // 拦截规则（与 workbench 同）：固定探针只被动态体阻挡（固定×固定放行）
+      const ob = this._bindLookup ? this._bindLookup(o.userData.entityId) : null;
+      const otherDynamic = ob && ob.entity && ob.entity.physics ? ob.entity.physics.body === 'dynamic' : true;
+      if (!isDynamic && !otherDynamic) continue;
+      others.push(o);
+    }
+    if (!others.length) return false;
+    if (!this._penDirs) {
+      this._penDirs = [];
+      for (const x of [-1, 0, 1]) for (const y of [-1, 0, 1]) for (const z of [-1, 0, 1]) {
+        if (!x && !y && !z) continue;
+        this._penDirs.push(new THREE.Vector3(x, y, z).normalize());
+      }
+    }
+    const mats = new Set();
+    for (const o of [mesh, ...others]) {
+      o.traverse((t) => { if (t.isMesh && t.material) { t.material.side = THREE.DoubleSide; mats.add(t.material); } });
+    }
+    try {
+      let embedded = 0, enclosed = 0;
+      for (const d of this._penDirs) {
+        this.raycaster.set(center, d);
+        this.raycaster.far = far;
+        const sHit = this.raycaster.intersectObject(mesh, true)[0];
+        const oHit = this.raycaster.intersectObjects(others, true)[0];
+        if (!oHit) continue;
+        enclosed++;
+        // 他面比自己面更近 = 该方向被埋（贴面相切 o≈s 不算，1e-4 容差）
+        if (!sHit || oHit.distance < sHit.distance - 1e-4) embedded++;
+      }
+      // 返回嵌入方向数（0=不嵌）；体内包覆（≥22 向有他面=封闭体内）按全嵌 26 计
+      return enclosed >= 22 ? this._penDirs.length : embedded;
+    } finally {
+      for (const m of mats) m.side = THREE.FrontSide;
+    }
+  }
+
   // 运行态抓取拾取（层 2）：射线找最近可见实体网格，命中返回 {id, point:[x,y,z]}
   pickDynamic(clientX, clientY) {
     const r = this.renderer.domElement.getBoundingClientRect();
