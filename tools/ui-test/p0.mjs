@@ -146,15 +146,26 @@ try {
   await page.waitForTimeout(300);
   check('工具按钮冒烟', (await page.evaluate(() => window.MECH.ready())) === true);
 
-  // ---- classic 保留页存活（同标签跳转；legacy readouts 会覆写 document.title，用控制台激活特征断言）
+  // ---- classic 经典演示页存活（R4 起 title 不再被 readouts 覆写，改用物理时钟前进 + 球离开发点断言）
   await page.goto(BASE + '/classic.html?run=1', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => {
     const c = document.querySelector('#console');
     return c && c.classList.contains('on') && !document.querySelector('#btnRelease').disabled;
   }, null, { timeout: 15000 });
-  await page.waitForTimeout(4000);   // run=1 1.2s 后自动抽挡板，球开始滚
-  const legacyT = await page.title();
-  check('classic.html 存活(物理在读数)', legacyT.startsWith('M x='), legacyT.slice(0, 60));
+  const t0 = await page.evaluate(() => window.MECH.time());
+  // run=1 1.2s 后自动抽挡板；headless rAF 饥饿会让经典页慢钟（实测 4s 墙钟只走 0.7s 模拟）——
+  // 用条件等待而非固定睡眠：时钟前进 + 球离开发点，双条件即「物理在跑」的活体证据
+  const liveOk = await page.waitForFunction(([t0, sx, sy]) => {
+    const b = window.MECH.ball();
+    return window.MECH.time() - t0 > 0.5
+      && Math.hypot(b.pos.x - sx, b.pos.y - sy) > 0.15;
+  }, [t0, -1.70135, 1.57693], { timeout: 25000, polling: 500 }).then(() => true).catch(() => false);
+  const live = await page.evaluate(([t0, sx, sy]) => {
+    const b = window.MECH.ball();
+    return { dt: window.MECH.time() - t0, dx: Math.hypot(b.pos.x - sx, b.pos.y - sy) };
+  }, [t0, -1.70135, 1.57693]);
+  check('classic.html 存活(物理在读数)', liveOk,
+    `simT+${live.dt.toFixed(1)}s 球离开发点 ${live.dx.toFixed(2)}m`);
   await page.close();
   await context.close();
 } finally {

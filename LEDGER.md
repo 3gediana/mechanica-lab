@@ -418,3 +418,11 @@ PL-* 台账落 `docs/OPTIMIZATION-R4-PLAY.md`（PL-50..58 性能 / PL-1..8 声�
 - **环境坑三条入账**：worktree 漏签 assets/（HDRI 404 静默降级）；headed 失焦 20fps 节流（rAF 健康门 + 禁节流 flag）；waitForFunction rAF 轮询 CDP 风暴（polling:500 + 页面函数禁引 Node 闭包）。
 - 测试基建：全部 UI 套件支持 `MECH_BASE` 环境变量（默认 8721 不变）——双 agent 并行各用各端口。
 - 全量回归 run-all 36 套全绿（p1 首跑缺 `tools/server/step_key.txt`，复制后复跑 19/19）；单测 78/78（+perfmon 6）。
+
+## R4-PLAY 层 1-5 全落地 + UI 精致化（10-05 续，同分支）
+
+- **六层全部 ☑ 有证据**（a589ecd）：声音（模态共振簇程序合成、冲量强度 J=Σm·|Δv|、三音色 softer-of、限流/衰减/pan、静音持久、autoplay 合规）；抓抛（速度伺服禁 setTranslation、80ms 指针轨迹混合甩出、质量缩力沉感、运行态 add/pin/remove、run 操作不进 undo）；juice（320 粒软精灵池、两段碰撞环、trauma² 震屏、toneMapped=false 绕 ACES 洗白、PL-23 自动子弹时间保留）；时间（-/= 倍率档、. 单步、Shift+Space 慢放状态机）；打磨（maxPolarAngle、zoomToCursor+平滑、12 预置 flyToPose、hover 三态）。p33-play 48 断言全绿；juice 视觉门三轮过审（freezeAt 诊断时钟是取证关键）。
+- **用户追加两项 UI 工程已交付**：①工作台精致化——perf HUD 重建两列微表格仪表（+启动 120 帧预热豁免+进运行态重开采样窗，修掉"刚开页峰值 959ms 红字"惊吓）、simbar 孤儿按钮归组（叠加/记录/感官）+开关热态从琥珀填色降为底线指示、守恒条移左下避让曲线面板、曲线图例剥离括号复读；②classic.html 重点优化——右上「← 返回工作台」+Esc、环底四管口重叠套管收口（smoothstep 0.42→0.16m，物理中心线不动）、删无关摆球整套、清调试残留（title 诊断串/邻域碰撞探针/「保留版」标题）、环顶光门过球闪光。样张 tools/ui-test/shots/{c1,c2,w1,w2,w3}-*.png。
+- **回归基建补课**：run-all 修 p33 条目（文件实为 p33-play.mjs，此前全量跑从未真正执行过该套件）+ 失败套件保留逐条断言明细；p0 classic 断言改物理时钟+位移双条件（title 诊断串已删；headless 经典页 rAF 饥饿 4s 墙钟只走 0.7s 模拟——固定睡眠断言不可用，条件等待 polling:500）。
+- **新坑入账**：page.evaluate 页面函数引用 Node 闭包变量=ReferenceError（本轮在 p0 连犯两次——台账已有此条但仍犯，下次写 evaluate 先查自由变量）。
+- 人工走查两项状态：听感 E4 wav 样本仍待人耳抽检（不阻塞）；30 分钟游玩+教学混合走查见 R4 台账走查节。

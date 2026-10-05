@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230b0c0e'/%3E%3Ccircle cx='8' cy='8' r='4.2' fill='none' stroke='%23d9a441' stroke-width='1.6'/%3E%3Ccircle cx='8' cy='3.8' r='1.6' fill='%23d9a441'/%3E%3C/svg%3E">
 <title>MECHANICA · 物理教学工作台</title>
 <style>
   :root {
@@ -56,7 +57,8 @@
   .tb-group button:last-child, .tb-group select:last-child { border-right: none; }
   .tb-group button:hover, .tb-group select:hover { color: var(--text); background: rgba(255,255,255,.035); }
   .tb-group button:active { transform: translateY(1px); }
-  .tb-group button.hot { color: var(--accent); background: var(--accent-dim); }
+  /* 开关热态：琥珀文字+底线指示，不再整块填色（四个叠加开关齐亮时读作一排琥珀色块，视觉过噪） */
+  .tb-group button.hot { color: var(--accent); background: transparent; box-shadow: inset 0 -2px 0 rgba(217,164,65,.55); }
   .tb-group button:disabled, .tb-group select:disabled { color: var(--faint); cursor: default; background: transparent; }
   .tb-group select { font-family: var(--mono); }
   .tb-group select option { background: var(--panel-solid); color: var(--text); }
@@ -219,7 +221,7 @@
   #simbar button:hover { color: var(--text); background: rgba(255,255,255,.035); }
   #simbar button:active { transform: translateY(1px); }
   #simbar button.primary { color: var(--accent); }
-  #simbar button.hot { color: var(--accent); background: var(--accent-dim); }
+  #simbar button.hot { color: var(--accent); background: transparent; box-shadow: inset 0 -2px 0 rgba(217,164,65,.55); }
   #simbar button:disabled { color: var(--faint); cursor: default; }
   #simbar .ro { font-family: var(--mono); font-size: 11px; color: var(--dim); letter-spacing: .04em; white-space: nowrap; }
   #simbar .ro b { color: var(--accent); font-weight: 400; font-variant-numeric: tabular-nums; }
@@ -230,15 +232,17 @@
   }
   #simbar select option { background: var(--panel-solid); }
 
-  /* 守恒量条 */
+  /* 守恒量条（左下对齐：居中版会伸到右侧曲线面板底下，两开时互相遮挡） */
   #consbar {
-    position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--simbar-h) + 10px);
+    position: fixed; left: calc(var(--left-w) + 12px); bottom: calc(var(--simbar-h) + 38px);
     z-index: 18; display: none;
     background: var(--panel); border: 1px solid var(--line); border-radius: 2px;
     padding: 8px 16px; font-family: var(--mono);
   }
   #consbar.on { display: block; }
   #consbar .cgrid { display: grid; grid-template-columns: repeat(4, auto); gap: 4px 22px; }
+  /* 窄视口：四列守恒条右缘会顶进曲线面板（1280/1440 走查实测重叠）→ 降两列收窄 */
+  @media (max-width: 1520px) { #consbar .cgrid { grid-template-columns: repeat(2, auto); } }
   #consbar .cell { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
   #consbar .k { font-family: var(--sans); font-size: 9px; color: var(--faint); letter-spacing: .1em; }
   #consbar .v { font-size: 12px; color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -258,14 +262,26 @@
     background: rgba(11,12,14,.6); padding: 3px 8px; border-radius: 2px; user-select: none;
   }
 
-  /* 性能 HUD（PL-50）：帧预算/分段耗时/draw calls，运行态常开可关 */
+  /* 性能 HUD（PL-50）：帧预算仪表——两列微表格，标签列/数值列对齐，读数右对齐 tabular */
   #perfHud {
     position: fixed; right: calc(var(--right-w) + 12px); top: calc(var(--topbar-h) + 10px); z-index: 14;
-    font-family: var(--mono); font-size: 10px; line-height: 1.6; color: var(--dim);
-    letter-spacing: .04em; white-space: pre; text-align: right;
-    background: rgba(11,12,14,.72); padding: 4px 9px; border: 1px solid var(--line);
-    border-radius: 2px; user-select: none; pointer-events: none;
+    font-family: var(--mono); font-size: 10px; color: var(--dim);
+    background: rgba(11,12,14,.78); padding: 9px 11px 8px; border: 1px solid var(--line);
+    border-radius: 2px; user-select: none; pointer-events: none; min-width: 132px;
   }
+  #perfHud .ph-hd { display: flex; align-items: baseline; gap: 5px; padding-bottom: 6px; margin-bottom: 6px;
+    border-bottom: 1px solid var(--line); }
+  #perfHud .ph-hd b { font-size: 16px; font-weight: 400; color: var(--text); font-variant-numeric: tabular-nums; }
+  #perfHud .ph-hd .u { font-size: 9px; color: var(--faint); letter-spacing: .14em; }
+  #perfHud .ph-hd .warn { margin-left: auto; font-size: 9px; font-family: var(--sans); color: var(--danger); letter-spacing: .05em; }
+  #perfHud .ph-sec { font-family: var(--sans); font-size: 8px; color: var(--faint); letter-spacing: .24em;
+    margin: 6px 0 2px; user-select: none; }
+  #perfHud .ph-row { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; line-height: 1.75; }
+  #perfHud .ph-row .k { font-family: var(--sans); font-size: 9px; color: var(--faint); letter-spacing: .1em; white-space: nowrap; }
+  #perfHud .ph-row .v { color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #perfHud .ph-row .v b { color: var(--text); font-weight: 400; }
+  #perfHud .ph-row .v.bad { color: var(--danger); }
+  #perfHud .ph-row .v .u2 { color: var(--faint); font-size: 9px; margin-left: 1px; }
   #btnPerf { font-size: 10px; letter-spacing: .1em; }
   #modeChip.grab { color: #0b0c0e; background: var(--accent); }
 
@@ -275,6 +291,7 @@
     display: none; background: var(--panel); border: 1px solid var(--line); border-radius: 2px; padding: 6px;
   }
   #curvePanel.on { display: block; }
+  #curvePanel { width: 334px; }   /* 锚定画布宽：图例长行（多体场景 7×2 项）不许把面板撑宽到左邻守恒条底下 */
   #curvePanel canvas { display: block; background: rgba(0,0,0,.35); }
   #curvePanel .ctabs { display: flex; gap: 4px; margin-bottom: 4px; }
   #curvePanel .ctabs button {
@@ -283,7 +300,8 @@
     letter-spacing: .08em; font-family: inherit;
   }
   #curvePanel .ctabs button.hot { color: var(--accent); border-color: rgba(217,164,65,.5); }
-  #curvePanel .clegend { display: flex; gap: 14px; justify-content: center; margin-top: 4px; font-size: 9px; color: var(--dim); letter-spacing: .1em; }
+  #curvePanel .clegend { display: flex; flex-wrap: wrap; gap: 2px 10px; justify-content: center; margin-top: 4px;
+    font-size: 9px; color: var(--dim); letter-spacing: .1em; }   /* 多体换行而非撑宽面板 */
 
   /* 加载幕 / 错误条 */
   #veil {
@@ -371,9 +389,9 @@
     <button id="btnFocus" title="聚焦选中（F）">聚焦</button>
   </div>
   <div class="spacer"></div>
-  <button id="btnPerf" title="性能 HUD：帧预算/分段耗时/draw calls（运行态采样，PL-50）">perf</button>
+  <div class="tb-group"><button id="btnPerf" title="性能 HUD：帧预算/分段耗时/draw calls（运行态采样，PL-50）">perf</button></div>
   <span id="modeChip" class="chip">编辑态</span>
-  <a id="linkClassic" href="./classic.html" title="原固定轨道演示页（保留）">经典演示</a>
+  <a id="linkClassic" href="./classic.html" title="固定轨道经典演示（独立页面，Esc 返回）">经典演示</a>
 </header>
 
 <aside id="left">
@@ -496,17 +514,23 @@
     <option value="2">2x</option>
     <option value="4">4x</option>
   </select>
-  <button id="btnVectors" title="速度向量箭头（叠加层）">矢量</button>
-  <button id="btnForces" title="受力箭头：重力(红)+接触合力(绿)">受力</button>
-  <button id="btnDecompose" title="受力分解：支持力(淡绿 N)+摩擦力(橙 f) 分列（斜面场景）">分解</button>
-  <button id="btnTrails" title="轨迹线（叠加层）">轨迹</button>
-  <button id="btnCurves" title="时间曲线：选中体速率/高度 + 系统动能">曲线</button>
-  <button id="btnRec" title="录制帧序列（回放用）">录制</button>
-  <button id="btnReplay" title="回放录制的帧序列" disabled>回放</button>
+  <div class="sgroup">
+    <button id="btnVectors" title="速度向量箭头（叠加层）">矢量</button>
+    <button id="btnForces" title="受力箭头：重力(红)+接触合力(绿)">受力</button>
+    <button id="btnDecompose" title="受力分解：支持力(淡绿 N)+摩擦力(橙 f) 分列（斜面场景）">分解</button>
+    <button id="btnTrails" title="轨迹线（叠加层）">轨迹</button>
+    <button id="btnCurves" title="时间曲线：选中体速率/高度 + 系统动能">曲线</button>
+    <button id="btnCons" title="守恒量读数">守恒</button>
+  </div>
+  <div class="sgroup">
+    <button id="btnRec" title="录制帧序列（回放用）">录制</button>
+    <button id="btnReplay" title="回放录制的帧序列" disabled>回放</button>
+  </div>
   <input type="range" id="replayBar" min="0" max="100" value="0" step="1" title="回放时间轴（拖动逐帧检查）" style="display:none;width:120px">
-  <button id="btnCons" title="守恒量读数">守恒</button>
-  <button id="btnSound" title="碰撞与状态音效（程序合成，静音状态刷新后保持）">音效</button>
-  <button id="btnShake" title="碰撞镜头微震（trauma² 曲线，重击才抖；关闭状态刷新后保持）">震屏</button>
+  <div class="sgroup">
+    <button id="btnSound" title="碰撞与状态音效（程序合成，静音状态刷新后保持）">音效</button>
+    <button id="btnShake" title="碰撞镜头微震（trauma² 曲线，重击才抖；关闭状态刷新后保持）">震屏</button>
+  </div>
   <span class="ro">t=<b id="roT">0.000</b>s</span>
   <span class="ro">步长 <b>1/120s</b></span>
   <span class="ro">实体 <b id="roN">0</b></span>

@@ -14,6 +14,11 @@ export class PerfMon {
     this.calls = 0; this.tris = 0;     // 最近一次 renderer.info（DC/三角数）
   }
 
+  // 清空采样窗：进入运行态时重开预算窗口——启动期的编译/HDRI 毫秒级尖峰不属于运行态预算
+  reset() {
+    this.n = 0;
+  }
+
   // s: {frame, physics, overlay, render, dom, calls, tris}（毫秒）
   commit(s) {
     const i = this.n % this.cap;

@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const P_ALL = Array.from({ length: 34 }, (_, i) => `p${i}`);   // p0-p33（p33=R4 运行态玩感；p34-perf headed 单独跑不入聚合）
+const P_ALL = [...Array.from({ length: 33 }, (_, i) => `p${i}`), 'p33-play'];   // p0-p32 + p33-play（R4 运行态玩感；p34-perf headed 单独跑不入聚合）
 const W_NOAPI = ['w1-manual', 'w5-journey', 'w6-depth'];
 const W_API = ['w2-agent', 'w4-mixed', 'w7-presets-explain'];
 
@@ -36,7 +36,10 @@ for (const s of suites) {
   if (!ok) fails++;
   rows.push(`${ok ? 'OK  ' : 'FAIL'}  ${s.padEnd(20)} ${String(dt).padStart(6)}s  ${summary}`);
   console.log(rows[rows.length - 1]);
-  if (!ok && r.stderr) console.log(r.stderr.split('\n').slice(0, 5).join('\n'));
+  if (!ok) {
+    for (const l of tail.filter((l) => l.startsWith('FAIL '))) console.log('     ' + l);   // 失败套件保留逐条断言明细
+    if (r.stderr) console.log(r.stderr.split('\n').slice(0, 5).join('\n'));
+  }
 }
 const total = ((Date.now() - t0) / 1000).toFixed(1);
 const report = [

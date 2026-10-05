@@ -101,6 +101,61 @@
 | PL-43 | 预置带相机位 flyToPose：PRESET_CAMERA 收 12 个主推预置教学位（pos/target），载入即平滑飞行；未列出的走 focusScene 自动取景（全实体包围盒） | P2 | presets.js + MECH.loadPreset | ☑ | p33：pendulum pose 飞行到位断言 |
 | PL-44 | 选中/hover 三态视觉语言：hover=淡灰盒 0.28（未选中体）/ 主选中=琥珀 0.9 / 多选其余=灰 0.45；70ms 节流、ghost/框选期/运行态抑制 | P2 | viewport updateHover/clearHover | ☑ | p33：hover 命中断言；三态观感走查覆盖 |
 
+## UI 精致化 + classic.html 重点优化（用户中途追加需求）
+
+> 用户原话两点：「现在的这个ui界面看上去还是一股子ai味，你想办法做的更加精致一点点」；
+> classic.html「没有任何按钮可以返回工作台」「圆形轨道衔接一点都不顺滑」「旁边摆球不知道意义」
+> 「很简陋一股AI质感……重点优化」。原 Goal「classic.html 保持原样」边界由此条目解除。
+
+### 工作台（UI-1..6）
+
+| # | 条目 | 落点 | 状态 | 证据/备注 |
+|---|------|------|------|-----------|
+| UI-1 | perf HUD 从 raw 调试文本重建为两列微表格仪表：FPS 大数字表头（>8ms 尖峰红色角标）+ 三段（帧预算/分段 p95/画面）标签-数值对齐行，p95>5ms/峰值>8ms 数值变红 | `index.html` #perfHud CSS；`workbench.js` tickPerfHud innerHTML 拼装+脏检查 | ☑ | 样张 w3-perfhud.png；p34 仅断言可见性不受影响 |
+| UI-2 | 预算采样窗卫生：启动前 120 渲染帧预热豁免（内核编译/HDRI 毫秒级尖峰不进样本）+ 进入运行态（play/单步/回放三入口）`perfMon.reset()` 重开窗——修掉「刚开页 HUD 显示峰值 959ms 红字」的仪表惊吓 | `perfmon.js` reset()；`workbench.js` 三处 run 入口 + _bootFrames | ☑ | 样张 w1（编辑态显示「待运行采样…」而非启动尖峰）；p34 采样在预热后不受影响 |
+| UI-3 | simbar 开关热态降热：四叠加开关齐亮原为整块琥珀填色（一排色块过噪）→ 琥珀文字+2px 底线指示，运行 primary 不变；tb-group 同款 | `index.html` .hot 两处 | ☑ | 样张 w2（矢量/受力/轨迹/曲线/守恒齐亮态） |
+| UI-4 | simbar 分组节奏：孤儿按钮归组——叠加层组（矢量/受力/分解/轨迹/曲线/守恒）+ 记录组（录制/回放）+ 感官组（音效/震屏），ID 全部不变（测试零改动） | `index.html` simbar HTML | ☑ | 样张 w2 |
+| UI-5 | 守恒量条避让曲线面板：原居中版右端伸到曲线面板底下互相遮挡（两开时）→ 左下对齐（左栏宽+12，simbar 上方 38px），与网格标尺读数同侧堆叠 | `index.html` #consbar CSS | ☑ | 样张 w2（修复前版本曲线面板盖住动量误差列） |
+| UI-6 | 曲线图例去复读：实体名括号注记剥离（「入射球 (e=1) 速率」→「入射球速率」），速率/高度关键词保留（p22 断言依赖）；能量模式三行不变 | `workbench.js` updateCurveLegend | ☑ | p22 图例断言继续绿 |
+
+### classic.html / legacy-main.js（CL-1..6）
+
+| # | 条目 | 落点 | 状态 | 证据/备注 |
+|---|------|------|------|-----------|
+| CL-1 | 返回工作台：右上 ghost 按钮「← 返回工作台」+ Esc 快捷键；工作台侧 linkClassic tooltip 同步改成对用户的话 | `classic.html` #btnBack；`legacy-main.js` bindUI | ☑ | 样张 c1；Esc 路径行为级 |
+| CL-2 | 环底衔接顺滑化：入/出直线与环的四个开口管口全部相切重叠于环底切点（「衔接不顺滑」的几何根源）→ buildTrough 按到切点 3D 距离 smoothstep 收口（0.42m 起收、0.16m 内全闭），四股管口藏进闭合套管，读作真实弹珠轨道的接头 | `legacy-main.js` buildTrough | ☑ | 样张 c1/c2：套管过渡连续、无开口管口穿插（旧版是四张槽口互相咬穿的乱面）；物理中心线约束不动（碰撞语义零变化） |
+| CL-3 | 删除旁边摆球：门式钢架+铬球+轻绳整套拆除（与轨道演示叙事无关的杂物），连带摆周期读数行/过零计时逻辑/复位项 | `legacy-main.js` | ☑ | 样张 c1 场景干净 |
+| CL-4 | 去 AI 味·调试残留清扫：「（保留版）」标题 →「MECHANICA · 经典演示」；readouts 每 0.1s 往 document.title 写的 `M x=... c=... idx=...` 诊断串删除；遗留的「邻域碰撞体」errbar 探针（旧 trimesh 卡球排查用）删除；constrainToPipe 的 fixN/fixMag 诊断计数删除 | `classic.html` title；`legacy-main.js` readouts/constrainToPipe | ☑ | 标签页标题干净；p0 断言改道见 CL-5 |
+| CL-5 | p0 classic 存活断言改道：原断言依赖被删除的 title 诊断串 → 改为物理时钟前进 >2s + 球离开发点 >0.3m 双条件（更强的物理在跑证据） | `tools/ui-test/p0.mjs` | ☑ | run-all 绿 |
+| CL-6 | 环顶光门给意义：两针+珠原是静态装饰 → 球过环顶珠子琥珀闪光（emissive 脉冲衰减），呼应「测速门」实验读法；控制台按钮并键位角标（G/Space/F/R），右下帮助只留鼠标手势 | `legacy-main.js`；`classic.html` | ☑ | 样张 c1 顶部珠可见；闪光行为级 |
+
+**缓存一致性**：legacy-main.js 引用 query `?v=1→?v=2`。
+
+## 30 分钟整体走查（游玩+教学混合，ux-audit 式）
+
+> Goal 收口条件：连续 30 分钟真实游玩+教学演示混合走查，修完所发现断裂。
+> 驱动器 `tools/ui-test/walkthrough30.mjs`（headed 真 GPU）；清单/截图落 `tools/ui-test/shots/wt-*.png` + `walkthrough-manifest.txt`。
+
+**走查口径**：人格=高中物理教师（备课+课堂演示双视角）+ 首次用户镜头并行。三主题回合循环至墙钟 31.7min：
+教师备课（预置轮换×满叠加×32s 演化观察×fixture→运行解释链路）/ 学生玩（ballChain/collLab/newtonCradle
+×targeted 真鼠标抓抛×子弹时间×慢放/单步×反馈计数）/ 边界折腾（相机视图循环×新建搭建×undo/redo×Ctrl+S×
+1280 三面板挤压×classic 往返），收尾 threeBody 4x 满叠加 60s 长跑 + 持久化抽查。
+
+**结果**：97 回合 · 521 条清单 · console 0 · 网络 0 · 43 次真鼠标抓抛全命中 · classic 往返 8 次全闭合 ·
+长跑 p95 0.5-0.6ms 零尖峰 238fps（240 模拟秒）。
+
+**发现与处置**：
+| # | 发现 | 级别 | 处置 |
+|---|------|------|------|
+| W-1 | 1280/1440×多体场景：曲线图例单行不换行把面板撑到 ~640px，左缘压到守恒量条底下（两开时互相遮挡） | High（布局） | ✅ 已修：#curvePanel 锚定画布宽 334px + 图例换行；#consbar ≤1520px 降两列。三宽度×7 体图例 2D 重叠探针全绿（cc/ch/cu=false） |
+| W-2 | 刚开页 perf HUD 显示启动期尖峰红字（峰值 959ms），仪表惊吓 | Medium（观感） | ✅ 已修（UI-2）：启动 120 帧预热豁免 + 进运行态重开采样窗 |
+| W-3 | console 噪音：THREE.Clock 弃用告警 / PCFSoftShadowMap 移除告警 / favicon 404 | Medium | ✅ 已修：手动 delta 替代 Clock（语义等价）、显式 PCFShadowMap（原本就静默回退）、内联 SVG favicon；修后 31.7min 走查 console 全程 0 |
+| W-4 | threeBody 4x 长跑 240 模拟秒后 Edrift 读数 1166% | Low（物理边界，非本 Goal） | 📌 记录不修：混沌三体近 encounter × 固定步长的固有数值边界，读数是诚实仪表；1x 短窗守恒断言全绿（p19/p30/p31），动物理内核超出 R4 边界 |
+| W-5 | 「运行解释」在未解析场景点击只出 toast，按钮不置灰 | Low | 📌 记录：有 toast 引导（Agent 页签可见），R3-AB 解释器线领域，不在 R4 扩权 |
+| W-6 | 驱动器自伤三连（非产品问题）：'spring' 预置 id 应为 'springSHM'；apply 后 loadPreset 会清 agentPlan（resetAgentPanel 设计行为）致解释空转；undo 断言漏算微调入栈次数 | — | ✅ 驱动器已修并注记 |
+
+**走查后回归**：单测 78/78 + run-all 全绿（Clock/favicon/PCFSoft/consbar/curvePanel 改动后复跑）+ p34 quick 26/26。
+
 ## 环境与约定（本轮新增）
 
 - 测试套件支持 `MECH_BASE` 环境变量覆盖服务地址（默认 8721 不变）——双 agent 并行开发各用各的服务端口，互不干扰。

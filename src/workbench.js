@@ -504,6 +504,7 @@ function maybeBulletTime(strength) {
 function play() {
   if (mode === 'run' && !paused) return;
   if (doc.entities.length === 0) toast('空场景：无实体可演化，从目录添加组件后再运行');
+  if (mode === 'edit') perfMon.reset();   // 运行态重开预算采样窗（启动尖峰不污染）
   mode = 'run'; paused = false;
   viewport.setGizmoEnabled(false);
   sound.ui('play');
@@ -518,7 +519,7 @@ function pauseToggle() {
   updateSimbarStatic();
 }
 function stepOnce() {
-  if (mode === 'edit') { mode = 'run'; paused = true; viewport.setGizmoEnabled(false); }
+  if (mode === 'edit') { mode = 'run'; paused = true; viewport.setGizmoEnabled(false); perfMon.reset(); }
   runtime.stepOnce();
   updateSimbarStatic();
 }
@@ -2030,12 +2031,14 @@ function updateCurveLegend() {
   let i = 0;
   for (const sr of curveData.byId.values()) {
     const c = CURVE_PALETTE[i % CURVE_PALETTE.length];
+    // 括号注记（如"入射球 (e=1)"）在图例里是复读噪声：只留主名，速率/高度关键词保留（p22 断言依赖）
+    const base = sr.name.replace(/\s*\([^)]*\)\s*$/, '').trim() || sr.name;
     const sp = document.createElement('span');
     sp.style.color = c;
-    sp.textContent = `${sr.name}速率`;
+    sp.textContent = `${base}速率`;
     const hp = document.createElement('span');
     hp.style.color = c;
-    hp.textContent = `${sr.name}高度`;
+    hp.textContent = `${base}高度`;
     el.append(sp, hp);
     i++;
   }
@@ -2097,6 +2100,7 @@ function startReplay() {
   scrubbing = false;
   mode = 'run';
   paused = false;
+  perfMon.reset();
   viewport.setGizmoEnabled(false);
   $('btnReplay').classList.add('hot');
   const bar = $('replayBar');
@@ -2247,6 +2251,7 @@ let _perfHudT = 0;
 let perfHudOn = true;           // HUD 常开（验收形式），可关，localStorage 持久
 let qTier = 2;                  // 自适应档（0/1/2），只动分辨率与阴影
 let _tierT = 0, _tierUpStreak = 0;
+let _bootFrames = 0;            // 启动预热帧计数（前 120 渲染帧不进预算样本）
 function setPerfHud(on) {
   perfHudOn = !!on;
   try { localStorage.setItem('mech.perfhud', perfHudOn ? '1' : '0'); } catch (e) { /* 隐私模式忽略 */ }
@@ -2258,7 +2263,8 @@ function setPerfHud(on) {
 // 每帧收口：渲染帧提交分段样本；HUD 0.25s 节流拼串（脏检查后才写 DOM）；1s 窗口评估降/升档
 function tickPerfHud(rawDt, rendered, phys, ov, rnd, dom) {
   if (rendered) {
-    perfMon.commit({ frame: phys + ov + rnd + dom, physics: phys, overlay: ov, render: rnd, dom, calls: viewport.drawCalls, tris: viewport.triangles });
+    if (_bootFrames < 120) { _bootFrames++; }   // 预热豁免：内核编译/首帧资源不进预算窗
+    else perfMon.commit({ frame: phys + ov + rnd + dom, physics: phys, overlay: ov, render: rnd, dom, calls: viewport.drawCalls, tris: viewport.triangles });
   }
   _perfHudT += rawDt;
   if (_perfHudT < 0.25) return;
@@ -2281,23 +2287,40 @@ function tickPerfHud(rawDt, rendered, phys, ov, rnd, dom) {
   }
   if (!perfHudOn) return;
   const s = perfMon.summary(600);
-  let txt;
+  let html;
   if (!s) {
-    txt = 'perf 待运行采样…';
+    html = '<div class="ph-sec">PERF</div><div class="ph-row"><span class="k">状态</span><span class="v">待运行采样…</span></div>';
   } else {
-    txt = `${Math.round(_fps)} FPS · frame ${s.frame.p50.toFixed(2)}ms p95 ${s.frame.p95.toFixed(2)} max ${s.frame.max.toFixed(2)} 1%l ${s.frame.low1.toFixed(2)}${s.spike8 ? ` ⚠>8ms×${s.spike8}` : ''}`
-      + `\nphys ${s.physics.p95.toFixed(2)} ov ${s.overlay.p95.toFixed(2)} rnd ${s.render.p95.toFixed(2)} dom ${s.dom.p95.toFixed(2)} · dc ${s.calls} tri ${(s.tris / 1000).toFixed(0)}k · Q${qTier}`;
+    const row = (k, v, cls) => `<div class="ph-row"><span class="k">${k}</span><span class="v${cls || ''}">${v}</span></div>`;
+    const spike = s.spike8 ? `<span class="warn">&gt;8ms×${s.spike8}</span>` : '';
+    html = `<div class="ph-hd"><b>${Math.round(_fps)}</b><span class="u">FPS</span>${spike}</div>`
+      + '<div class="ph-sec">帧预算</div>'
+      + row('p50', `<b>${s.frame.p50.toFixed(2)}</b><span class="u2">ms</span>`)
+      + row('p95', `<b>${s.frame.p95.toFixed(2)}</b><span class="u2">ms</span>`, s.frame.p95 > 5 ? ' bad' : '')
+      + row('1%低', s.frame.low1.toFixed(2) + '<span class="u2">ms</span>')
+      + row('峰值', s.frame.max.toFixed(2) + '<span class="u2">ms</span>', s.frame.max > 8 ? ' bad' : '')
+      + '<div class="ph-sec">分段 p95</div>'
+      + row('物理', s.physics.p95.toFixed(2) + '<span class="u2">ms</span>')
+      + row('叠加', s.overlay.p95.toFixed(2) + '<span class="u2">ms</span>')
+      + row('渲染', s.render.p95.toFixed(2) + '<span class="u2">ms</span>')
+      + row('DOM', s.dom.p95.toFixed(2) + '<span class="u2">ms</span>')
+      + '<div class="ph-sec">画面</div>'
+      + row('Draw', String(s.calls))
+      + row('三角', (s.tris / 1000).toFixed(0) + 'k')
+      + row('画质档', 'Q' + qTier);
   }
   const el = $('perfHud');
-  if (el && el.__t !== txt) { el.__t = txt; el.textContent = txt; }
+  if (el && el.__t !== html) { el.__t = html; el.innerHTML = html; }
 }
 
 // ============ 主循环 ============
-const clock = new THREE.Clock();
+let _lastFrameT = performance.now();   // 手动 delta（THREE.Clock r186 起弃用告警，语义等价）
 function tick() {
   requestAnimationFrame(tick);
+  const _now = performance.now();
+  const rawDt = Math.min((_now - _lastFrameT) / 1000, 0.05);
+  _lastFrameT = _now;
   if (!appReady) return;
-  const rawDt = Math.min(clock.getDelta(), 0.05);
   if (rawDt > 0) _fps += (Math.min(1 / rawDt, 240) - _fps) * 0.06;
   const _t0 = performance.now();
   if (replaying) {

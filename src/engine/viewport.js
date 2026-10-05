@@ -637,7 +637,7 @@ export class Viewport {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(this.container.clientWidth, this.container.clientHeight);
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = THREE.PCFShadowMap;   // r186 移除 PCFSoft（原本就静默回退到此，显式化去告警）
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.06;
     this.container.appendChild(renderer.domElement);

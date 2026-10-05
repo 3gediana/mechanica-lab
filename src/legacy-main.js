@@ -36,13 +36,14 @@ const groupsDyn = (G_DYN << 16) | 0xffff;
 const rayGroups = (G_ARROW << 16) | G_DYN; // 抓取射线只命中动态体
 
 const pairs = [];            // {mesh, body} 同步对
-let ballBody, ballMesh, pendBody, pendMesh, ropeMesh, blockBody, blockMesh;
+let ballBody, ballMesh, blockBody, blockMesh;
 let stopperMesh, stopperBody, stopperCol = null, stopperAnim = -1;
 let saturnSpin;
+let gatePulse = 0, gateLastT = -9;       // 环顶光门闪光
+let gateMat = null;
 let held = null, grabDist = 3, grabPoint = new THREE.Vector3();
 const pointerNdc = new THREE.Vector2();
 const raycaster = new THREE.Raycaster();
-let pendCross = { lastSign: 0, prevT: -1, lastT: -1, avg: 0, samples: [] };
 let roTimer = 0;
 
 const initPose = [];         // 复位用 [{body, pos, rot, vel, angvel}]
@@ -80,7 +81,6 @@ function constrainToPipe(body) {
   if (r > 0.30) return;                                        // 离管太远（被抛出），不约束
   const LIMIT = TRACK_META.tubeRadius - TRACK_META.ballRadius; // 球心允许的最大径向距 0.05
   if (r <= LIMIT) return;
-  readouts.fixN++; readouts.fixMag += r - LIMIT;
   const nx = rx / r, ny = ry / r, nz = rz / r;
   body.setTranslation({ x: bp.x + nx * LIMIT, y: bp.y + ny * LIMIT, z: bp.z + nz * LIMIT }, true);
   const v = body.linvel();
@@ -116,7 +116,9 @@ function buildTrough(radius, arcFraction, along, radial) {
   const curve = polylineCurve(pts);
   const up = new THREE.Vector3(0, 1, 0);
   const B = new THREE.Vector3(0, 0, 1);
-  const openHalf = Math.PI * (1 - arcFraction) / 2;
+  // 环底切点：入/出直线与环的四个管口在此重叠，是"衔接不顺滑"的根源——
+  // 靠近切点把开口槽平滑收拢成闭合套管（真实弹珠轨道的接头读法），四股管口被藏进壳内
+  const J = TRACK_POINTS[TRACK_META.segments.loop[0]];
   const pos = [], nor = [], uv = [], idx = [];
   const N = new THREE.Vector3(), P = new THREE.Vector3(), T = new THREE.Vector3(), D = new THREE.Vector3();
   for (let i = 0; i <= along; i++) {
@@ -125,6 +127,10 @@ function buildTrough(radius, arcFraction, along, radial) {
     curve.getTangentAt(t, T).normalize();
     N.set(-T.y, T.x, 0).normalize();                 // 平面曲线的面内法向
     const phiUp = Math.atan2(up.dot(B), up.dot(N));  // 开口对准世界正上方
+    const dj = Math.hypot(P.x - J[0], P.y - J[1], P.z - J[2]);
+    let s = Math.min(Math.max((0.42 - dj) / 0.26, 0), 1);
+    s = s * s * (3 - 2 * s);                         // smoothstep：0.42m 处开始收口，0.16m 内全闭
+    const openHalf = Math.PI * (1 - (arcFraction + (1 - arcFraction) * s)) / 2;
     for (let j = 0; j <= radial; j++) {
       const phi = phiUp + openHalf + (j / radial) * (2 * Math.PI - 2 * openHalf);
       D.copy(N).multiplyScalar(Math.cos(phi)).addScaledVector(B, Math.sin(phi));
@@ -157,7 +163,7 @@ function buildTrough(radius, arcFraction, along, radial) {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = THREE.PCFShadowMap;   // r186 移除 PCFSoft（原本就静默回退到此，显式化去告警）
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.06;
     $('stage').appendChild(renderer.domElement);
@@ -307,34 +313,6 @@ function buildTrough(radius, arcFraction, along, radial) {
       .setDensity(700).setFriction(0.8).setRestitution(0.12).setCollisionGroups(groupsDyn), blockBody);
     pairs.push({ mesh: blockMesh, body: blockBody });
 
-    // ---- 单摆：钢架门式横梁 + 铬球 + 轻绳
-    const gantry = new THREE.Group();
-    const post1 = new THREE.Mesh(cylGeo, M.steelDark);
-    post1.scale.set(0.03, 2.4, 0.03); post1.position.set(1.95, 1.2, -1.62);
-    const post2 = post1.clone(); post2.position.z = -0.58;
-    const cross = new THREE.Mesh(cylGeo, M.steelDark);
-    cross.scale.set(0.024, 1.1, 0.024);
-    cross.rotation.x = Math.PI / 2; cross.position.set(1.95, 2.38, -1.1);
-    const mount = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.03, 24), M.brass);
-    mount.position.set(1.95, 2.355, -1.1);
-    gantry.add(post1, post2, cross, mount);
-    gantry.traverse((o) => { o.castShadow = true; });
-    scene.add(gantry);
-
-    pendMesh = new THREE.Mesh(new THREE.SphereGeometry(0.075, 40, 28), M.chrome);
-    pendMesh.castShadow = true;
-    scene.add(pendMesh);
-    pendBody = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic()
-      .setTranslation(1.95, 1.1, -1.1).setLinearDamping(0.12).setAngularDamping(0.2));
-    world.createCollider(RAPIER.ColliderDesc.ball(0.075)
-      .setDensity(7100).setFriction(0.3).setRestitution(0.3).setCollisionGroups(groupsDyn), pendBody);
-    const anchorBody = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(1.95, 2.35, -1.1));
-    world.createImpulseJoint(RAPIER.JointData.rope(1.25, { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }), anchorBody, pendBody, true);
-    ropeMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.0045, 0.0045, 1, 8),
-      new THREE.MeshStandardMaterial({ color: 0x3a3d42, roughness: 0.5, metalness: 0.6 }));
-    scene.add(ropeMesh);
-    pendBody.setLinvel({ x: 0.9, y: 0, z: 0 }, true);
-
     // ---- 土星展台（黄铜座 + 真实贴图行星，置于滑道左侧空地避免遮挡）
     const pedestal = new THREE.Group();
     pedestal.position.set(-2.35, 0, -1.35);
@@ -355,13 +333,16 @@ function buildTrough(radius, arcFraction, along, radial) {
     pedestal.traverse((o) => { o.castShadow = true; });
     scene.add(pedestal);
 
-    // ---- 环顶光门标记（两根细针 + 黄铜珠）
+    // ---- 环顶光门（两根细针 + 黄铜珠；球过顶时闪光——测速门的老实验读法）
     const lc = loopCenter();
+    gateMat = M.brass.clone();
+    gateMat.emissive = new THREE.Color(0xd9a441);
+    gateMat.emissiveIntensity = 0.12;
     for (const dz of [-0.26, 0.26]) {
       const pin = new THREE.Mesh(cylGeo, M.steelDark);
       pin.scale.set(0.006, 0.34, 0.006);
       pin.position.set(lc.x, 1.32, dz);
-      const bead = new THREE.Mesh(new THREE.SphereGeometry(0.016, 16, 12), M.brass);
+      const bead = new THREE.Mesh(new THREE.SphereGeometry(0.016, 16, 12), gateMat);
       bead.position.set(lc.x, 1.49, dz);
       scene.add(pin, bead);
     }
@@ -380,7 +361,7 @@ function buildTrough(radius, arcFraction, along, radial) {
 
     // ---- 复位快照
     for (const p of pairs) snapshot(p.body);
-    snapshot(ballBody); snapshot(pendBody); snapshot(blockBody);
+    snapshot(ballBody); snapshot(blockBody);
 
     bindEvents();
     bindUI();
@@ -472,10 +453,12 @@ function bindUI() {
   $('btnPause').onclick = togglePause;
   $('btnSlow').onclick = toggleSlow;
   $('btnReset').onclick = resetAll;
+  $('btnBack').onclick = () => { location.href = './'; };
   if (new URLSearchParams(location.search).get('run') === '1') {
     setTimeout(releaseStopper, 1200);   // 确定性验证通道：加载完自动抽挡板
   }
   window.addEventListener('keydown', (e) => {
+    if (e.code === 'Escape') { location.href = './'; return; }
     if (!ready) return;
     if (e.code === 'Space') { e.preventDefault(); togglePause(); }
     else if (e.code === 'KeyR') resetAll();
@@ -504,7 +487,6 @@ function resetAll() {
     s.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
     s.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
   }
-  pendBody.setLinvel({ x: 0.9, y: 0, z: 0 }, true);
   trackClosest.idx = nearestTrackIndex(initPose.find((s) => s.body === ballBody).pos);
   if (held) { held.setGravityScale(1, true); held = null; controls.enabled = true; }
   if (stopperCol === null) {
@@ -519,7 +501,7 @@ function resetAll() {
   $('btnSlow').textContent = '慢速'; $('btnSlow').classList.remove('hot');
   paused = false;
   $('btnPause').textContent = '暂停'; $('btnPause').classList.remove('hot');
-  pendCross = { lastSign: 0, prevT: -1, lastT: -1, avg: 0, samples: [] };
+  gatePulse = 0; gateLastT = -9;
 }
 
 // ============ 物理步进 ============
@@ -538,25 +520,18 @@ function stepPhysics(h) {
   world.step();
   if (held !== ballBody) constrainToPipe(ballBody);   // 光滑管道约束（抓取时不干预）
 
-  // 摆周期：只记 -→+ 同向过零，相邻两次间隔才是整周期
-  const vx = pendBody.linvel().x;
-  const sign = vx > 0 ? 1 : (vx < 0 ? -1 : pendCross.lastSign);
-  if (pendCross.lastSign < 0 && sign > 0) {
-    if (pendCross.prevT > 0) {
-      pendCross.samples.push(simT - pendCross.prevT);
-      if (pendCross.samples.length > 4) pendCross.samples.shift();
-      pendCross.avg = pendCross.samples.reduce((a, b) => a + b, 0) / pendCross.samples.length;
-    }
-    pendCross.prevT = simT;
+  // 环顶光门：球心过环顶附近即闪光（同次通过只触发一次）
+  const seg = TRACK_META.segments.loop;
+  const topIdx = (seg[0] + seg[1]) >> 1;
+  if (Math.abs(trackClosest.idx - topIdx) < 6 && simT - gateLastT > 0.8) {
+    gateLastT = simT;
+    gatePulse = 1;
   }
-  pendCross.lastSign = sign;
   simT += h;
 }
 
 // ============ 渲染循环 ============
-const clock = new THREE.Clock();
-const ropeDir = new THREE.Vector3(), ropeMid = new THREE.Vector3(), yAxis = new THREE.Vector3(0, 1, 0), ropeQ = new THREE.Quaternion();
-const pendAnchor = new THREE.Vector3(1.95, 2.35, -1.1);
+let _lastFrameT = performance.now();   // 手动 delta（THREE.Clock r186 起弃用告警，语义等价）
 function sync(rawDt) {
   ballMesh.position.copy(ballBody.translation());
   ballMesh.quaternion.copy(ballBody.rotation());
@@ -564,16 +539,11 @@ function sync(rawDt) {
     p.mesh.position.copy(p.body.translation());
     p.mesh.quaternion.copy(p.body.rotation());
   }
-  const pp = pendBody.translation();
-  pendMesh.position.copy(pp);
-  ropeDir.subVectors(pp, pendAnchor);
-  const len = ropeDir.length();
-  ropeMid.addVectors(pendAnchor, pp).multiplyScalar(0.5);
-  ropeMesh.position.copy(ropeMid);
-  ropeMesh.scale.set(1, len, 1);
-  ropeQ.setFromUnitVectors(yAxis, ropeDir.normalize());
-  ropeMesh.quaternion.copy(ropeQ);
   if (saturnSpin && rawDt > 0 && !paused) saturnSpin.rotation.y += 0.0025;
+  if (gatePulse > 0 && gateMat) {
+    gatePulse = Math.max(0, gatePulse - rawDt * 2.2);
+    gateMat.emissiveIntensity = 0.12 + 2.4 * gatePulse * gatePulse;
+  }
   if (stopperAnim >= 0 && rawDt > 0) {
     stopperAnim += rawDt;
     const k = Math.min(stopperAnim / 0.35, 1);
@@ -592,26 +562,12 @@ function readouts() {
   $('roV').textContent = speed.toFixed(2);
   $('roH').textContent = Math.max(0, p.y - TRACK_META.ballRadius).toFixed(2);
   $('roX').textContent = p.x.toFixed(2);
-  $('roP').textContent = pendCross.avg > 0 ? pendCross.avg.toFixed(2) : '--';
-  document.title = `M x=${p.x.toFixed(3)} y=${p.y.toFixed(3)} z=${p.z.toFixed(3)} vx=${v.x.toFixed(2)} vy=${v.y.toFixed(2)} vz=${v.z.toFixed(2)} c=${readouts.fixN}/${readouts.fixMag.toExponential(1)} idx=${trackClosest.idx}`;
-  readouts.fixN = 0; readouts.fixMag = 0;
-  // 诊断：球在异常位置停稳时，列出其 0.35m 邻域内的全部碰撞体句柄
-  if (!readouts.probed && simT > 3 && Math.abs(p.x - 0.684) < 0.06 && speed < 0.05) {
-    readouts.probed = true;
-    const hits = [];
-    world.intersectionWithShape(p, { x: 0, y: 0, z: 0, w: 1 }, new RAPIER.Ball(0.35), () => true,
-      undefined, undefined, undefined, (handle) => {
-        const col = world.getCollider(handle);
-        hits.push(`${handle}(body=${col.parent() ? col.parent().handle : '?'})`);
-        return true;
-      });
-    errbar.textContent = '邻域碰撞体: ' + hits.join(', ');
-    errbar.style.display = 'block';
-  }
 }
 function tick() {
   requestAnimationFrame(tick);
-  const rawDt = Math.min(clock.getDelta(), 0.05);
+  const _now = performance.now();
+  const rawDt = Math.min((_now - _lastFrameT) / 1000, 0.05);
+  _lastFrameT = _now;
   if (!ready || !renderer) return;
   const dt = rawDt * (paused ? 0 : timeScale);
   acc += dt;

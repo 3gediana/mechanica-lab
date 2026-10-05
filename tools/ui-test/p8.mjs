@@ -80,7 +80,12 @@ try {
   await page.waitForFunction(() => window.MECH.doc().entities.some((e) => e.physics.gravitating),
     null, { timeout: 10000, polling: 200 });
   await page.waitForTimeout(300);
-  await page.click('#btnCons');
+  // classic 预置已自动开守恒（workbench loadPreset classic 分支）——这里幂等开启：
+  // 盲点 toggle 在批负载下会「关掉」守恒条（本函数体早退，读数冻结在旧态）→ 必超时假失败
+  await page.evaluate(() => {
+    const b = document.getElementById('btnCons');
+    if (b && !b.classList.contains('hot')) b.click();
+  });
   // 两级断言（UI 写入竞态容忍）：宽度读数是 0.15s UI tick 的 CSS 副产物，批负载下 rAF 偶发
   // 饥饿会拖过等待窗——此时退回验证数据层（astro 分支活跃 + 百分比已组合），教学性质不变。
   const energyOk = await page.waitForFunction(() => {
