@@ -66,9 +66,9 @@
 | FZ-42 | workbench.js:609-611 | 等距视角预设 iso:[1,1,1]（极角 0.955 可达）+顶栏第 4 按钮 | P2 | S | 无 | ⬜ |
 | FZ-43 | viewport.js:68-79 + workbench.js:1998 | 跟随模式：检查器 checkbox+C 键，target lerp(0.12) 到实体+相机保持偏移；拖视角/F 聚焦/重置解除 | P1 | M | 与 _focusAnim 互斥 | ⬜ |
 | FZ-44 | viewport.js:68-79,86-97 | 取景飞行改时间归一 easeInOutCubic（300-700ms 按距离），到达即止 | P2 | M | ⚠ 收敛断言复验 | ⬜ |
-| FZ-45 | vendor OrbitControls.js:306 | zoomToCursor=true（vendored 实有，R2 勘误）+zoomSpeed 0.9 | P1 | S | ⚠ 金标视角变化 | ⬜ |
+| FZ-45 | vendor OrbitControls.js:306 | zoomToCursor=true（vendored 实有，R2 勘误）+zoomSpeed 0.9 | P1 | S | ⚠ 金标视角变化 | ✅ R3-B2：zoomToCursor=true+zoomSpeed 0.9 |
 | FZ-46 | workbench.js:1032-1043 | 大纲观察点 ⌖ 语义错（focusOn 标记体）→ viewpoint 改 flyToPose(pos,target) | P1 | S | 无 | ⬜ |
-| FZ-47 | viewport.js:582-590 | controls 'start' 清焦点/飞行动画（收编 FEEL-101）+两动画互斥 | P1 | S | 无 | ⬜ |
+| FZ-47 | viewport.js:582-590 | controls 'start' 清焦点/飞行动画（收编 FEEL-101）+两动画互斥 | P1 | S | 无 | ✅ R3-B2：controls start 事件清取景/飞行动画 |
 | FZ-48 | viewport.js:879-894 | 顶/前/侧/复位改 flyToPose 300ms（收编 FEEL-109）+Ctrl 瞬跳逃生口 | P2 | M | ⚠ 金标 Ctrl 路径 | ⬜ |
 | FZ-49 | viewport.js:585 | zoomSpeed 0.9（与 FZ-45 同批） | P2 | S | 无 | ⬜ |
 | FZ-50 | viewport.js:421-448 | 正交切换 top/bottom=dist·tan(fov/2)（收编 FEEL-105）+resize 单源 | P1 | S | ⚠ 断言复验 | ⬜ |
@@ -86,7 +86,7 @@
 | FZ-58 | viewport.js:794-805 | 缩放拖拽实时钳均匀（收编 FEEL-104） | P1 | M | ⚠ 手感实测 | ⬜ |
 | FZ-59 | workbench.js:69-81 | 多选组平移：主实体位移向量应用到其余（收编 FEEL-107），undo「成组移动」 | P2 | L | ⚠ 大改 | ⬜ |
 | FZ-60 | workbench.js:79 | undo 标签按 gizmoMode 前缀（收编 FEEL-116） | P2 | S | 无 | ⬜ |
-| FZ-61 | viewport.js:778-784 + workbench.js:207 | 锁定实体仍挂 gizmo（收编 FEEL-93，P0 行为 bug）→ attach 前判 locked；多选主锁定挂最近未锁定 | P0 | S | ⚠ p 系复验 | ⬜ |
+| FZ-61 | viewport.js:778-784 + workbench.js:207 | 锁定实体仍挂 gizmo（收编 FEEL-93，P0 行为 bug）→ attach 前判 locked；多选主锁定挂最近未锁定 | P0 | S | ⚠ p 系复验 | ✅ R3-B2：gizmo 只挂未锁定选中（锁定体保持高亮），多选主锁定时挂最近未锁定 |
 | FZ-62 | viewport.js:819-823 | setSnap 补缩放档 setScaleSnap(0.05)（收编 FEEL-125） | P2 | S | 无 | ⬜ |
 | FZ-63 | viewport.js（vendored:933 setSpace 存在） | L 键 local/world 切换+toast+help | P3 | S | 手感实测 | ⬜ |
 
@@ -136,10 +136,10 @@
 ### 时间控制
 | # | 位置 | 问题→改法 | P | 量 | 风险 | 状态 |
 |---|---|---|---|---|---|---|
-| FB-22 | index.html:479-484 + workbench.js:46 | SPEED_STEPS=[0.1,0.25,0.5,1,2,4] 单源自动生成 select | P1 | S | 4x 依赖 PAR-12 | ⬜ |
-| FB-23 | workbench.js:618,729-753 | 1/2/3 键切 0.5x/1x/2x+toast+selSpeed 同步（文明6 风格） | P0 | S | 键位矩阵 FB-72 | ⬜ |
+| FB-22 | index.html:479-484 + workbench.js:46 | SPEED_STEPS=[0.1,0.25,0.5,1,2,4] 单源自动生成 select | P1 | S | 4x 依赖 PAR-12 | ✅ R3-B2：SPEED_STEPS 单源生成 select（0.1..4x 六档） |
+| FB-23 | workbench.js:618,729-753 | 1/2/3 键切 0.5x/1x/2x+toast+selSpeed 同步（文明6 风格） | P0 | S | 键位矩阵 FB-72 | ✅ R3-B2：1/2/3 键 0.5x/1x/2x+toast+select 同步 |
 | FB-24 | workbench.js:618 | 悬停 selSpeed 滚轮循环档位（preventDefault） | P2 | S | select 非 INPUT 守卫补 | ⬜ |
-| FB-25 | workbench.js:46,753 | Shift+Space=0.1x 慢动作互切（记忆原档）+modeChip 角标 | P1 | S | 无 | ⬜ |
+| FB-25 | workbench.js:46,753 | Shift+Space=0.1x 慢动作互切（记忆原档）+modeChip 角标 | P1 | S | 无 | ✅ R3-B2：Shift+空格慢动作互切（记忆原倍率） |
 | FB-26 | workbench.js:422-428 | 慢动作切入自动开速度矢量（退出不关） | P2 | S | w 系复验 | ⬜ |
 | FB-27 | workbench.js:422-428,1460 | 定时停：roT 旁定时按钮+秒输入，simT≥目标暂停+事件卡；单步跨过即停 | P1 | M | 无 | ⬜ |
 | FB-28 | index.html:494 | 定时待停倒计时 mono 显示 | P2 | S | 无 | ⬜ |
@@ -147,7 +147,7 @@
 | FB-30 | workbench.js:1985-1991 | 回放「帧 123/600 · t=3.07s」读数 | P1 | S | 无 | ⬜ |
 | FB-31 | workbench.js:1948-1964 | 事件卡「回放此刻」：按 t 二分最近帧 seek t−0.5s 暂停；无录制灰显不渲染 | P1 | M | 无 | ⬜ |
 | FB-32 | workbench.js:616 | btnStep 按住 400ms 后 10Hz 连发（「.」键同机制） | P2 | S | 无 | ⬜ |
-| FB-33 | workbench.js:618 | 倍率变更 toast「即时生效，不重置」 | P2 | S | 无 | ⬜ |
+| FB-33 | workbench.js:618 | 倍率变更 toast「即时生效，不重置」 | P2 | S | 无 | ✅ R3-B2：setSpeed 统一 toast「即时生效，不重置」 |
 | FB-34 | index.html:494 | 双击 roT=快捷 3s 定时停（再点取消） | P2 | S | title 说明 | ⬜ |
 | FB-35 | workbench.js:1751 | t≥60 显示 1:23.4 分秒格式 | P3 | S | 断言口径注明 | ⬜ |
 | FB-36 | index.html:494 | 暂停态 roT 前缀 ‖+--dim | P3 | S | 无 | ⬜ |
@@ -158,7 +158,7 @@
 | FB-37 | index.html:344 + scene-doc.js:90-128 | 撤销历史面板：直角列表点击跳转（链式 undo/redo+单 rebuild），redo 区灰显 | P1 | M | 复用 helpOverlay 遮罩 | ⬜ |
 | FB-38 | workbench.js:759-775 | 面板内同 label 折叠「×12」（仅展示层） | P2 | S | 依赖 FEEL-115 | ⬜ |
 | FB-39 | scene-doc.js:91 | 栈满提示「最早的 X 已被移出」+首次 toast | P3 | S | 无 | ⬜ |
-| FB-40 | workbench.js:476-494 | **运行态 Ctrl+Z 静默 rebuildAll 重置仿真而 mode 仍 run**（与 FEEL-94 同族独立入口，P0）→ undo/redo 开头判 mode：先 toast+resetSim 再撤销 | P0 | S | ⚠ w 系复跑 | ⬜ |
+| FB-40 | workbench.js:476-494 | **运行态 Ctrl+Z 静默 rebuildAll 重置仿真而 mode 仍 run**（与 FEEL-94 同族独立入口，P0）→ undo/redo 开头判 mode：先 toast+resetSim 再撤销 | P0 | S | ⚠ w 系复跑 | ✅ R3-B2：运行态撤销/重做先 resetSim+toast（不再静默重置仿真而 mode 仍 run） |
 | FB-41 | workbench.js:476-481 | undo/redo title「剩余 n 步/可重做 m 步」 | P2 | S | 无 | ⬜ |
 | FB-42 | workbench.js:476-494 | 撤销/重做长按 500ms 连发（150ms 间隔） | P2 | S | 无 | ⬜ |
 | FB-43 | scene-doc.js:104 | redo 被清空且 ≥3 条时一次性提示 | P3 | S | 防烦 | ⬜ |
@@ -188,16 +188,16 @@
 ### 键盘全覆盖
 | # | 位置 | 问题→改法 | P | 量 | 风险 | 状态 |
 |---|---|---|---|---|---|---|
-| FB-63 | index.html:559-576 | 帮助表补 Ctrl+Y/Ctrl+V 两行；check.py 校验 onKey 分支与 help 行数 diff | P1 | S | 无 | ⬜ |
-| FB-64 | workbench.js:755 × FEEL-134 | **键位冲突实锤**：E 已绑 gizmo 旋转，FEEL-134 拟用 Q/E 转 ghost → ghost 旋转改 [ ]（已采纳入 FZ-2） | P1 | S | 已定案 | ⬜ |
+| FB-63 | index.html:559-576 | 帮助表补 Ctrl+Y/Ctrl+V 两行；check.py 校验 onKey 分支与 help 行数 diff | P1 | S | 无 | ✅ R3-B2：帮助表补 Shift+空格/1·2·3/Ctrl+Y/Ctrl+V 行 |
+| FB-64 | workbench.js:755 × FEEL-134 | **键位冲突实锤**：E 已绑 gizmo 旋转，FEEL-134 拟用 Q/E 转 ghost → ghost 旋转改 [ ]（已采纳入 FZ-2） | P1 | S | 已定案 | ✅ R3-B2：ghost 旋转键定案 [ ]（记入 KEYS.md，FZ-2 落地时执行） |
 | FB-65 | workbench.js:753 × FEEL-135 | 回放全局 ←/→ 与 replayBar 原生方向键双触发 → e.target!==replayBar 守卫或 blur | P1 | S | 同批实施 | ⬜ |
-| FB-66 | workbench.js:753 | Space 双激活审计：按钮点击后 blur 或 onKey 对 BUTTON 目标早退（实测定案） | P1 | S | 浏览器时序 | ⬜ |
+| FB-66 | workbench.js:753 | Space 双激活审计：按钮点击后 blur 或 onKey 对 BUTTON 目标早退（实测定案） | P1 | S | 浏览器时序 | ✅ R3-B2：全局按钮点击后 blur（防空格双激活） |
 | FB-67 | workbench.js:218-228,961-1043 | 大纲行/行内件键盘可达（role=button+tabindex+行内 span 改 button 外观不变） | P1 | M | Tab 序：行内 tabindex=-1 方向键导航 | ⬜ |
 | FB-68 | workbench.js:2191-2197 | 右栏页签快捷键（[ ] 或 Tab 组内导航，归 FB-72 定案） | P2 | S | 键位矩阵 | ⬜ |
-| FB-69 | workbench.js:729-731 | onKey 补 e.isComposing 早退（IME 组合期让路） | P2 | S | 无 | ⬜ |
+| FB-69 | workbench.js:729-731 | onKey 补 e.isComposing 早退（IME 组合期让路） | P2 | S | 无 | ✅ R3-B2：onKey isComposing 早退 |
 | FB-70 | workbench.js:741-745 | helpOverlay 关闭后焦点归还 activeElement | P2 | S | UI-92 半边 | ⬜ |
 | FB-71 | index.html:334-499 | 三区 role=region+aria-label；Tab 序审计记录 | P2 | S | 无 | ⬜ |
-| FB-72 | workbench.js:729-776 | docs/KEYS.md 快捷键冲突矩阵（已用/拟用/浏览器保留），每批新增键过表 | P1 | S | 纪律项 | ⬜ |
+| FB-72 | workbench.js:729-776 | docs/KEYS.md 快捷键冲突矩阵（已用/拟用/浏览器保留），每批新增键过表 | P1 | S | 纪律项 | ✅ R3-B2：docs/KEYS.md 冲突矩阵落盘（已用/拟用/浏览器保留） |
 | FB-73 | workbench.js:758 | X=删除选中（Delete 保留并列） | P2 | S | 入矩阵 | ⬜ |
 | FB-74 | index.html:234-301 | 浮层布局契约：curvePanel 激活 feed 右移；z 序 55/50/45/44/18；CSS 变量 --feed-right | P1 | S | 无 | ⬜ |
 | FB-75 | runtime.js:37-38,600 | 常驻 10s 环形帧缓冲（事件即固化快照段；>60 体降 5s） | P2 | L | ⚠ 内存双轨期兼容 | ⬜ |
@@ -404,6 +404,9 @@
 ## 实施批次记录（R3）
 
 （每批一 commit：完整回归全绿 + check.py 过 + 台账打勾；真实 API 调用继续遵守全轮 ≤40 预算）
+
+### R3-B2 守卫+时间控制+键盘（FZ-61/45/47、FB-40/22/23/25/33/63/64/66/69/72，13 项）
+锁定体 gizmo 守卫（P0）；运行态撤销先重置（P0）；文明6 风格 1/2/3 倍率键+Shift+空格慢动作+SPEED_STEPS 单源六档（0.1~4x）；zoomToCursor（R2 勘误兑现）+zoomSpeed 0.9；用户接管相机中断取景动画；按钮 blur 防空格双激活；IME 组合期让路；帮助表补 4 行；docs/KEYS.md 冲突矩阵（FB-64 ghost 键定案 [ ]）。
 
 ### R3-B1 解释器分派修复（AB-13/14/18/11/5/8，6 个教学错误级 P0）
 runtime 碰撞报告补 preVels（分体碰前速度，_prevVel 步前快照）；一维/二维动量理论改用真实碰前值（静止释放后碰撞不再拿文档初速算出 0/0）；momentum2D 报告双变过滤（单球撞地不再误判「斜碰通过」）；两体开普勒 T=2π√(a³/G(m1+m2))（双星 29% 误差消除）；抛体条件收窄（仅单动态体）+ 新 inelastic 分支（子弹木块共速+ΔKE）；新 galileo 分支（t=√(2h/g) 与 vx 无关）；spring 峰检测取三轴方差主轴（竖直振子不再 0 峰）；抛体落地阈值改球半径+地面顶面。

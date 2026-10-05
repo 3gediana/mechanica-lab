@@ -586,7 +586,11 @@ export class Viewport {
     controls.minDistance = 0.4;
     controls.maxDistance = 100;   // 大场景（天体系）与 5m 刻度档可达
     controls.maxPolarAngle = 1.54;
+    controls.zoomToCursor = true;    // FZ-45：滚轮朝光标缩放（vendored r186 实有该开关——R2 台账勘误）
+    controls.zoomSpeed = 0.9;        // 近景手感：默认 1.0 近距离过快
     controls.addEventListener('change', () => this.markDirty());   // 阻尼收尾帧持续置脏，静止后停渲染
+    // FZ-47：用户接管相机即中断取景/飞行动画（此前拖一下视角又被动画拽回去）
+    controls.addEventListener('start', () => { this._focusAnim = null; this._poseAnim = null; });
     this.controls = controls;
 
     // 环境：HDRI 失败降级 RoomEnvironment（材质复用 materials.js，光照环境必须先就绪）
@@ -764,6 +768,7 @@ export class Viewport {
     }
     this._highlights = [];
     let mainMesh = null;
+    let gizmoMesh = null;   // FZ-61：锁定体保持高亮但 gizmo 只挂未锁定选中（「防误拖」承诺兑现）
     for (const id of ids) {
       const bind = this._bindLookup && this._bindLookup(id);
       if (!bind || !bind.mesh) continue;
@@ -773,10 +778,11 @@ export class Viewport {
       h.material.opacity = main ? 0.9 : 0.45;
       this.scene.add(h);
       this._highlights.push(h);
-      mainMesh = bind.mesh;
+      if (main) mainMesh = bind.mesh;
+      if (!bind.mesh.userData.locked) gizmoMesh = bind.mesh;
     }
-    if (mainMesh && this.gizmoEnabled !== false && this.gizmoMode) {
-      this.gizmo.attach(mainMesh);
+    if (gizmoMesh && this.gizmoEnabled !== false && this.gizmoMode) {
+      this.gizmo.attach(gizmoMesh);
       this.gizmo.enabled = true;
     } else {
       this.gizmo.detach();

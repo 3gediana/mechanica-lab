@@ -44,6 +44,16 @@ let selectedIds = [];           // 多选集合（末位=主选中）
 let mode = 'edit';              // edit | run
 let paused = false;
 let timeScale = 1;
+let _preSlowSpeed = 1;   // FB-25：慢动作切换前记忆的原倍率
+// FB-22：倍率档位单源（select 选项/快捷键/慢动作共用；4x 档需 MAX_STEPS 配套见 PAR-12）
+const SPEED_STEPS = [0.1, 0.25, 0.5, 1, 2, 4];
+function setSpeed(v, silent) {
+  timeScale = v;
+  const sel = $('selSpeed');
+  const opt = sel && [...sel.options].find((o) => parseFloat(o.value) === v);
+  if (opt) sel.value = opt.value;
+  if (!silent) toast(`时间倍率 ${v}x（即时生效，不重置）`);
+}
 let appReady = false;
 const history = new History();
 let RAPIER, M, runtime, viewport;
@@ -480,6 +490,7 @@ function refreshHistoryButtons() {
   $('btnRedo').title = history.canRedo() ? '重做: ' + history.label().redo : '重做';
 }
 function undo() {
+  if (mode !== 'edit') { resetSim(); toast('已先重置运行，再执行撤销'); }   // FB-40：运行中撤销曾静默 rebuild 重置仿真而 mode 仍 run
   const prev = history.undo(() => serializeDoc(doc));
   if (!prev) return;
   doc = prev; autosave(); rebuildAll(); refreshHistoryButtons();
@@ -487,6 +498,7 @@ function undo() {
   toast('已撤销: ' + (lb || ''));
 }
 function redo() {
+  if (mode !== 'edit') { resetSim(); toast('已先重置运行，再执行重做'); }
   const next = history.redo(() => serializeDoc(doc));
   if (!next) return;
   doc = next; autosave(); rebuildAll(); refreshHistoryButtons();
@@ -615,7 +627,23 @@ function bindUI() {
   $('btnPause').onclick = pauseToggle;
   $('btnStep').onclick = stepOnce;
   $('btnReset').onclick = resetSim;
-  $('selSpeed').onchange = (e) => { timeScale = parseFloat(e.target.value); };
+  $('selSpeed').onchange = (e) => setSpeed(parseFloat(e.target.value), true);
+  {   // FB-22：selSpeed 选项由 SPEED_STEPS 生成（消除与快捷键/慢动作的三处漂移）
+    const sel = $('selSpeed');
+    sel.innerHTML = '';
+    for (const v of SPEED_STEPS) {
+      const o = document.createElement('option');
+      o.value = String(v);
+      o.textContent = v + 'x';
+      if (v === 1) o.selected = true;
+      sel.appendChild(o);
+    }
+  }
+  // FB-66：按钮点击后移除焦点残留——否则点过「运行」后按空格会再次触发该按钮（双激活）
+  document.addEventListener('click', (e) => {
+    const b = e.target && e.target.closest && e.target.closest('button');
+    if (b) b.blur();
+  });
   $('btnVectors').onclick = () => setVectors(!vectorsOn);
   $('btnForces').onclick = () => setForces(!forcesOn);
   $('btnDecompose').onclick = () => {
@@ -729,6 +757,7 @@ function setGizmoMode(m) {
 function onKey(e) {
   const tag = (e.target && e.target.tagName) || '';
   if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+  if (e.isComposing) return;               // FB-69：中文输入法组合期全局快捷键让路
   if (!appReady) return;
   if (e.ctrlKey || e.metaKey) {
     const k = e.key.toLowerCase();
@@ -750,7 +779,14 @@ function onKey(e) {
     viewport.hideGhost();
     return;
   }
-  if (e.code === 'Space') { e.preventDefault(); mode === 'run' ? pauseToggle() : play(); }
+  if (e.code === 'Space') {
+    e.preventDefault();
+    if (e.shiftKey) {                      // FB-25：慢动作教学模式 0.1x <-> 原倍率互切
+      if (timeScale === 0.1) { setSpeed(_preSlowSpeed || 1); toast(`慢动作退出，恢复 ${timeScale}x`); }
+      else { _preSlowSpeed = timeScale; setSpeed(0.1); toast('慢动作 0.1x（Shift+空格 切回）'); }
+    } else mode === 'run' ? pauseToggle() : play();
+  }
+  else if (e.key === '1' || e.key === '2' || e.key === '3') setSpeed({ 1: 0.5, 2: 1, 3: 2 }[e.key]);   // FB-23：文明6 风格倍率档
   else if (e.code === 'KeyW') setGizmoMode('translate');
   else if (e.code === 'KeyE') setGizmoMode('rotate');
   else if (e.code === 'KeyF') viewport.focusOn(selectedId ? runtime.binds.get(selectedId).mesh : null);

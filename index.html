@@ -476,10 +476,7 @@
     <button id="btnStep" title="推进一个固定步长 1/120s">单步</button>
     <button id="btnReset" title="回到初始态（R）">重置</button>
   </div>
-  <select id="selSpeed" title="时间倍率">
-    <option value="0.1">0.1x</option>
-    <option value="0.25">0.25x</option>
-    <option value="0.5">0.5x</option>
+  <select id="selSpeed" title="时间倍率（快捷键 1/2/3；Shift+空格 慢动作）">
     <option value="1" selected>1.0x</option>
   </select>
   <button id="btnVectors" title="速度向量箭头（叠加层）">矢量</button>
@@ -561,10 +558,14 @@
     <h2>快捷键速查</h2>
     <table>
       <tr><td class="k">空格</td><td>运行 / 暂停</td></tr>
+      <tr><td class="k">Shift+空格</td><td>慢动作 0.1x 与原倍率互切</td></tr>
+      <tr><td class="k">1 / 2 / 3</td><td>时间倍率 0.5x / 1x / 2x</td></tr>
       <tr><td class="k">R</td><td>重置到初始态</td></tr>
       <tr><td class="k">W / E</td><td>移动 / 旋转 gizmo</td></tr>
       <tr><td class="k">F</td><td>聚焦选中对象</td></tr>
       <tr><td class="k">Ctrl+Z / Ctrl+Shift+Z</td><td>撤销 / 重做</td></tr>
+      <tr><td class="k">Ctrl+Y</td><td>重做</td></tr>
+      <tr><td class="k">Ctrl+V</td><td>粘贴题目图片</td></tr>
       <tr><td class="k">Ctrl+D</td><td>复制选中对象</td></tr>
       <tr><td class="k">Ctrl+S</td><td>保存场景 JSON</td></tr>
       <tr><td class="k">Delete</td><td>删除选中对象</td></tr>
