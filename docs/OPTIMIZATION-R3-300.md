@@ -111,22 +111,22 @@
 ### 通知流（文明6 右侧事件流）
 | # | 位置 | 问题→改法 | P | 量 | 风险 | 状态 |
 |---|---|---|---|---|---|---|
-| FB-1 | workbench.js:31-38 + index.html:296 | #eventFeed 右下竖排：直角卡+左 2px 严重度竖线（line/琥珀/danger）+mono t= 前缀；同屏 ≤5 | P0 | M | 布局避让（FB-74） | ⬜ |
-| FB-2 | runtime.js:645-647 + workbench.js:2130 | 碰撞事件卡「碰撞 A×B · t=1.234s · Δp 0.8%」 | P0 | S | 高频配 FB-12 去重 | ⬜ |
+| FB-1 | workbench.js:31-38 + index.html:296 | #eventFeed 右下竖排：直角卡+左 2px 严重度竖线（line/琥珀/danger）+mono t= 前缀；同屏 ≤5 | P0 | M | 布局避让（FB-74） | ✅ R3-B3：#eventFeed 右下事件卡容器（直角卡+左 2px 严重度竖线+mono 时间前缀，同屏 ≤5） |
+| FB-2 | runtime.js:645-647 + workbench.js:2130 | 碰撞事件卡「碰撞 A×B · t=1.234s · Δp 0.8%」 | P0 | S | 高频配 FB-12 去重 | ✅ R3-B3：碰撞事件卡「碰撞 A × B」+聚焦动作（实测 momentum 预置出卡） |
 | FB-3 | workbench.js:2130 + viewport.js:60 | 事件卡点击=focusOn 两体包围盒中点；有录制帧按 FB-31 跳回放 | P1 | M | 实体已删降级 | ⬜ |
-| FB-4 | runtime.js:290 | 管道脱轨完全静默 → 警告卡+「聚焦该球」（每球一次） | P0 | S | 无 | ⬜ |
+| FB-4 | runtime.js:290 | 管道脱轨完全静默 → 警告卡+「聚焦该球」（每球一次） | P0 | S | 无 | ✅ R3-B3：runtime 脱轨事件一次性上报 escapeEvents+警告卡+聚焦（管道场景数据源就绪） |
 | FB-5 | runtime.js:462-610 | 实体坠出工作域警告卡+「停止运行」动作（天体 gravitating 豁免） | P1 | S | 不自动停 | ⬜ |
 | FB-6 | workbench.js:1658-1677 | 能量环比漂移>5% 信息卡（关守恒条也可见） | P2 | S | 弹簧基准误报防 | ⬜ |
 | FB-7 | runtime.js:686-694 | 光门通过瞬间成功卡「穿过光门 · t=X.XXXs」 | P1 | S | 无 | ⬜ |
 | FB-8 | runtime.js:29,209 | jointFailures 可见化：错误卡逐条+计数徽标 | P1 | S | w 系断言同步 | ⬜ |
 | FB-9 | workbench.js:467 + runtime.js:635 | 丢步警告卡（每 epoch 首次 dropped>0.1s，含降档建议） | P2 | S | 文案常量同源 | ⬜ |
 | FB-10 | runtime.js:600-609 | 录满 30s 自动掐断信息卡 | P2 | S | 无 | ⬜ |
-| FB-11 | workbench.js:439-445 | feed 绑 epoch：rebuild/reset 清空+分隔线+上轮摘要 | P1 | S | 无 | ⬜ |
-| FB-12 | runtime.js:641-649 | 同对 (a,b) 0.5s 窗口合并「碰撞 ×3」，hover 展开 | P1 | S | 无 | ⬜ |
-| FB-13 | index.html:296 | 卡片 6s 驻留+hover 暂停（1px 进度 hairline） | P2 | S | 无 | ⬜ |
-| FB-14 | workbench.js:439-445 | 重置发运行摘要卡「本轮 12.4s · 碰撞 3 · 脱轨 0」 | P2 | S | 无 | ⬜ |
+| FB-11 | workbench.js:439-445 | feed 绑 epoch：rebuild/reset 清空+分隔线+上轮摘要 | P1 | S | 无 | ✅ R3-B3：epoch 边界检测（rebuild 清空事件数组→计数器回退）自动清流 |
+| FB-12 | runtime.js:641-649 | 同对 (a,b) 0.5s 窗口合并「碰撞 ×3」，hover 展开 | P1 | S | 无 | ✅ R3-B3：同对碰撞 0.5s 窗口聚合「碰撞 ×n」 |
+| FB-13 | index.html:296 | 卡片 6s 驻留+hover 暂停（1px 进度 hairline） | P2 | S | 无 | ✅ R3-B3：卡片 6s 驻留（err 12s）+× 关闭+动作链接 |
+| FB-14 | workbench.js:439-445 | 重置发运行摘要卡「本轮 12.4s · 碰撞 3 · 脱轨 0」 | P2 | S | 无 | ✅ R3-B3：epoch 摘要卡「上一轮：碰撞 N 次」 |
 | FB-15 | workbench.js:31-38 | toast 堆叠队列 ≤3 同屏（超越 FEEL-117 单卡） | P1 | M | z-index 编排 | ⬜ |
-| FB-16 | workbench.js:31-38 | 四级驻留 info1.8/success2.2/warn3.2/error4.5s+左竖线区分 | P1 | S | kind 默认不破坏 | ⬜ |
+| FB-16 | workbench.js:31-38 | 四级驻留 info1.8/success2.2/warn3.2/error4.5s+左竖线区分 | P1 | S | kind 默认不破坏 | ✅ R3-B3：toast 分级驻留 info1.8/success2.2/warn3.2/err4.5s+warn/err 描边（单槽 #toast 语义不变，测试兼容） |
 | FB-17 | index.html:300 + workbench.js:407 | toast 可点动作链（撤销/停止/查看明细 ≤2 个文字链） | P1 | M | 指针域不挡视口 | ⬜ |
 | FB-18 | workbench.js:31-38 | 同文案 2s 聚合「×2」+延长 1s | P2 | S | 无 | ⬜ |
 | FB-19 | index.html:296 | 卡片右上 × 关闭；error 不自动消失 | P2 | S | 无 | ⬜ |
@@ -199,7 +199,7 @@
 | FB-71 | index.html:334-499 | 三区 role=region+aria-label；Tab 序审计记录 | P2 | S | 无 | ⬜ |
 | FB-72 | workbench.js:729-776 | docs/KEYS.md 快捷键冲突矩阵（已用/拟用/浏览器保留），每批新增键过表 | P1 | S | 纪律项 | ✅ R3-B2：docs/KEYS.md 冲突矩阵落盘（已用/拟用/浏览器保留） |
 | FB-73 | workbench.js:758 | X=删除选中（Delete 保留并列） | P2 | S | 入矩阵 | ⬜ |
-| FB-74 | index.html:234-301 | 浮层布局契约：curvePanel 激活 feed 右移；z 序 55/50/45/44/18；CSS 变量 --feed-right | P1 | S | 无 | ⬜ |
+| FB-74 | index.html:234-301 | 浮层布局契约：curvePanel 激活 feed 右移；z 序 55/50/45/44/18；CSS 变量 --feed-right | P1 | S | 无 | ✅ R3-B3：body.curves-on 时事件流右移 356px 给曲线面板让位 |
 | FB-75 | runtime.js:37-38,600 | 常驻 10s 环形帧缓冲（事件即固化快照段；>60 体降 5s） | P2 | L | ⚠ 内存双轨期兼容 | ⬜ |
 
 ## AX 解析准确度/一次性通过率/鲁棒性（75 项）
@@ -404,6 +404,9 @@
 ## 实施批次记录（R3）
 
 （每批一 commit：完整回归全绿 + check.py 过 + 台账打勾；真实 API 调用继续遵守全轮 ≤40 预算）
+
+### R3-B3 事件流 MVP（FB-1/2/4/11/12/13/14/16/74，9 项）
+文明6 式右下事件卡：碰撞卡（聚焦动作）+脱轨警告卡（runtime escapeEvents 一次性上报）+同对 0.5s 聚合+epoch 摘要+toast 分级驻留；出生触地噪声按 t<0.15 过滤；curves-on 让位契约。视觉验收过（panel 底/2px 竖线/hairline/无廉价感）。冒烟：momentum 出卡「碰撞 球A × 球B」、reset 出「上一轮：碰撞 3 次」；36 套回归 ALL GREEN。
 
 ### R3-B2 守卫+时间控制+键盘（FZ-61/45/47、FB-40/22/23/25/33/63/64/66/69/72，13 项）
 锁定体 gizmo 守卫（P0）；运行态撤销先重置（P0）；文明6 风格 1/2/3 倍率键+Shift+空格慢动作+SPEED_STEPS 单源六档（0.1~4x）；zoomToCursor（R2 勘误兑现）+zoomSpeed 0.9；用户接管相机中断取景动画；按钮 blur 防空格双激活；IME 组合期让路；帮助表补 4 行；docs/KEYS.md 冲突矩阵（FB-64 ghost 键定案 [ ]）。

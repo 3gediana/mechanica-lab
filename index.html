@@ -300,6 +300,29 @@
     opacity: 0; pointer-events: none; transition: opacity .25s;
   }
   #toast.on { opacity: 1; }
+  #toast.warn { border-color: rgba(217,164,65,.55); }
+  #toast.err { border-color: rgba(201,106,90,.55); color: #d8a29a; }
+  /* 事件流（文明6 右下事件卡，FB-1）：直角卡+左 2px 严重度竖线+mono 时间前缀 */
+  #eventFeed {
+    position: fixed; right: calc(var(--right-w) + 10px); bottom: calc(var(--simbar-h) + 10px); z-index: 44;
+    display: none; flex-direction: column; justify-content: flex-end; align-items: flex-end; gap: 5px;
+    pointer-events: none; max-height: 46vh;
+  }
+  body.curves-on #eventFeed { right: calc(var(--right-w) + 356px); }   /* FB-74：给曲线面板让位 */
+  #eventFeed.on { display: flex; }
+  .feed-card {
+    pointer-events: auto; background: var(--panel-solid); border: 1px solid var(--line); border-radius: 2px;
+    border-left: 2px solid var(--line-strong); color: var(--text); font-size: 11px; letter-spacing: .04em;
+    padding: 6px 9px; max-width: 300px; opacity: 0; transform: translateY(4px);
+    transition: opacity .18s, transform .18s;
+  }
+  .feed-card.in { opacity: 1; transform: translateY(0); }
+  .feed-card.warn { border-left-color: var(--accent); }
+  .feed-card.err { border-left-color: var(--danger); }
+  .feed-card .ft { font-family: var(--mono); font-size: 9px; color: var(--faint); margin-right: 6px; }
+  .feed-card .fx { cursor: pointer; color: var(--faint); margin-left: 8px; font-size: 10px; }
+  .feed-card .fx:hover { color: var(--text); }
+  .feed-card .fact { cursor: pointer; color: var(--accent); margin-left: 8px; text-decoration: underline; text-underline-offset: 2px; }
   .chip.warn { color: var(--danger); border-color: rgba(201,106,90,.5); }
   /* 解析中徽标的克制转圈（UI-16）：12px 琥珀弧线，1s 一圈 */
   .spinner { display: inline-block; width: 9px; height: 9px; margin-left: 5px; vertical-align: -1px;
@@ -550,7 +573,8 @@
 
 <div id="scaleReadout">网格 1 格 = 1 m</div>
 
-<div id="toast"></div>
+  <div id="toast"></div>
+  <div id="eventFeed"></div>
 <div id="errbar"></div>
 
 <div id="helpOverlay" title="按 Esc 关闭">

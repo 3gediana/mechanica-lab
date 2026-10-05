@@ -25,6 +25,7 @@ export class Runtime {
     this.acc = 0;
     this.dropped = 0;            // 因背压丢弃的模拟秒数（诊断）
     this.collisions = [];        // [{t, a, b}] 碰撞事件（动量等场景用），上限 200
+    this.escapeEvents = [];      // [{t, id}] 管道脱轨事件（每球一次），上限 20（FB-4）
     this.collisionReports = [];  // [{t, pBefore, pAfter, keBefore, keAfter}] 碰撞步前后系统守恒量快照，上限 50
     this.jointFailures = [];     // 约束创建失败记录（UI/Agent 可见）
     this.recording = null;       // 轨迹采样 {id, points:[{t,pos,speed,vel}], every, n}（解释器用，单实体）
@@ -287,7 +288,15 @@ export class Runtime {
     tb.closest = bi;
     const rx = q.x - bp.x, ry = q.y - bp.y, rz = q.z - bp.z;
     const r = Math.hypot(rx, ry, rz);
-    if (r > 0.30) return;                                          // 离管太远（被抛出），不约束
+    if (r > 0.30) {
+      // FB-4：脱轨事件一次性上报（此前完全静默——球飞走教师只看到诡异轨迹）
+      if (!tb.escaped) {
+        tb.escaped = true;
+        this.escapeEvents.push({ t: this.simT, id: tb.id });
+        if (this.escapeEvents.length > 20) this.escapeEvents.shift();
+      }
+      return;
+    }
     const LIMIT = TRACK_META.tubeRadius - tb.ballR;
     if (r <= LIMIT) return;
     const nx = rx / r, ny = ry / r, nz = rz / r;

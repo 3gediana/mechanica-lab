@@ -29,12 +29,105 @@ function fail(msg) {
   if (retry) retry.style.display = 'inline-block';
 }
 let toastTimer = 0;
-function toast(msg) {
+const TOAST_DWELL = { info: 1800, success: 2200, warn: 3200, err: 4500 };   // FB-16：分级驻留
+function toast(msg, kind) {
   const t = $('toast');
   t.textContent = msg;
+  t.classList.remove('warn', 'err');
+  if (kind === 'warn' || kind === 'err') t.classList.add(kind);
   t.classList.add('on');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('on'), 1800);
+  toastTimer = setTimeout(() => t.classList.remove('on'), TOAST_DWELL[kind] || TOAST_DWELL.info);
+}
+
+// ============ 事件流（FB-1/2/4/11/12/14：文明6 右下事件卡；数据源=runtime 已采集事件） ============
+let _seenCollisions = 0, _seenEscapes = 0;
+let _epochCollisions = 0, _epochEscapes = 0;
+const _pairAgg = new Map();        // FB-12：同对碰撞 0.5s 窗口聚合 {a|b → {el, count, t}}
+function feedCard(msg, kind = 'info', opts = {}) {
+  const feed = document.getElementById('eventFeed');
+  if (!feed) return null;
+  feed.classList.add('on');
+  const card = document.createElement('div');
+  card.className = 'feed-card' + (kind === 'warn' || kind === 'err' ? ' ' + kind : '');
+  const time = opts.t != null && opts.t > 0 ? `<span class="ft">t=${opts.t.toFixed(2)}s</span>` : '<span class="ft">·</span>';
+  card.innerHTML = time + '<span class="fm"></span>';
+  card.querySelector('.fm').textContent = msg;
+  if (opts.action) {
+    const a = document.createElement('span');
+    a.className = 'fact';
+    a.textContent = opts.action.label;
+    a.onclick = () => { opts.action.fn(); dismiss(); };
+    card.appendChild(a);
+  }
+  const x = document.createElement('span');
+  x.className = 'fx';
+  x.textContent = '×';
+  x.onclick = () => dismiss();
+  card.appendChild(x);
+  feed.appendChild(card);
+  requestAnimationFrame(() => card.classList.add('in'));
+  // 超限淡出最旧（同屏 ≤5）
+  const cards = [...feed.children];
+  for (const old of cards.slice(0, Math.max(0, cards.length - 5))) old.remove();
+  const timer = setTimeout(dismiss, kind === 'err' ? 12000 : 6000);   // FB-13：6s 驻留，err 12s
+  function dismiss() {
+    clearTimeout(timer);
+    card.style.opacity = '0';
+    setTimeout(() => card.remove(), 200);
+  }
+  return { el: card, dismiss };
+}
+function feedClear() {
+  const feed = document.getElementById('eventFeed');
+  if (feed) feed.innerHTML = '';
+  _pairAgg.clear();
+}
+function pollFeedEvents() {
+  const cols = runtime.collisions || [];
+  const esc = runtime.escapeEvents || [];
+  // epoch 边界（FB-11/14）：runtime.rebuild 清空事件数组 → 计数器回退即新 epoch：
+  // 先清流，上一轮有事件再补摘要卡
+  if (_seenCollisions > cols.length || _seenEscapes > esc.length) {
+    feedClear();
+    if (_epochCollisions > 0 || _epochEscapes > 0) {
+      feedCard(`上一轮：碰撞 ${_epochCollisions} 次${_epochEscapes ? ` · 脱轨 ${_epochEscapes}` : ''}`, 'info');
+    }
+    _seenCollisions = 0; _seenEscapes = 0; _epochCollisions = 0; _epochEscapes = 0;
+  }
+  while (_seenCollisions < cols.length) {
+    const c = cols[_seenCollisions++];
+    _epochCollisions++;
+    if (c.t < 0.15) continue;                   // 出生触地噪声：建场首帧接触不算事件
+    const na = (getEntity(doc, c.a) || {}).name || (c.a || '?').slice(0, 6);
+    const nb = (getEntity(doc, c.b) || {}).name || (c.b || '?').slice(0, 6);
+    if (c.a === c.b || (!c.a && !c.b)) continue;
+    const key = [c.a, c.b].sort().join('|');
+    const prev = _pairAgg.get(key);
+    if (prev && c.t - prev.t < 0.5) {           // FB-12：0.5s 窗口内同对合并为「碰撞 ×n」
+      prev.count++; prev.t = c.t;
+      prev.el.querySelector('.fm').textContent = `碰撞 ${na} × ${nb} · ×${prev.count}`;
+      continue;
+    }
+    if (prev) prev.dismiss();
+    const card = feedCard(`碰撞 ${na} × ${nb}`, 'info', {
+      t: c.t,
+      action: { label: '聚焦', fn: () => {
+        const bind = runtime.binds.get(c.a) || runtime.binds.get(c.b);
+        if (bind && bind.mesh) viewport.focusOn(bind.mesh);
+      } },
+    });
+    if (card) _pairAgg.set(key, { el: card.el, dismiss: card.dismiss, count: 1, t: c.t });
+  }
+  while (_seenEscapes < esc.length) {
+    const e = esc[_seenEscapes++];
+    _epochEscapes++;
+    const ne = (getEntity(doc, e.id) || {}).name || '管道小球';
+    feedCard(`${ne} 脱离轨道`, 'warn', { t: e.t, action: { label: '聚焦', fn: () => {
+      const bind = runtime.binds.get(e.id);
+      if (bind && bind.mesh) viewport.focusOn(bind.mesh);
+    } } });
+  }
 }
 
 // ============ 全局状态 ============
@@ -1514,6 +1607,7 @@ function setCurves(on) {
   curvesOn = on;
   $('curvePanel').classList.toggle('on', on);
   $('btnCurves').classList.toggle('hot', on);
+  document.body.classList.toggle('curves-on', on);   // FB-74：事件流给曲线面板让位
   if (on) {
     curveData.t.length = 0; curveData.ke.length = 0; curveData.pe.length = 0;
     curveData.byId.clear(); curveData.epoch = -1; curveData.legendN = -1;
@@ -1786,6 +1880,7 @@ let _seenReports = 0;
 function updateReadouts() {
   $('roT').textContent = runtime.simT.toFixed(3);
   $('roN').textContent = doc.entities.length;
+  pollFeedEvents();   // FB-2/4：碰撞/脱轨事件轮询（0.15s 节拍内，聚合去重在 poll 内）
   const e = selectedId ? getEntity(doc, selectedId) : null;
   const roSel = $('roSel');
   if (!e) { roSel.textContent = '未选中'; }
