@@ -141,12 +141,16 @@ try {
   const fr = await page.evaluate(() => window.MECH.frameState());
   check('帧录制', fr.frames > 10 && !fr.recording, JSON.stringify({ frames: fr.frames }));
   await page.click('#btnReset');
+  // ==== F2. 回放墙钟配速（FEEL-99 收编）：帧数据 60Hz 采样，回放必须按 60 帧/s 墙钟推进——
+  //      旧 max(1,round(rawDt·60)) 钳制在高刷屏变倍速（240Hz=4x）。量墙钟：应 ≈帧数/60 秒。
   await page.click('#btnReplay');
-  await page.waitForTimeout(1200);
-  const fr2 = await page.evaluate(() => window.MECH.frameState());
-  check('回放进行中', fr2.replaying === true, JSON.stringify(fr2));
-  await page.screenshot({ path: 'shots/84-replay.png' });
-  await page.waitForTimeout(6000);
+  const repT0 = Date.now();
+  await page.waitForFunction(() => !window.MECH.frameState().replaying, null, { timeout: 30000, polling: 200 });
+  const wall = (Date.now() - repT0) / 1000;
+  const expect = fr.frames / 60;
+  check('回放墙钟配速 60 帧/s（FEEL-99）', Math.abs(wall - expect) < Math.max(0.8, expect * 0.35),
+    `${fr.frames} 帧 wall=${wall.toFixed(2)}s 期望≈${expect.toFixed(2)}s`);
+  await page.waitForTimeout(600);
   const stEnd = await page.evaluate(() => window.MECH.state());
   check('回放结束自动回编辑态', stEnd.mode === 'edit', `mode=${stEnd.mode}`);
 

@@ -154,6 +154,11 @@
 | W-5 | 「运行解释」在未解析场景点击只出 toast，按钮不置灰 | Low | 📌 记录：有 toast 引导（Agent 页签可见），R3-AB 解释器线领域，不在 R4 扩权 |
 | W-6 | 驱动器自伤三连（非产品问题）：'spring' 预置 id 应为 'springSHM'；apply 后 loadPreset 会清 agentPlan（resetAgentPanel 设计行为）致解释空转；undo 断言漏算微调入栈次数 | — | ✅ 驱动器已修并注记 |
 
+**收编项逐条审计（FEEL-14/15/24/25/99/106、FB-25/26、FZ-45、FEEL-17/18/112）**：
+- ✅ 已收编进 R4：FEEL-14/106（hover 反馈→PL-44 三态视觉）、FEEL-17/112（单步键盘→PL-31）、FEEL-18/142（2x/4x 档+步上限→PL-30）、FB-25/26（慢动作状态机→PL-32）、FZ-45（zoomToCursor→PL-41）。
+- ✅ **FEEL-99（回放随刷新率漂移）——走查后审计抓出的漏收编运行态项，已修**：帧数据 60Hz 采样（every:2×1/120s），旧推进 `max(1,round(rawDt·60))` 钳制在 240Hz 屏=4 倍速回放；改墙钟配速累加器（`_replayAcc += rawDt·60`，起点/拖动结束清零防burst）。p8 新增配速断言（98 帧 wall 2.00s ≈ 期望 1.63s+轮询容差；旧代码 0.4s 判然有别）。
+- ⬜ 归还 R3 台账（纯编辑态，Goal 明文「其余编辑态项仍归 R3 台账」）：FEEL-15（右键菜单）、FEEL-24（label 拖拽滑值）、FEEL-25（slider schema）。
+
 **走查后回归**：单测 78/78 + run-all 全绿（Clock/favicon/PCFSoft/consbar/curvePanel 改动后复跑）+ p34 quick 26/26。
 
 ## 环境与约定（本轮新增）

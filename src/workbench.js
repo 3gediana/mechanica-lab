@@ -684,7 +684,7 @@ function bindUI() {
       runtime.applyFrame(replayIdx);
       viewport.markDirty();
     });
-    bar.addEventListener('change', () => { scrubbing = false; });
+    bar.addEventListener('change', () => { scrubbing = false; _replayAcc = 0; });
   }
   $('btnBoxSel').onclick = () => {
     if (mode !== 'edit') { toast('框选仅编辑态可用'); return; }
@@ -2072,6 +2072,8 @@ function updateScaleReadout() {
 let replaying = false;
 let replayIdx = 0;
 let scrubbing = false;   // 回放时间轴拖动中：暂停自动推进，逐帧由 oninput 驱动
+let _replayAcc = 0;      // FEEL-99 收编：帧数据 60Hz 采样（every:2×1/120s），墙钟配速推进——
+                         // 旧 round(rawDt*60)+max(1) 钳制在高刷屏变倍速（240Hz=4x）
 
 function toggleFrameRec() {
   if (replaying) { stopReplay(); return; }
@@ -2098,6 +2100,7 @@ function startReplay() {
   replaying = true;
   replayIdx = 0;
   scrubbing = false;
+  _replayAcc = 0;
   mode = 'run';
   paused = false;
   perfMon.reset();
@@ -2324,7 +2327,12 @@ function tick() {
   if (rawDt > 0) _fps += (Math.min(1 / rawDt, 240) - _fps) * 0.06;
   const _t0 = performance.now();
   if (replaying) {
-    if (!scrubbing) replayIdx += Math.max(1, Math.round(rawDt * 60));   // 60 帧/s 回放速率（拖动时逐帧）
+    if (!scrubbing) {
+      _replayAcc += rawDt * 60;                    // 墙钟配速：任意刷新率下都按 60 帧/s 推进
+      const adv = Math.floor(_replayAcc);
+      _replayAcc -= adv;
+      if (adv > 0) replayIdx += adv;
+    }
     if (replayIdx >= runtime.frames.length) { stopReplay(); }
     else {
       runtime.applyFrame(replayIdx);
