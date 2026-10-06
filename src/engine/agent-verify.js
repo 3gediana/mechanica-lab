@@ -78,7 +78,7 @@ export function auditStatic(ctx) {
   // 4. 连接初始状态：绳绷紧/弹簧大拉伸 = 首帧猛拉风险
   for (const at of ctx.attaches || []) {
     const d = dist3(at.aPos, at.bPos);
-    if (at.type === 'rope' && at.length != null && d > at.length * 1.02 + 0.01) {
+    if (at.type === 'rope' && at.length != null && d > at.length * 1.05 + 0.01) {   // 1.05=3% 标准松弛出生(AG-V2)+余量,不把正常松弛当绷紧
       F.push({
         sev: 'warn', cat: '静态·连接', item: `${at.aName}↔${at.bName}`,
         msg: `绳初始绷紧：两端距 ${d.toFixed(2)}m > 绳长 ${at.length.toFixed(2)}m，首帧会被猛拉`,

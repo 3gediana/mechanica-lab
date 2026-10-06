@@ -2815,7 +2815,7 @@ function bindAgentPanel() {
     }
   });
   $('btnFixtureParse').onclick = () => loadFixtureParse();
-  $('btnApplyParse').onclick = () => applyAgentPlan();
+  $('btnApplyParse').onclick = () => applyAgentPlan({ vivid: true });
   $('btnClearParse').onclick = () => { resetAgentPanel(); };
   $('btnRunExplain').onclick = () => runAndExplain();
   $('btnVeilRetry').onclick = () => location.reload();
@@ -3507,24 +3507,113 @@ function recordCorrection(field, from, to) {
   agentCorrections.push({ field, from, to, at: new Date().toISOString() });
 }
 
-// 确认建场：全部经 window.MECH 白名单操作（与目录添加/Agent 未来调用同一条路径）
-function applyAgentPlan() {
+// 确认建场：全部经 window.MECH 白名单操作（与目录添加/Agent 未来调用同一条路径）。
+// opts.vivid（面板「创建场景实体」按钮）：分批落场+分块探针，用户全程看得到搭建过程（AG-V2）；
+// 默认（MECH.loadParse 等程序通道）：同步一次落场，行为与历史版本一致（测试兼容）。
+async function applyAgentPlan(opts = {}) {
   if (!agentPlan) { toast('没有可用的解析结果'); return; }
   if (mode !== 'edit') { toast('运行态不可建场，请先重置'); return; }
   const M = window.MECH;
   const wasEmpty = doc.entities.length === 0;
-  let batchReused = 0, batchCreated = 0, batchRemoved = 0;
+  if (!opts.vivid) {
+    let batchReused = 0, batchCreated = 0, batchRemoved = 0;
+    beginHistoryBatch();
+    rebuildSuspend++;   // 批内 N 次 addComponent 不再各自重建 Rapier 世界，收尾一次（PER-5）
+    try {
+      applyAgentPlanInner(M, (r, c, rm) => { batchReused = r; batchCreated = c; batchRemoved = rm || 0; });
+    } finally {
+      rebuildSuspend--;
+      rebuildAll();
+      endHistoryBatch(wasEmpty ? 'Agent 按解析建场' : `Agent 混合建场（更新 ${batchReused}+新增 ${batchCreated}${batchRemoved ? `+删除 ${batchRemoved}` : ''}）`);
+    }
+    // AG-V：建场完成自动自查（静态→修复→探针→理论），报告进 Agent 页签
+    if (agentVerifyCtx && agentVerifyCtx.items.length) runAgentVerify(true);
+    return;
+  }
+  await applyAgentPlanVivid(M, wasEmpty);
+}
+
+// vivid 分批建场（AG-V2）：删除先行，实体逐件落场（每件重建→出生下落立刻可见），
+// 连接件/关节在共享后处理收尾，整批一条历史。节奏自适应：总量压在 ~1s 内（测试 sleep 兼容）。
+async function applyAgentPlanVivid(M, wasEmpty) {
+  const rejected = new Set(agentChanges.filter((c) => c.skipped)
+    .map((c) => c.type + (c.idx != null ? ':' + c.idx : '')));
   beginHistoryBatch();
-  rebuildSuspend++;   // 批内 N 次 addComponent 不再各自重建 Rapier 世界，收尾一次（PER-5）
+  let batchReused = 0, batchCreated = 0, batchRemoved = 0;
   try {
-    applyAgentPlanInner(M, (r, c, rm) => { batchReused = r; batchCreated = c; batchRemoved = rm || 0; });
+    if (!agentPlan.gravityDefault && !rejected.has('gravity')) M.setGravity(agentPlan.gravity);
+    if (agentPlan.G != null && !rejected.has('G')) M.setG(agentPlan.G);
+    if (doc.entities.some((e) => e.physics.gravitating) && !trailsOn) setTrails(true);
+    if (agentPlan.kind === 'rotation') doc.kind = 'rotation';
+    const created = [];
+    agentOps.length = 0;
+    // 删除先行（AG-R1）：先删后建才不会「换成X」误删新建体
+    let nRemoved = 0;
+    let remSeq = 0;
+    for (const rm of (agentPlan.removals || [])) {
+      const c = agentChanges.find((x) => x.type === 'remove' && x.idx === remSeq);
+      remSeq++;
+      if (!c || c.skipped) continue;
+      for (const id of (c.targetIds || [])) {
+        const e = getEntity(doc, id);
+        if (!e) continue;
+        removeInBatch(id);
+        nRemoved++;
+        agentOps.push({ op: '删除', target: e.name, ok: true });
+      }
+    }
+    if (nRemoved) {
+      selectedIds = selectedIds.filter((x) => getEntity(doc, x));
+      if (!getEntity(doc, selectedId)) selectedId = selectedIds.length ? selectedIds[selectedIds.length - 1] : null;
+      rebuildAll();
+    }
+    batchRemoved = nRemoved;
+    const overrides = planToOverrides(agentPlan);
+    const matches = matchOverrides(overrides);
+    const mixed = doc.entities.length > 0;
+    let nReused = 0, nCreated = 0;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    // Playwright/webdriver 下节奏归零：套件的固定 sleep 与条件等待都按同步建场写——
+    // 生动分批只给真人浏览器（AG-V2 呈现层节奏与行为正确性解耦）
+    const delay = (typeof navigator !== 'undefined' && navigator.webdriver) ? 0
+      : Math.max(40, Math.min(150, Math.round(900 / Math.max(matches.length, 1))));
+    for (let i = 0; i < matches.length; i++) {
+      const { o, idx, reuseId } = matches[i];
+      setAgentStage('building', `搭场景 ${i + 1}/${matches.length}：${o.name || o.type}`);
+      if (rejected.has('entity:' + idx)) {
+        created.push(null);
+        agentOps.push({ op: '跳过 ' + o.type, target: o.name || o.type, ok: true });
+        continue;
+      }
+      let id = null;
+      if (reuseId) {
+        const cand = getEntity(doc, reuseId);
+        if (cand) {
+          const patch = { params: o.params, transform: o.transform, physics: o.physics, source: 'agent' };
+          if (M.updateEntity(cand.id, patch, `Agent 按「${agentPlan.questionType}」更新 ${cand.name || o.type}（混合）`)) {
+            id = cand.id; nReused++;
+            agentOps.push({ op: '更新 ' + o.type, target: cand.name || o.type, ok: true });
+          } else {
+            agentOps.push({ op: '更新 ' + o.type, target: cand.name || o.type, ok: false });
+          }
+        }
+      }
+      if (!id) {
+        id = M.addComponent(o.type, o);
+        if (id) { nCreated++; agentOps.push({ op: '创建 ' + o.type, target: o.name || o.type, ok: true }); }
+        else agentOps.push({ op: '创建 ' + o.type, target: o.name || o.type, ok: false });
+      }
+      created.push(id);
+      rebuildAll();
+      if (id) selectEntity(id);
+      if (delay) await sleep(delay);   // webdriver=0:完全同步完成(测试读档不落在建场中态)
+    }
+    batchReused = nReused; batchCreated = nCreated;
+    agentPostPass(M, created, rejected, mixed, nReused, nCreated, matches);
   } finally {
-    rebuildSuspend--;
-    rebuildAll();
     endHistoryBatch(wasEmpty ? 'Agent 按解析建场' : `Agent 混合建场（更新 ${batchReused}+新增 ${batchCreated}${batchRemoved ? `+删除 ${batchRemoved}` : ''}）`);
   }
-  // AG-V：建场完成自动自查（静态→修复→探针→理论），报告进 Agent 页签
-  if (agentVerifyCtx && agentVerifyCtx.items.length) runAgentVerify(true);
+  if (agentVerifyCtx && agentVerifyCtx.items.length) await runAgentVerify(true);
 }
 
 // 批内删除（Agent 建场历史批次专用）：级联 attach/joint 清理，不 rebuild 不进历史（外层 endHistoryBatch 统一记账）
@@ -3617,6 +3706,12 @@ function applyAgentPlanInner(M, reportCounts) {
     ? `混合模式：更新 ${nReused} 个已有实体，新增 ${nCreated} 个`
     : '按解析计划创建实体…') + (nRemoved ? `，删除 ${nRemoved} 个` : ''));
   if (mixed) setParseStatus(`混合建场：复用已有同类型实体（保留命名/材质，参数按题给更新）+ 新增 ${nCreated} 个${agentPlan.gravityDefault ? '' : '；重力已按题给调整'}`);
+  agentPostPass(M, created, rejected, mixed, nReused, nCreated, matches);
+}
+// Agent 建场共享后处理（同步/vivid 两路径共用）：滑轮回填、关节、元数据、连接件、
+// 自查上下文快照、收尾 UI。连接绳长=端距×1.03（AG-V2，长于端距才有垂坠）：挂重物
+// 落下绷紧接住→垂一垂→摆动（rope joint 单侧拉紧不弹射）；模型显式题给绳长忠实不动。
+function agentPostPass(M, created, rejected, mixed, nReused, nCreated, matches) {
   // atwood 类：onPulley 占位符回填真实滑轮 id，并重建使约束收集生效
   if (agentPlan.entities.some((e) => e.type === 'pulley')) {
     const pi = agentPlan.entities.findIndex((e) => e.type === 'pulley');
@@ -3685,7 +3780,7 @@ function applyAgentPlanInner(M, reportCounts) {
     const pa = ea.transform.pos, pb = eb.transform.pos;
     const dist = Math.hypot(pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]);
     const params = at.type === 'rope'
-      ? { length: at.length ?? +dist.toFixed(3) }
+      ? { length: at.length ?? +(dist * 1.03).toFixed(3) }   // AG-V2：长于端距 3%=有松弛,挂重物落下绷紧才垂坠摆动
       : { stiffness: at.stiffness ?? 20, restLength: at.restLength ?? +dist.toFixed(3), damping: at.damping ?? 0.5 };
     const id = M.addComponent(at.type, { name: (at.type === 'rope' ? '绳 ' : '弹簧 ') + dist.toFixed(2) + 'm', params, attach: [fromId, toId], source: 'agent' });
     if (id) { created.push(id); agentOps.push({ op: '连接 ' + at.type, target: ea.name + ' 与 ' + eb.name, ok: true }); }
@@ -3734,6 +3829,7 @@ function applyAgentPlanInner(M, reportCounts) {
   }
 }
 
+
 // ============ 建场自查（AG-V）：静态核对 → 自动修复 → 运动探针 → 理论对照 ============
 // 用户需求：Agent 要能自己发现自己建的系统与题目的误差、自身的 bug（球没放对位置/卡死等）。
 // 探针=同步确定性步进（rAF 不介入），跑完重置回初始态，不脏文档不进历史（修复走独立批次）。
@@ -3741,18 +3837,18 @@ let agentVerifyCtx = null;
 let agentVerifyState = null;
 let verifyBusy = false;
 
-function runAgentVerify(auto = true) {
+async function runAgentVerify(auto = true) {
   if (verifyBusy) return;
   if (!agentVerifyCtx) { if (!auto) toast('没有可自查的建场记录'); return; }
   verifyBusy = true;
   try {
-    runAgentVerifyInner();
+    await runAgentVerifyInner();
   } finally {
     verifyBusy = false;
   }
 }
 
-function runAgentVerifyInner() {
+async function runAgentVerifyInner() {
   const ctx = agentVerifyCtx;
   // ---- 1. 静态核对：穿透（26 向射线）+ 坡面语义/题给位置/连接（纯函数） ----
   const penetrations = {};
@@ -3822,7 +3918,8 @@ function runAgentVerifyInner() {
   // ---- 3. 运动探针 + 理论对照（需要动态体才有意义；理论要在重置前算——报告/碰撞数据活在 runtime） ----
   if (mode !== 'edit') resetSim(true);
   if (doc.entities.some((e) => e.physics.body === 'dynamic' || e.physics.gravitating)) {
-    const probe = motionProbe();
+    setAgentStage('verifying', '自查：运行探针…');
+    const probe = await motionProbe();
     findings.push(...auditMotion(probe));
     const tf = verifyTheory(probe);
     if (tf) findings.push(tf);
@@ -3830,6 +3927,7 @@ function runAgentVerifyInner() {
   }
   agentVerifyState = { findings, summary: summarize(findings), repaired, at: Date.now() };
   renderAgentVerify();
+  setAgentStage('built', `已建场，自查 ${agentVerifyState.summary.ok}✓ ${agentVerifyState.summary.warn}⚠ ${agentVerifyState.summary.error}✗`);
   const s = agentVerifyState.summary;
   toast(s.error ? `自查发现 ${s.error} 处问题（见 Agent 页签）`
     : s.warn ? `自查通过，${s.warn} 处提醒（见 Agent 页签）` : '自查全部通过');
@@ -3837,7 +3935,7 @@ function runAgentVerifyInner() {
 
 // 确定性运动探针：同步步进 needT 秒（照抄 runAndExplain 的题型窗口与预采基准），
 // 每 12 步（0.1s）采全体位姿 + 系统动能；解释器主体系列复用 runtime.startRecording。
-function motionProbe() {
+async function motionProbe() {
   const hasRamp = doc.entities.some((e) => e.type === 'ramp');
   const isAstro = doc.entities.some((e) => e.physics.gravitating);
   const isRotation = doc.kind === 'rotation';
@@ -3877,8 +3975,14 @@ function motionProbe() {
   const ke = [];
   const every = 12;
   const total = Math.ceil(needT * 120);
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const isTest = typeof navigator !== 'undefined' && navigator.webdriver;
   for (let s = 1; s <= total; s++) {
     runtime.stepOnce();
+    if (!isTest && s % 4 === 0) {   // 分块让帧（AG-V2）：探针运动肉眼可见（webdriver 走同步路径不interleave）
+      setAgentStage('verifying', `自查：探针运行 t=${runtime.simT.toFixed(1)}/${needT}s`);
+      await sleep(8);
+    }
     if (s % every === 0) {
       const states = {};
       for (const it of entities) {
@@ -4453,6 +4557,7 @@ window.MECH = {
   // AG-V 建场自查通道（p37 断言用）
   agentVerifyState: () => agentVerifyState,
   runAgentVerify: () => runAgentVerify(false),
+  agentBusy: () => verifyBusy,   // 自查进行中（建场分批/探针），测试屏障用
   // 放置防穿模测试探针：已存在实体按其 type/params/位姿重建假想体，返回当前穿透深度（0=不嵌）
 
   sensorState: (id) => runtime.sensorReadings.get(id) || null,

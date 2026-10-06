@@ -419,10 +419,17 @@ function explainIncline(plan, doc, series) {
 
   // 理论值：机械能守恒 v = √(2g·Δh)，Δh = 球心实际下落高度（轨迹起→底端，诚实可比）。
   // 球心无法从坡顶棱角起滑（要避让高墙），故 Δh 略小于斜面全高；题目全长参考值单独给出。
-  const startY = series[0].pos[1];
+  // 基准取样点 AG-V2：跳过出生下落的反弹窗（≥0.15s，落地微弹 ~0.09s 内结束），
+  // 从已贴合坡面的样本起算——下落损耗不进能量账，教学漂移回到数值积分本底。
+  const k0 = series.findIndex((p2) => p2.t >= 0.15);
+  const base = k0 > 0 ? series[k0] : series[0];
+  const startY = base.pos[1];
   const endY = exitPoint ? exitPoint.pos[1] : series[series.length - 1].pos[1];
   const hUsed = Math.max(startY - endY, 1e-6);
-  const vTheoretical = Math.sqrt(2 * g * hUsed);
+  // 理论含实测初速（AG-V2 出生下落友好）：首采样点若已带速度（出生 4cm 落下/题给初速），
+  // 机械能守恒口径 v=√(v0²+2gΔh) 从真实初始状态起算——静态释放 v0=0 时与旧公式全等。
+  const v0 = base.speed;
+  const vTheoretical = Math.sqrt(v0 * v0 + 2 * g * hUsed);
   const hFull = ramp.params.height;                                    // 斜面全高
   const vFull = Math.sqrt(2 * g * hFull);                              // 题目"从顶端滑到底端"参考
   const errorPct = Math.abs(measured - vTheoretical) / vTheoretical * 100;
@@ -430,7 +437,7 @@ function explainIncline(plan, doc, series) {
 
   // 机械能：以底端为零势能面，起始 mg·Δh vs 底端 ½mv²（漂移=数值积分损耗）
   const m = ball.physics.mass;
-  const e0 = m * g * hUsed;
+  const e0 = 0.5 * m * v0 * v0 + m * g * hUsed;   // 能量基准含初速动能（与理论同口径,出生下落友好）
   const e1 = 0.5 * m * measured * measured;
   const driftPct = e0 > 1e-9 ? (e0 - e1) / e0 * 100 : 0;
 

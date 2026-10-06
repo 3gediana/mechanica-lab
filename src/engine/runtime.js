@@ -142,7 +142,17 @@ export class Runtime {
       const desc = e.physics.body === 'fixed'
         ? RAPIER.RigidBodyDesc.fixed()
         : RAPIER.RigidBodyDesc.dynamic().setCcdEnabled(true);
-      desc.setTranslation(...e.transform.pos).setRotation(quatFromEuler(RAPIER, e.transform.rot));
+      // 出生动效（AG-V2）：无初速动态体从文档位姿上方 4cm 落下——落+微弹+入稳，
+      // 不许开局即稳态。教学精度安全：explainIncline/projectile 的理论以 series[0]
+      // 实际出生高度为基准，这 4cm 被理论自动吸收（errPct 不受污染）。
+      // 豁免：带初速（轨迹题）、天体（自积分）、转台 spinLock（悬空盘不落）、
+      // gravityScale=0（理想化悬空场景——两球平面错位会让接触事件早于解析步，
+      // 碰撞报告抓到速度未变的幽灵事件，p26 实测）、onPulley、spawnDrop:false。
+      const spawnDrop = e.physics.body === 'dynamic' && !e.physics.spinLock && !e.physics.onPulley
+        && e.physics.spawnDrop !== false
+        && e.physics.gravityScale !== 0
+        && e.physics.linvel.every((x) => Math.abs(x) < 1e-9) ? 0.04 : 0;
+      desc.setTranslation(e.transform.pos[0], e.transform.pos[1] + spawnDrop, e.transform.pos[2]).setRotation(quatFromEuler(RAPIER, e.transform.rot));
       const body = this.world.createRigidBody(desc);
       if (e.physics.body === 'dynamic') {
         body.setLinvel({ x: e.physics.linvel[0], y: e.physics.linvel[1], z: e.physics.linvel[2] }, true);
@@ -762,12 +772,68 @@ export class Runtime {
       const a = this.binds.get(b.entity.attach[0]), c = this.binds.get(b.entity.attach[1]);
       if (!a || !c) continue;
       const pa = a.mesh.position, pc = c.mesh.position;
+      if (b.entity.type === 'rope') { this._syncRope(b, pa, pc); continue; }   // 绳：verlet 垂坠/摆动（AG-V2）
       const dir = new THREE.Vector3().subVectors(pc, pa);
       const len = dir.length();
       if (len < 1e-6) continue;
       b.mesh.position.copy(pa).addScaledVector(dir, 0.5);
       b.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
       b.mesh.scale.set(1, len, 1);
+    }
+  }
+
+  // 绳的呈现层动力学（AG-V2）：8 段 verlet 链——重力下垂（slack 时悬链弧）、出生上踢的
+  // 跳动、端点拖动的摆动。只动网格不动关节（rope joint 照旧约束刚体），零物理污染。
+  // 张紧时 segRest 取 max(绳长/8, 端距/8)，链自然绷直，与 rope joint 单侧拉紧语义一致。
+  _syncRope(b, pa, pc) {
+    const N = 8;
+    if (!b.linkPts || b.linkPts.length !== N + 1) {
+      b.linkPts = [];
+      b.linkPrev = [];
+      for (let i = 0; i <= N; i++) {
+        const p = pa.clone().lerp(pc, i / N);
+        b.linkPts.push(p);
+        b.linkPrev.push(p.clone());
+        // 出生抖动：中段向上小踢 + 横向扰动——绳子落入垂弧时看得见「跳一跳」
+        if (i > 0 && i < N) {
+          b.linkPrev[i].y += 0.02 + Math.random() * 0.012;
+          b.linkPrev[i].x += (Math.random() - 0.5) * 0.014;
+        }
+      }
+    }
+    const span = pa.distanceTo(pc);
+    const segRest = Math.max(b.entity.params.length / N, span / N, 1e-4);
+    const s2 = FIXED_H * FIXED_H;
+    for (let i = 1; i < N; i++) {
+      const pt = b.linkPts[i], pr = b.linkPrev[i];
+      const nx = pt.x + (pt.x - pr.x) * 0.982;
+      const ny = pt.y + (pt.y - pr.y) * 0.982 - 9.81 * s2;
+      const nz = pt.z + (pt.z - pr.z) * 0.982;
+      pr.copy(pt);
+      pt.set(nx, ny, nz);
+    }
+    b.linkPts[0].copy(pa);
+    b.linkPts[N].copy(pc);
+    const corr = (A, B, movA, movB) => {
+      const dx = B.x - A.x, dy = B.y - A.y, dz = B.z - A.z;
+      const d = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1e-6;
+      const f = (d - segRest) / d;
+      if (movA && movB) { A.x += dx * f * 0.5; A.y += dy * f * 0.5; A.z += dz * f * 0.5; B.x -= dx * f * 0.5; B.y -= dy * f * 0.5; B.z -= dz * f * 0.5; }
+      else if (movA) { A.x += dx * f; A.y += dy * f; A.z += dz * f; }
+      else if (movB) { B.x -= dx * f; B.y -= dy * f; B.z -= dz * f; }
+    };
+    for (let k = 0; k < 3; k++) {
+      for (let i = 0; i < N; i++) corr(b.linkPts[i], b.linkPts[i + 1], i !== 0, i + 1 !== N);
+    }
+    const segs = b.mesh.children;
+    const dir = new THREE.Vector3();
+    for (let i = 0; i < N && i < segs.length; i++) {
+      const A = b.linkPts[i], B2 = b.linkPts[i + 1];
+      dir.subVectors(B2, A);
+      const len = Math.max(dir.length(), 1e-4);
+      segs[i].position.copy(A).addScaledVector(dir, 0.5);
+      segs[i].quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.multiplyScalar(1 / len));
+      segs[i].scale.set(1, len, 1);
     }
   }
 

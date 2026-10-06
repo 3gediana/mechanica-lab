@@ -100,7 +100,8 @@ try {
   await page.evaluate(() => window.MECH.loadFixture('momentum'));
   await page.waitForTimeout(300);
   await page.click('#btnApplyParse');
-  await page.waitForTimeout(400);
+  // AG-V：建场后自动自查（异步探针）——等自查收尾再跑解释，避免 resetSim 冲掉录制
+  await page.waitForFunction(() => window.MECH.agentBusy && !window.MECH.agentBusy(), null, { timeout: 30000, polling: 100 });
   await page.click('#tabAgent');
   await page.click('#btnRunExplain');
   await page.waitForFunction(() => {

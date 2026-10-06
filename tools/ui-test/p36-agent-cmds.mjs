@@ -137,7 +137,8 @@ try {
   const previewTxt = await page.evaluate(() => document.getElementById('changePreviewList').textContent);
   check('F1 复合句走模型通道且预览含删除项', previewTxt.includes('删除') && previewTxt.includes('小球'), previewTxt.slice(0, 60));
   await page.click('#btnApplyParse');
-  await page.waitForTimeout(600);
+  // AG-V2 vivid 分批建场+探针异步：等自查完成（agentVerifyState 落地=建场+探针+重置全结束）
+  await page.waitForFunction(() => window.MECH.agentVerifyState() != null, null, { timeout: 30000, polling: 250 });
   const after = await page.evaluate(() => {
     const es = window.MECH.doc().entities;
     return { n: es.length, sphere: es.some((e) => e.type === 'sphere'), box: es.some((e) => e.type === 'box') };

@@ -256,7 +256,18 @@ export const COMPONENTS = {
     schema: [
       { key: 'length', label: '绳长', unit: 'm', min: 0.05, max: 20, step: 0.05 },
     ],
-    buildGeometry: () => new THREE.CylinderGeometry(0.008, 0.008, 1, 12),  // 单位杆，runtime 按两端拉伸；径向 12 段（MAT-76）斜视轮廓更圆
+    buildGeometry: () => new THREE.CylinderGeometry(0.008, 0.008, 1, 12),  // 单位杆；径向 12 段（MAT-76）斜视轮廓更圆
+    // 8 段组网格（AG-V2）：runtime _syncRope 逐段摆放——slack 悬链弧、出生跳动、摆动可见
+    makeMesh: (p, material) => {
+      const g = new THREE.Group();
+      const segGeo = new THREE.CylinderGeometry(0.008, 0.008, 1, 10);
+      for (let i = 0; i < 8; i++) {
+        const seg = new THREE.Mesh(segGeo, material);
+        seg.position.set(0, 1 - (i + 0.5) / 8, 0);   // 初始沿 Y 单位高直排（缩略图/首帧不是一坨）
+        g.add(seg);
+      }
+      return g;
+    },
     buildCollider: () => null,
     isLink: true,                                  // 连接类：无独立 body，runtime 建绳关节并每帧同步网格
     spawnY: () => 0.5,
@@ -272,7 +283,23 @@ export const COMPONENTS = {
       { key: 'restLength', label: '原长', unit: 'm', min: 0.1, max: 10, step: 0.05 },
       { key: 'damping', label: '阻尼', unit: '', min: 0, max: 50, step: 0.1 },
     ],
-    buildGeometry: () => new THREE.CylinderGeometry(0.022, 0.022, 1, 14),  // 单位杆，runtime 按两端拉伸；径向 14 段（MAT-76）弹簧线圈更圆润
+    // 螺旋线圈（AG-V2）：单位高 7 圈管体，runtime 按端距 scale.y 拉伸——
+    // 弹簧拉开时圈距变疏（正确的视觉语义），不再是直挺挺一根杆
+    buildGeometry: (() => {
+      let coil = null;
+      return () => {
+        if (coil) return coil;
+        const pts = [];
+        const coils = 7, N = 150;
+        for (let i = 0; i <= N; i++) {
+          const t = i / N;
+          const a = t * coils * 2 * Math.PI;
+          pts.push(new THREE.Vector3(Math.cos(a) * 0.034, t, Math.sin(a) * 0.034));
+        }
+        coil = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 170, 0.0075, 8, false);
+        return coil;
+      };
+    })(),
     buildCollider: () => null,
     isLink: true,
     spawnY: () => 0.5,
