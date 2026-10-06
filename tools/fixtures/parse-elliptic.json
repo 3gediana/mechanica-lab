@@ -1,0 +1,51 @@
+{
+  "kind": "astro",
+  "questionType": "椭圆轨道（开普勒定律）",
+  "goal": "v=0.92·v圆 的椭圆轨道：验证开普勒第二定律（角动量守恒）与第三定律（T²∝i³），观察近日点/远日点速度",
+  "gravity": 10,
+  "G": 1,
+  "entities": [
+    {
+      "type": "celestial",
+      "name": "中心恒星",
+      "given": {
+        "mass": 100,
+        "position": [
+          0,
+          0,
+          0
+        ]
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "celestial",
+      "name": "卫星",
+      "given": {
+        "mass": 1,
+        "position": [
+          4,
+          0,
+          0
+        ],
+        "velocity": [
+          0,
+          0,
+          4.61
+        ]
+      },
+      "confidence": 0.95
+    }
+  ],
+  "observations": [
+    "偏心率",
+    "近日点/远日点速度对比",
+    "周期与半长轴关系"
+  ],
+  "assumptions": [
+    "v=4.61 m/s ≈ 0.92·√(GM/r)，对应偏心率约 0.15",
+    "G=1（题给引力常数）"
+  ],
+  "confidence": 0.9,
+  "_fixture": true
+}

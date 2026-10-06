@@ -1,0 +1,66 @@
+{
+  "questionType": "反冲运动（动量守恒）",
+  "goal": "验证静止系统分裂后总动量仍为零",
+  "gravity": 10,
+  "entities": [
+    {
+      "type": "ground",
+      "name": "地面",
+      "given": {
+        "length": 12,
+        "width": 4
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "sphere",
+      "name": "物体甲",
+      "given": {
+        "mass": 1,
+        "radius": 0.15,
+        "position": [
+          -0.5,
+          0.15,
+          0
+        ],
+        "velocity": [
+          -1.5,
+          0,
+          0
+        ],
+        "friction": 0
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "sphere",
+      "name": "物体乙",
+      "given": {
+        "mass": 1,
+        "radius": 0.15,
+        "position": [
+          0.5,
+          0.15,
+          0
+        ],
+        "velocity": [
+          1.5,
+          0,
+          0
+        ],
+        "friction": 0
+      },
+      "confidence": 0.95
+    }
+  ],
+  "observations": [
+    "两物体速率相等方向相反",
+    "总动量为零"
+  ],
+  "assumptions": [
+    "分裂瞬间内力远大于外力",
+    "分离后速率各 1.5 m/s"
+  ],
+  "confidence": 0.92,
+  "_fixture": true
+}

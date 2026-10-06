@@ -1,0 +1,68 @@
+{
+  "questionType": "板块模型（摩擦传动）",
+  "goal": "滑块减速、木板加速，验证摩擦力是内力",
+  "gravity": 10,
+  "entities": [
+    {
+      "type": "ground",
+      "name": "地面",
+      "given": {
+        "length": 10,
+        "width": 4,
+        "friction": 0
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "box",
+      "name": "木板",
+      "given": {
+        "mass": 2,
+        "length": 1.0,
+        "height": 0.2,
+        "width": 0.4,
+        "position": [
+          0,
+          0.1,
+          0
+        ],
+        "friction": 0.35
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "box",
+      "name": "滑块",
+      "given": {
+        "mass": 0.5,
+        "length": 0.3,
+        "height": 0.2,
+        "width": 0.3,
+        "position": [
+          0.15,
+          0.3,
+          0
+        ],
+        "velocity": [
+          1.5,
+          0,
+          0
+        ],
+        "friction": 0.35
+      },
+      "confidence": 0.95
+    }
+  ],
+  "observations": [
+    "滑块减速",
+    "木板被摩擦力带动加速",
+    "两者共速后一起运动"
+  ],
+  "environment": "地面光滑，板与滑块间 μ=0.35",
+  "assumptions": [
+    "滑块初始位于木板中部偏右",
+    "滑块初速 1.5 m/s"
+  ],
+  "confidence": 0.9,
+  "_fixture": true
+}

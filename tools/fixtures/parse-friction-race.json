@@ -1,0 +1,71 @@
+{
+  "questionType": "摩擦力对比（刹车距离）",
+  "goal": "对比不同摩擦系数下木箱的滑行距离",
+  "gravity": 10,
+  "environment": "两箱初速相同，仅地面摩擦不同",
+  "entities": [
+    {
+      "type": "ground",
+      "name": "地面",
+      "given": {
+        "length": 12,
+        "width": 4
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "box",
+      "name": "木箱甲（μ=0.1）",
+      "given": {
+        "mass": 1,
+        "length": 0.3,
+        "height": 0.3,
+        "width": 0.3,
+        "position": [
+          -2,
+          0.15,
+          -0.4
+        ],
+        "velocity": [
+          2,
+          0,
+          0
+        ],
+        "friction": 0.1
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "box",
+      "name": "木箱乙（μ=0.6）",
+      "given": {
+        "mass": 1,
+        "length": 0.3,
+        "height": 0.3,
+        "width": 0.3,
+        "position": [
+          -2,
+          0.15,
+          0.4
+        ],
+        "velocity": [
+          2,
+          0,
+          0
+        ],
+        "friction": 0.6
+      },
+      "confidence": 0.95
+    }
+  ],
+  "observations": [
+    "两箱滑行距离对比",
+    "摩擦力对刹车距离的影响"
+  ],
+  "assumptions": [
+    "初速均为 2 m/s",
+    "箱子不翻滚（质心平动模型）"
+  ],
+  "confidence": 0.92,
+  "_fixture": true
+}

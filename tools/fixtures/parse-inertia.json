@@ -1,0 +1,47 @@
+{
+  "questionType": "牛顿第一定律（惯性）",
+  "goal": "演示光滑水平面上物体的匀速直线运动",
+  "gravity": 10,
+  "entities": [
+    {
+      "type": "ground",
+      "name": "地面",
+      "given": {
+        "length": 12,
+        "width": 4,
+        "friction": 0
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "sphere",
+      "name": "小球",
+      "given": {
+        "mass": 1,
+        "radius": 0.15,
+        "position": [
+          -2,
+          0.15,
+          0
+        ],
+        "velocity": [
+          1.5,
+          0,
+          0
+        ],
+        "friction": 0
+      },
+      "confidence": 0.95
+    }
+  ],
+  "observations": [
+    "速度是否保持 1.5 m/s 不变"
+  ],
+  "environment": "水平面光滑，不计空气阻力",
+  "assumptions": [
+    "不受水平外力",
+    "初速 1.5 m/s 沿 +x"
+  ],
+  "confidence": 0.95,
+  "_fixture": true
+}

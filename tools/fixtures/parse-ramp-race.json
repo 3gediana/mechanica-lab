@@ -1,0 +1,49 @@
+{
+  "questionType": "滚动与滑动赛跑",
+  "goal": "同斜面同质量：光滑滑块 a=g·sinθ 恒大于纯滚动 a=g·sinθ/(1+2/5)，滑块先到底",
+  "gravity": 10,
+  "entities": [
+    {
+      "type": "ramp",
+      "name": "斜面",
+      "given": {
+        "angleDeg": 30,
+        "length": 2.5,
+        "friction": 0.2
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "sphere",
+      "name": "滑块小球（光滑）",
+      "given": {
+        "mass": 1,
+        "radius": 0.15,
+        "friction": 0
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "cylinder",
+      "name": "滚动圆柱",
+      "given": {
+        "mass": 1,
+        "radius": 0.12,
+        "height": 0.3,
+        "friction": 0.2
+      },
+      "confidence": 0.95
+    }
+  ],
+  "observations": [
+    "两者到达底端顺序",
+    "滚动因转动惯量分走动能而更慢"
+  ],
+  "assumptions": [
+    "小球摩擦 0 纯滑动",
+    "圆柱纯滚动",
+    "沙盘自动分车道并排"
+  ],
+  "confidence": 0.9,
+  "_fixture": true
+}

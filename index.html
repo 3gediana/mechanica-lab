@@ -495,6 +495,7 @@
       <input type="file" id="agentFile" accept="image/*" style="display:none">
       <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
         <select id="fixtureSel" title="选择示例题型" style="appearance:none;background-color:var(--panel-solid);border:1px solid var(--line);border-radius:2px;color:var(--dim);font-family:var(--mono);font-size:10px;padding:3px 6px;max-width:150px">
+          <optgroup label="原有示例">
           <option value="incline">斜面下滑</option>
           <option value="momentum">一维对撞</option>
           <option value="momentum2d">二维斜碰</option>
@@ -505,6 +506,27 @@
           <option value="hinge">复摆（铰链杆）</option>
           <option value="projectile">抛体运动</option>
           <option value="atwood">阿特伍德机</option>
+          </optgroup>
+          <optgroup label="初中">
+          <option value="freefall">自由落体（双球）</option>
+          <option value="friction-race">摩擦刹车对比</option>
+          <option value="inertia">牛顿第一定律</option>
+          </optgroup>
+          <optgroup label="高中">
+          <option value="vertical-throw">竖直上抛</option>
+          <option value="inelastic">完全非弹性碰撞</option>
+          <option value="recoil">反冲运动</option>
+          <option value="bullet-block">子弹打木块</option>
+          <option value="plank">板块模型</option>
+          </optgroup>
+          <optgroup label="大学">
+          <option value="rolling">刚体纯滚动</option>
+          <option value="ramp-race">滚动滑动赛跑</option>
+          <option value="elliptic">椭圆轨道（开普勒）</option>
+          <option value="coupled">弹簧耦合双振子</option>
+          <option value="damped">阻尼振动</option>
+          <option value="launcher">弹簧弹射器</option>
+          </optgroup>
         </select>
         <button id="btnFixtureParse" style="appearance:none;background:none;border:none;padding:0;cursor:pointer;font-size:10px;color:var(--faint);letter-spacing:.06em;text-decoration:underline dotted">载入示例解析数据（fixture，非真实模型输出）</button>
       </div>

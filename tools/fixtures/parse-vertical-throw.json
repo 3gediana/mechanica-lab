@@ -1,0 +1,45 @@
+{
+  "questionType": "竖直上抛",
+  "goal": "观察上升、最高点与落回全过程，验证 H=v0²/2g",
+  "gravity": 10,
+  "entities": [
+    {
+      "type": "ground",
+      "name": "地面",
+      "given": {
+        "length": 6,
+        "width": 4
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "sphere",
+      "name": "小球",
+      "given": {
+        "mass": 0.5,
+        "radius": 0.15,
+        "position": [
+          0,
+          0.15,
+          0
+        ],
+        "velocity": [
+          0,
+          8,
+          0
+        ]
+      },
+      "confidence": 0.95
+    }
+  ],
+  "observations": [
+    "最大高度",
+    "往返对称性"
+  ],
+  "assumptions": [
+    "不计空气阻力",
+    "抛出点在地面（球心 0.15m）"
+  ],
+  "confidence": 0.95,
+  "_fixture": true
+}

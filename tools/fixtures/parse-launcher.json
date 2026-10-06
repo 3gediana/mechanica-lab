@@ -1,0 +1,70 @@
+{
+  "questionType": "弹簧弹射器（压缩储能）",
+  "goal": "压缩弹簧释放，弹性势能 ½kx² 转化为小球动能弹射出去",
+  "gravity": 10,
+  "entities": [
+    {
+      "type": "ground",
+      "name": "地面",
+      "given": {
+        "length": 12,
+        "width": 4,
+        "friction": 0
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "box",
+      "name": "固定墙",
+      "given": {
+        "mass": 10,
+        "length": 0.3,
+        "height": 0.3,
+        "width": 0.3,
+        "position": [
+          0,
+          0.15,
+          0
+        ],
+        "friction": 0.8,
+        "fixed": 1
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "sphere",
+      "name": "小球",
+      "given": {
+        "mass": 0.5,
+        "radius": 0.15,
+        "position": [
+          0.8,
+          0.15,
+          0
+        ],
+        "friction": 0.1
+      },
+      "confidence": 0.95
+    }
+  ],
+  "attaches": [
+    {
+      "type": "spring",
+      "from": 0,
+      "to": 1,
+      "stiffness": 20,
+      "restLength": 1.2,
+      "damping": 0.2
+    }
+  ],
+  "observations": [
+    "弹射初速（理论 √(k/m)·x≈1.8 m/s）",
+    "弹簧拉伸后的回拉振荡"
+  ],
+  "assumptions": [
+    "弹簧原长 1.2m，安装距 0.8m → 压缩量 0.4m",
+    "墙固定（fixed）"
+  ],
+  "confidence": 0.9,
+  "_fixture": true
+}

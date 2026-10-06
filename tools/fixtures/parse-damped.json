@@ -1,0 +1,36 @@
+{
+  "kind": "spring",
+  "questionType": "阻尼振动（振幅衰减）",
+  "goal": "对比无阻尼情形，观察振幅按指数衰减",
+  "gravity": 10,
+  "entities": [
+    {
+      "type": "sphere",
+      "name": "振子小球",
+      "given": {
+        "mass": 1.5
+      },
+      "confidence": 0.95
+    }
+  ],
+  "attaches": [
+    {
+      "type": "spring",
+      "from": 0,
+      "to": 1,
+      "stiffness": 20,
+      "restLength": 0.8,
+      "damping": 0.8
+    }
+  ],
+  "observations": [
+    "振幅是否逐周期衰减",
+    "阻尼对周期的影响"
+  ],
+  "assumptions": [
+    "阻尼系数 0.8（欠阻尼）",
+    "水平理想化（重力不影响振动方向）"
+  ],
+  "confidence": 0.9,
+  "_fixture": true
+}

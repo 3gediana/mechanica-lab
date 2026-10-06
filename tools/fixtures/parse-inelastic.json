@@ -1,0 +1,69 @@
+{
+  "questionType": "完全非弹性碰撞（共速）",
+  "goal": "验证碰后共速 v'=mv/(m+M)=1 m/s 与动量守恒",
+  "gravity": 10,
+  "entities": [
+    {
+      "type": "ground",
+      "name": "地面",
+      "given": {
+        "length": 10,
+        "width": 4
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "sphere",
+      "name": "球甲",
+      "given": {
+        "mass": 1,
+        "radius": 0.15,
+        "position": [
+          -1.4,
+          0.15,
+          0
+        ],
+        "velocity": [
+          2,
+          0,
+          0
+        ],
+        "friction": 0,
+        "restitution": 0
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "sphere",
+      "name": "球乙",
+      "given": {
+        "mass": 1,
+        "radius": 0.15,
+        "position": [
+          1.4,
+          0.15,
+          0
+        ],
+        "velocity": [
+          0,
+          0,
+          0
+        ],
+        "friction": 0,
+        "restitution": 0
+      },
+      "confidence": 0.95
+    }
+  ],
+  "observations": [
+    "碰后两球速度相同",
+    "动能损失"
+  ],
+  "environment": "水平面光滑",
+  "assumptions": [
+    "恢复系数 e=0",
+    "碰后共同速度理论值 1 m/s"
+  ],
+  "confidence": 0.95,
+  "_fixture": true
+}

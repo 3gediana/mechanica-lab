@@ -33,6 +33,7 @@ PARSE_PROMPT = """你是大学物理题解析器。看图中的物理题，输�
  "unknowns": ["图中未给出的量（不要编造数值）"],
  "uncertain": ["题图未明示、你按惯例处理但需用户确认的内容，没有则空数组"],
  "joint": {"from": 实体索引, "to": 实体索引, "axis": [1,0,0], "limits": [0.15, 1.05], "anchor1": [0,0.14,0], "anchor2": [0,0,0]},
+ "attaches": [{"type":"spring","from":实体索引,"to":实体索引,"stiffness":数值N/m,"restLength":数值m,"damping":数值}],
  "assumptions": ["你做的假设"],
  "confidence": 0到1
 }
@@ -52,6 +53,12 @@ PARSE_PROMPT = """你是大学物理题解析器。看图中的物理题，输�
 - given 只写题目文字或图中明确给出的数值；没给的键不要写。
 - 题目说"不计摩擦"时 friction 写 0 并在 assumptions 说明；"由静止释放"时 velocity 不写（默认零）。
 - 题目未明确给重力加速度时 gravity 填 null（不要猜 0 或 10）；gravity 禁止填 0（除非题目明确是失重/零重力环境）。
+- 「滑下斜面后在水平面继续运动」类组合题：必须补一个 ground 实体承接水平段（斜面底端在斜面 +x 侧）。
+- 斜面上的方块/圆柱省略 given.position——沙盘会自动贴坡放置（圆柱自动躺平可纯滚动）；多个物体在斜面上并排对比时都不写 position，沙盘自动分车道。
+- 方块/圆柱/球的 given.position 是自由落位（按题给坐标放置），写 position 表示你确定它在哪里。
+- 卫星速度小于圆轨道速度是椭圆轨道（合法，可演示开普勒第二/第三定律，沙盘支持偏心率观测）；不要把椭圆强行改圆。
+- 弹簧连接两个实体时用 attaches 数组（from/to 是 entities 下标，stiffness 单位 N/m，restLength 是弹簧原长 m，damping 阻尼系数 0~2，缺省 damping=0）；「弹簧一端固定在墙上」：墙写 box 实体 given.fixed=1，attaches 两端分别指向墙与小球。弹簧压缩状态：restLength 写原长（大于安装距离即可）。
+- 「同一高度/同时释放」等多物体对比题：每个物体都要写 given.position 且高度一致（红队实测：模型把其中一个球放在地面=保真错误）。
 - 缺失的重要条件写进 unknowns；你补充的工程默认值写进 assumptions；按惯例处理但无题图依据的写进 uncertain。
 - 只输出 JSON 本体，且必须紧凑：单行、无缩进、无多余空格与换行。"""
 

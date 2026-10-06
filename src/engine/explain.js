@@ -20,7 +20,14 @@ export function explainRun(plan, doc, series, reports = [], astro = null, rotati
   const hasGround = doc.entities.some((e) => e.type === 'ground');
   const onlyBall = projBalls.length === 1 && dynBodies.length === 1;
   if (!hasRamp && !hasSpring && !hasGrav && onlyBall && hasGround) {
-    return explainProjectile(plan, doc, series);
+    // UX-R：贴地滑动（惯性/摩擦刹车类单球+地面）不是抛体——要求起始离地（球心高于地面顶
+    // 半径+6cm）或带竖直初速分量，否则惯性演示会被拿去算「射程」误判 15%（p41 inertia 实测）
+    const b0 = projBalls[0];
+    const gE = doc.entities.find((e) => e.type === 'ground');
+    const gTop = gE.transform ? gE.transform.pos[1] + (gE.params.sy || 0.2) / 2 : 0;
+    const airborne = series.length > 0 && series[0].pos[1] > gTop + (b0.params.radius || 0.15) + 0.06;
+    const vy0 = b0.physics.linvel ? b0.physics.linvel[1] : 0;
+    if (airborne || vy0 > 0.5) return explainProjectile(plan, doc, series);
   }
   // 伽利略平抛同落（AB-8）：两动态球同高、都无竖直初速、恰一带水平初速、双球空中起始
   // + 地面——此前被误派二维斜碰分支输出「斜碰验证」（错误教学内容）。
@@ -286,17 +293,25 @@ function explainSpring(plan, doc, series) {
   });
   const axis = dims.indexOf(Math.max(...dims));
   const xs = series.map((p) => p.pos[axis]);
-  const peaks = [];
+  const rawPeaks = [];
   for (let i = 1; i < xs.length - 1; i++) {
-    if (xs[i] > xs[i - 1] && xs[i] >= xs[i + 1] && xs[i] - xs[i - 1] > 1e-4) {
-      if (!peaks.length || i - peaks[peaks.length - 1] > 5) peaks.push(i);   // 去毛刺：峰间隔 > 5 采样
-    }
+    if (xs[i] > xs[i - 1] && xs[i] >= xs[i + 1] && xs[i] - xs[i - 1] > 1e-6) rawPeaks.push(i);
+  }
+  // UX-R：平台坍缩（60Hz 采样 apex 邻域多帧同为局部极大，逐帧都算峰会翻倍峰数）
+  // + 相邻间隔取中位数——阻尼衰减让后段峰值变浅易漏检，旧「首末平均」口径被拉到 2×
+  // （damped 实测偏差 100.5%，同步步进实测物理周期其实只偏 1.7%——纯测量口径问题）。
+  const peaks = [];
+  for (const i of rawPeaks) {
+    const last = peaks[peaks.length - 1];
+    if (last != null && i - last <= 10) { if (xs[i] > xs[last]) peaks[peaks.length - 1] = i; }
+    else peaks.push(i);
   }
   let Tmeasured = null;
   if (peaks.length >= 2) {
     const span = series[series.length - 1].t - series[0].t;
     const dt = span / (series.length - 1);
-    Tmeasured = (peaks[peaks.length - 1] - peaks[0]) * dt / (peaks.length - 1);
+    const gaps = peaks.slice(1).map((p, i) => p - peaks[i]).sort((a, b) => a - b);
+    Tmeasured = gaps[Math.floor(gaps.length / 2)] * dt;
   }
   const errPct = Tmeasured != null ? Math.abs(Tmeasured - Ttheory) / Ttheory * 100 : null;
   const pass = errPct != null && errPct < 8;
@@ -379,13 +394,18 @@ function explainAstro(plan, astro) {
   const eccOk = astro.ecc != null && astro.ecc < 0.1;
   const periodOk = astro.period != null && Ttheory != null
     && Math.abs(astro.period - Ttheory) / Ttheory * 100 < 5;
-  const pass = driftOk && eccOk && periodOk;
+  // UX-R 椭圆轨道合法化：ecc≥0.1 的椭圆不再定罪——开普勒第二定律（角动量守恒=driftL）
+  // 与第三定律（周期只依赖半长轴 a，对椭圆精确成立）在椭圆上照样可验证；
+  // 逃逸/双曲线才会因周期测不出（periodOk false）或漂移超限被拦下。
+  const pass = driftOk && periodOk;
   const summary = [
     `两体引力系统（G=${G}，中心质量 ${M}）：轨道半长轴 a≈${a != null ? a.toFixed(3) : '?'} m，`,
-    `圆轨道理论周期 T = 2π√(a³/GM) = ${Ttheory != null ? Ttheory.toFixed(2) : '?'} s。`,
+    `开普勒第三定律理论周期 T = 2π√(a³/GM) = ${Ttheory != null ? Ttheory.toFixed(2) : '?'} s。`,
     `模拟实测周期 ${astro.period != null ? astro.period.toFixed(2) + ' s' : '采样中'}、偏心率 e=${astro.ecc != null ? astro.ecc.toFixed(4) : '?'}，`,
     `机械能漂移 ${astro.driftE.toExponential(1)}、角动量漂移 ${astro.driftL.toExponential(1)}（velocity-Verlet 辛积分，能量长期有界）。`,
-    driftOk && eccOk ? '轨道闭合稳定，开普勒轨道动力学得到验证。' : '存在明显漂移或轨道变形，建议检查步长与初始条件。',
+    eccOk && pass ? '近圆闭合轨道，开普勒轨道动力学得到验证。'
+      : pass ? `椭圆轨道（e=${astro.ecc != null ? astro.ecc.toFixed(3) : '?'}）：开普勒第二定律（角动量守恒）与第三定律（周期-半长轴）得到验证，近日点/远日点速度对比可观察。`
+      : '存在明显漂移或轨道未闭合（可能逃逸），建议检查步长与初始条件。',
   ].join('');
   return {
     supported: true,

@@ -1,0 +1,17 @@
+{
+  "_fixture": true,
+  "_note": "初中·自由落体（比萨斜塔双球）：不同质量同时落地，演示 g 与质量无关",
+  "questionType": "自由落体（双球同时落地）",
+  "goal": "观察不同质量的物体从同一高度自由下落是否同时落地",
+  "gravity": 10,
+  "entities": [
+    { "type": "ground", "name": "地面", "given": { "length": 8, "width": 4 }, "confidence": 0.95 },
+    { "type": "sphere", "name": "铁球（5kg）", "given": { "mass": 5, "position": [-0.6, 2.0, 0], "radius": 0.15 }, "confidence": 0.95 },
+    { "type": "sphere", "name": "木球（1kg）", "given": { "mass": 1, "position": [0.6, 2.0, 0], "radius": 0.15 }, "confidence": 0.95 }
+  ],
+  "observations": ["两球落地时刻是否相同"],
+  "keyPoints": ["两球从同一高度 2m 由静止同时释放"],
+  "environment": "不计空气阻力",
+  "assumptions": ["球心高度即落体高度（2m）", "两球材质不影响运动（真空理想化）"],
+  "confidence": 0.95
+}

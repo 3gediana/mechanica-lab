@@ -1,0 +1,65 @@
+{
+  "questionType": "子弹打木块（完全非弹性）",
+  "goal": "验证 v'=mv/(m+M)≈0.294 m/s，观察嵌入",
+  "gravity": 10,
+  "entities": [
+    {
+      "type": "ground",
+      "name": "地面",
+      "given": {
+        "length": 10,
+        "width": 4
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "box",
+      "name": "木块",
+      "given": {
+        "mass": 1,
+        "length": 0.4,
+        "height": 0.3,
+        "width": 0.4,
+        "position": [
+          1.2,
+          0.15,
+          0
+        ],
+        "friction": 0.1,
+        "restitution": 0
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "sphere",
+      "name": "子弹",
+      "given": {
+        "mass": 0.02,
+        "radius": 0.05,
+        "position": [
+          0,
+          0.15,
+          0
+        ],
+        "velocity": [
+          15,
+          0,
+          0
+        ],
+        "friction": 0.1,
+        "restitution": 0
+      },
+      "confidence": 0.95
+    }
+  ],
+  "observations": [
+    "碰后共同速度",
+    "动量守恒"
+  ],
+  "assumptions": [
+    "子弹嵌入木块（e=0）",
+    "木块可在地面滑动"
+  ],
+  "confidence": 0.93,
+  "_fixture": true
+}

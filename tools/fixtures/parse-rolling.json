@@ -1,0 +1,38 @@
+{
+  "questionType": "刚体纯滚动（圆柱下斜面）",
+  "goal": "演示纯滚动：摩擦力不做功，a=g·sinθ/(1+I/mr²)",
+  "gravity": 10,
+  "entities": [
+    {
+      "type": "ramp",
+      "name": "斜面",
+      "given": {
+        "angleDeg": 30,
+        "length": 2.5,
+        "friction": 0.2
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "cylinder",
+      "name": "圆柱",
+      "given": {
+        "mass": 1,
+        "radius": 0.12,
+        "height": 0.3,
+        "friction": 0.2
+      },
+      "confidence": 0.95
+    }
+  ],
+  "observations": [
+    "圆柱滚动角速度与线速度",
+    "到达底端速度"
+  ],
+  "assumptions": [
+    "圆柱在坡面自动贴坡躺平（轴向水平）",
+    "纯滚动无滑动摩擦损耗"
+  ],
+  "confidence": 0.92,
+  "_fixture": true
+}

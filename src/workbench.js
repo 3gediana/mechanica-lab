@@ -4698,6 +4698,7 @@ window.MECH = {
   runAgentVerify: () => runAgentVerify(false),
   agentBusy: () => verifyBusy || agentPatchBusy,   // 自查/模型修订进行中（建场分批/探针/回喂），测试屏障用
   agentPatchState: () => ({ rounds: agentPatchRounds, busy: agentPatchBusy, max: AGENT_PATCH_MAX }),   // AG-V3 修订轮次（测试断言用）
+  __recDump: () => runtime.recording && runtime.recording.points.map((p) => +p.pos[0].toFixed(4)),   // TEMP-DEBUG
   lastSeriesInfo: () => lastSeries && { n: lastSeries.points.length, entityName: lastSeries.entityName, label: lastSeries.label },   // DE-1
   // 放置防穿模测试探针：已存在实体按其 type/params/位姿重建假想体，返回当前穿透深度（0=不嵌）
 

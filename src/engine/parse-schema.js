@@ -66,6 +66,11 @@ export function normalizeParse(raw) {
         else if (arr && arr.length === 2 && arr.every(Number.isFinite)) { given.angvel = [arr[0], arr[1], 0]; vec2Padded++; }
         continue;
       }
+      if (k === 'fixed') {
+        // UX-R：固定体表达（弹簧固定端/挡板/立柱）——given.fixed=1 → body fixed
+        if (Number(v) > 0) given.fixed = 1;
+        continue;
+      }
       if (!(k in RANGES)) { dropped.push(k); continue; }   // 未知键丢弃不猜，但让用户看见（AG-9）
       const n = num(v, RANGES[k]);
       if (n === null) errors.push(`${e.name || type}.${k} 值无效（${v}），已忽略`);
@@ -387,23 +392,42 @@ export function planToOverrides(plan) {
     .map((e) => e.given.radius ?? 0.15));
   if (ramp) {
     const g = ramp.given;
-    const width = g.width ?? Math.max(0.5, +(2.2 * maxBallR).toFixed(3));   // AG-21 防大球侧翻
+    // UX-R：坡面多物体（球/圆柱/方块赛跑、对比实验）自动加宽斜面——车道 0.75m 间距
+    const rampLanes = plan.entities.filter((x) => x.type === 'sphere' || x.type === 'cylinder' || x.type === 'box').length;
+    const width = Math.max(g.width ?? 0, Math.max(0.5, +(2.2 * maxBallR).toFixed(3)), rampLanes > 1 ? +(rampLanes * 0.75).toFixed(3) : 0);   // AG-21 防大球侧翻 + UX-R 多车道
     if (g.angleDeg != null) {
       const Lslope = g.length ?? 2.0;                       // 坡面长（斜边）
       const th = g.angleDeg * Math.PI / 180;
       const base = Lslope * Math.cos(th);
       const height = Lslope * Math.sin(th);
-      rampGeom = { base, height, angleDeg: g.angleDeg };
+      rampGeom = { base, height, angleDeg: g.angleDeg, width };
     } else {
       const base = g.length ?? 2.0;                          // 无角度：length 按底边处理
       const height = g.height ?? base * Math.tan(30 * Math.PI / 180);
-      rampGeom = { base, height, angleDeg: Math.atan2(height, base) * 180 / Math.PI };
+      rampGeom = { base, height, angleDeg: Math.atan2(height, base) * 180 / Math.PI, width };
     }
   }
 
   const out = [];
-  // 弹簧振子布局（attaches 有 spring 或 kind=spring）
-  if ((plan.attaches || []).some((a) => a.type === 'spring') || plan.kind === 'spring') {
+  // UX-R：坡面放置通用化——球（z 车道并排）、圆柱（躺平、轴向 z=滚动向 x）、方块（贴坡旋转）。
+  // 车道全宽 rampGeom.width（多物体自动加宽），间距 0.75m；题给 position 的实体自由落位不占车道。
+  const rampObjs = plan.entities.filter((x) =>
+    (x.type === 'sphere' || x.type === 'cylinder' || x.type === 'box')
+    && x.given.position == null);
+  const laneMap = new Map(rampObjs.map((x, i) => [x, i]));
+  const laneZ = (e) => +((laneMap.get(e) ?? 0) - (rampObjs.length - 1) / 2) * 0.75;
+  const slopeSpot = (r, off = 0.3) => {
+    const xl = -rampGeom.base / 2 + off;
+    const surf = rampGeom.height * (1 - (xl + rampGeom.base / 2) / rampGeom.base);
+    const yOff = r / Math.cos(rampGeom.angleDeg * Math.PI / 180);
+    return { xl, y: +(0.05 + surf + yOff + 0.01).toFixed(3) };
+  };
+  // UX-R：springLayout 只接管「单振子弹簧振子」——kind=spring 或（有 spring attach 且计划里
+  // 只有 ≤1 个实体）。多体 attach（耦合双振子/弹射器=显式墙+多实体）必须走正常管线，
+  // 否则模型给的地面/第二球/题给位置全被丢弃（p41 coupled/launcher 实测）。
+  const wantsSpringLayout = plan.kind === 'spring'
+    || ((plan.attaches || []).some((a) => a.type === 'spring') && plan.entities.length <= 1);
+  if (wantsSpringLayout) {
     return springLayout(plan);
   }
   // 摩擦是成对属性，模型可能把"不计摩擦"标在球上或斜面上（都是正确物理位置）：
@@ -419,7 +443,7 @@ export function planToOverrides(plan) {
       o.params = {
         length: +rampGeom.base.toFixed(4),
         height: +rampGeom.height.toFixed(4),
-        width: ramp.given.width ?? Math.max(0.5, +(2.2 * maxBallR).toFixed(3)),
+        width: +rampGeom.width.toFixed(4),   // UX-R：多车道自动加宽（题给 width 或车道数×0.75）
       };
       o.transform = { pos: [0, 0.05, 0], rot: [0, 0, 0] };
       // 摩擦是成对属性：固定斜面也必须带上题目给的摩擦（缺省 0.4），否则 Rapier 取平均把光滑面变粗糙
@@ -436,6 +460,7 @@ export function planToOverrides(plan) {
         restitution: e.given.restitution ?? 0.1,
         linDamping: 0, angDamping: 0.02,       // 教学演化不加空气阻尼，守恒量才可对照理论
       };
+      if (e.given.fixed) o.physics.body = 'fixed';
       // 无斜面（对撞类）布局：沿 x 排开，悬浮于地面上方（gravityScale=0 + 无摩擦）——
       // "光滑水平面"理想化：不落地不接触，水平动量不被地面摩擦污染，动量守恒才可对照
       if (!rampGeom) {
@@ -447,7 +472,9 @@ export function planToOverrides(plan) {
         o.physics.friction = 0;
         o.physics.gravityScale = 0;
       } else {
-        o.transform = { pos: ballOnRamp(rampGeom, o.params.radius), rot: [0, 0, 0] };
+        // UX-R：坡面球多车道并排（球 vs 球、球 vs 圆柱赛跑）；off=r+0.01 与 ballOnRamp 同点
+        const spot = slopeSpot(o.params.radius, o.params.radius + 0.01);
+        o.transform = { pos: [spot.xl, spot.y, laneZ(e)], rot: [0, 0, 0] };
       }
       if (e.given.velocity) o.physics.linvel = e.given.velocity;
     } else if (e.type === 'box') {
@@ -459,11 +486,20 @@ export function planToOverrides(plan) {
         sz: e.given.width ?? bl ?? 0.3,
       };
       o.physics = { mass: e.given.mass ?? 1, friction: e.given.friction ?? 0.4 };
+      if (e.given.fixed) o.physics.body = 'fixed';   // UX-R：固定墙/挡板（弹簧固定端等）
       // 复杂场景（AG-V 前置）：同类型多件沿 x 对称散开，不再全部叠在 [0.6,…] 同一点
       const boxList = plan.entities.filter((x) => x.type === 'box');
       const bi = boxList.indexOf(e);
       const spreadX = boxList.length > 1 ? (bi - (boxList.length - 1) / 2) * 0.9 : 0;
-      o.transform = { pos: [0.6 + spreadX, (o.params.sy / 2) + 0.02, 0], rot: [0, 0, 0] };
+      if (rampGeom && e.given.position == null) {
+        // UX-R：坡面方块——贴坡旋转（rot z=-θ，斜面沿 +x 下坡）；题给 position 仍自由落位
+        const th = rampGeom.angleDeg * Math.PI / 180;
+        const spot = slopeSpot(o.params.sy / 2, o.params.sx / 2 + 0.02);
+        o.transform = { pos: [spot.xl, spot.y, laneZ(e)], rot: [0, 0, +(-th)] };
+      } else {
+        // UX-R：方块尊重题给 position（此前恒被忽略——「把方块放在…」类要求无法表达）
+        o.transform = { pos: e.given.position ?? [0.6 + spreadX, (o.params.sy / 2) + 0.02, 0], rot: [0, 0, 0] };
+      }
       if (e.given.velocity) o.physics.linvel = e.given.velocity;
     } else if (e.type === 'pulley') {
       o.params = { radius: e.given.radius ?? 0.3 };
@@ -479,11 +515,18 @@ export function planToOverrides(plan) {
     } else if (e.type === 'cylinder') {
       o.params = { radius: e.given.radius ?? 0.12, height: e.given.height ?? 0.3 };   // AG-19
       o.physics = { mass: e.given.mass ?? 1 };
+      if (e.given.fixed) o.physics.body = 'fixed';
       // 同类型多圆柱沿 z 散开（复杂场景不叠在同一点）
       const cylList = plan.entities.filter((x) => x.type === 'cylinder');
       const ci = cylList.indexOf(e);
       const spreadZ = cylList.length > 1 ? (ci - (cylList.length - 1) / 2) * 0.8 : 0;
-      o.transform = { pos: [0, (o.params.height / 2) + 0.02, 0.8 + spreadZ], rot: [0, 0, 0] };
+      if (rampGeom && e.given.position == null) {
+        // UX-R：坡面圆柱——躺平（rot x=90°，轴向 z），可演示刚体纯滚动（摩擦不做功）
+        const spot = slopeSpot(o.params.radius, o.params.radius + 0.01);
+        o.transform = { pos: [spot.xl, spot.y, laneZ(e)], rot: [Math.PI / 2, 0, 0] };
+      } else {
+        o.transform = { pos: e.given.position ?? [0, (o.params.height / 2) + 0.02, 0.8 + spreadZ], rot: [0, 0, 0] };
+      }
     } else if (e.type === 'ground') {
       o.params = { sx: e.given.length ?? 10, sy: 0.1, sz: e.given.width ?? 8 };   // AG-20
       // 显式地面也要有 physics（AG-V3 修：模型修订计划常补 ground，缺 body 下游读 physics.body 炸）
@@ -492,8 +535,10 @@ export function planToOverrides(plan) {
     }
     out.push(o);
   }
-  // 对撞类（无斜面且 ≥2 球）：自动补光滑地面承接（对撞题的隐含装置，假设记录在 plan.assumptions）
-  if (!ramp && plan.entities.filter((e) => e.type === 'sphere').length >= 2) {
+  // 对撞类（无斜面且 ≥2 球）：自动补光滑地面承接（对撞题的隐含装置，假设记录在 plan.assumptions）。
+  // UX-R：模型已给 ground 则不重复补（freefall fixture 实测双地面）。
+  if (!ramp && !plan.entities.some((e) => e.type === 'ground')
+    && plan.entities.filter((e) => e.type === 'sphere').length >= 2) {
     out.push({
       type: 'ground', name: '光滑地面', source: 'agent',
       params: { sx: 12, sy: 0.1, sz: 6 },

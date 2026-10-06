@@ -1,0 +1,77 @@
+{
+  "questionType": "弹簧耦合双振子",
+  "goal": "运动小球通过弹簧驱动静止小球，观察能量交换（拍）",
+  "gravity": 10,
+  "entities": [
+    {
+      "type": "ground",
+      "name": "地面",
+      "given": {
+        "length": 8,
+        "width": 4,
+        "friction": 0
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "sphere",
+      "name": "球甲",
+      "given": {
+        "mass": 1,
+        "radius": 0.15,
+        "position": [
+          -0.9,
+          0.15,
+          0
+        ],
+        "velocity": [
+          1,
+          0,
+          0
+        ],
+        "friction": 0
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "sphere",
+      "name": "球乙",
+      "given": {
+        "mass": 1,
+        "radius": 0.15,
+        "position": [
+          0.9,
+          0.15,
+          0
+        ],
+        "velocity": [
+          0,
+          0,
+          0
+        ],
+        "friction": 0
+      },
+      "confidence": 0.95
+    }
+  ],
+  "attaches": [
+    {
+      "type": "spring",
+      "from": 1,
+      "to": 2,
+      "stiffness": 15,
+      "restLength": 1.8,
+      "damping": 0
+    }
+  ],
+  "observations": [
+    "甲减速乙加速",
+    "弹簧弹性势能与动能周期性交换"
+  ],
+  "assumptions": [
+    "弹簧原长等于初始间距 1.8m（无初应力）",
+    "k=15 N/m"
+  ],
+  "confidence": 0.9,
+  "_fixture": true
+}

@@ -28,8 +28,8 @@ const STUBS = {
     entities: [
       { type: 'ramp', name: '斜面', given: { angleDeg: 30, length: 2 }, confidence: 0.95 },
       { type: 'sphere', name: '小球', given: { mass: 1 }, confidence: 0.9 },
-      { type: 'box', name: '方块甲', given: { mass: 2 }, confidence: 0.9 },
-      { type: 'box', name: '方块乙', given: { mass: 2 }, confidence: 0.9 }],
+      { type: 'box', name: '方块甲', given: { mass: 2, position: [1.6, 0.15, 0.5] }, confidence: 0.9 },
+      { type: 'box', name: '方块乙', given: { mass: 2, position: [0.8, 0.15, -0.5] }, confidence: 0.9 }],
     observations: [], anchorPoints: [], keyPoints: [], environment: '',
     unknowns: [], uncertain: [], removals: [], joint: null, assumptions: [], confidence: 0.9 },
   // 大初速平抛（无斜面+地面=projectile 布局，探针应检出飞出）
