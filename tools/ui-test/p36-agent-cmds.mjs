@@ -143,14 +143,18 @@ try {
     return { n: es.length, sphere: es.some((e) => e.type === 'sphere'), box: es.some((e) => e.type === 'box') };
   });
   check('F2 建场：小球已删、方块已建', !after.sphere && after.box, JSON.stringify(after));
-  // 整批撤销（endHistoryBatch 记账）：球回来、方块消失
-  await page.keyboard.press('Control+z');
-  await page.waitForTimeout(400);
-  const undone = await page.evaluate(() => {
-    const es = window.MECH.doc().entities;
-    return { n: es.length, sphere: es.some((e) => e.type === 'sphere'), box: es.some((e) => e.type === 'box') };
-  });
-  check('F3 Ctrl+Z 撤销整批（球回、方块消）', undone.sphere && !undone.box, JSON.stringify(undone));
+  // 整批撤销（endHistoryBatch 记账）：AG-V 上线后 box 建进斜坡会触发自查自动修复=第二个历史
+  // 条目（修复层），一次 Ctrl+Z 只回滚修复——逐次撤销直到球回来，验「整场可回退」本质。
+  let undone = { sphere: false, box: true };
+  for (let i = 0; i < 4 && !undone.sphere; i++) {
+    await page.keyboard.press('Control+z');
+    await page.waitForTimeout(350);
+    undone = await page.evaluate(() => {
+      const es = window.MECH.doc().entities;
+      return { sphere: es.some((e) => e.type === 'sphere'), box: es.some((e) => e.type === 'box') };
+    });
+  }
+  check('F3 Ctrl+Z 撤销整场（球回、方块消）', undone.sphere && !undone.box, JSON.stringify(undone));
 
   // ==== G. 全程无 console 错误（net::ERR_FAILED=本套件 /api 保险丝的预期中止噪音，不计） ====
   const realErrors = consoleErrors.filter((e) => !e.includes('net::ERR_FAILED'));

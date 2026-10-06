@@ -42,7 +42,7 @@ PARSE_PROMPT = """你是大学物理题解析器。看图中的物理题，输�
 - 复摆/铰链摆（kind 填 hinge）：摆杆写 box（given.length=杆长），悬点/锚点写 box 或 ground（given.position=锚点坐标）。
 - 抛体题：单个 sphere，given.velocity=[vx,vy,0]，可给 given.position 为抛出点。
 - 混合搭建里用户要求"删除/去掉/拿走"某对象：把对象名或类型写进 removals（如 ["小球"]），不要假装它不存在。
-输出纪律：所有数值必须是 JSON 数字（不要字符串、不要带单位）；实体不超过 12 个，无关实体一律不列。
+输出纪律：所有数值必须是 JSON 数字（不要字符串、不要带单位）；实体不超过 16 个，无关实体一律不列。
 示例（斜面题的输出形状，内容以题为准）：
 {"questionType":"斜面下滑","kind":"","goal":"求底端速度","gravity":null,"entities":[{"type":"ramp","name":"斜面","given":{"angleDeg":30,"length":2},"confidence":0.95},{"type":"sphere","name":"小球","given":{"mass":1},"confidence":0.9}],"observations":["底端速度"],"anchorPoints":[],"keyPoints":[],"environment":"不计摩擦","unknowns":[],"uncertain":[],"joint":null,"assumptions":[],"confidence":0.9}
 规则：

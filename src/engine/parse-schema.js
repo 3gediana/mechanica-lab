@@ -103,7 +103,7 @@ export function normalizeParse(raw) {
       errors.push(`attaches ${a.type} ${a.from}→${a.to} 实体索引越界（原始 ${entities.length} 个实体），已丢弃`);
     }
   }
-  const attaches = attList.filter((a) => !a.drop).slice(0, 4);
+  const attaches = attList.filter((a) => !a.drop).slice(0, 6);
   let joint = null;
   if (raw.joint && typeof raw.joint === 'object') {
     const jf = Math.max(0, Number(raw.joint.from) | 0);
@@ -459,7 +459,11 @@ export function planToOverrides(plan) {
         sz: e.given.width ?? bl ?? 0.3,
       };
       o.physics = { mass: e.given.mass ?? 1, friction: e.given.friction ?? 0.4 };
-      o.transform = { pos: [0.6, (o.params.sy / 2) + 0.02, 0], rot: [0, 0, 0] };
+      // 复杂场景（AG-V 前置）：同类型多件沿 x 对称散开，不再全部叠在 [0.6,…] 同一点
+      const boxList = plan.entities.filter((x) => x.type === 'box');
+      const bi = boxList.indexOf(e);
+      const spreadX = boxList.length > 1 ? (bi - (boxList.length - 1) / 2) * 0.9 : 0;
+      o.transform = { pos: [0.6 + spreadX, (o.params.sy / 2) + 0.02, 0], rot: [0, 0, 0] };
       if (e.given.velocity) o.physics.linvel = e.given.velocity;
     } else if (e.type === 'pulley') {
       o.params = { radius: e.given.radius ?? 0.3 };
@@ -475,7 +479,11 @@ export function planToOverrides(plan) {
     } else if (e.type === 'cylinder') {
       o.params = { radius: e.given.radius ?? 0.12, height: e.given.height ?? 0.3 };   // AG-19
       o.physics = { mass: e.given.mass ?? 1 };
-      o.transform = { pos: [0, (o.params.height / 2) + 0.02, 0.8], rot: [0, 0, 0] };
+      // 同类型多圆柱沿 z 散开（复杂场景不叠在同一点）
+      const cylList = plan.entities.filter((x) => x.type === 'cylinder');
+      const ci = cylList.indexOf(e);
+      const spreadZ = cylList.length > 1 ? (ci - (cylList.length - 1) / 2) * 0.8 : 0;
+      o.transform = { pos: [0, (o.params.height / 2) + 0.02, 0.8 + spreadZ], rot: [0, 0, 0] };
     } else if (e.type === 'ground') {
       o.params = { sx: e.given.length ?? 10, sy: 0.1, sz: e.given.width ?? 8 };   // AG-20
       o.transform = { pos: [0, -0.05, 0], rot: [0, 0, 0] };
@@ -537,7 +545,8 @@ export function planToOverrides(plan) {
 }
 
 // 球心位置：高墙在 -x，球心距墙留出半径+间隙，置于坡面近顶端（r = 实际题给/默认球半径）
-function ballOnRamp(rampGeom, r = 0.15) {
+// 导出供 agent-verify 自查复用（同一公式，静核与建场不两张脸）
+export function ballOnRamp(rampGeom, r = 0.15) {
   if (!rampGeom) return [0, 0.5, 0];
   const xl = -rampGeom.base / 2 + r + 0.01;
   const surfLocal = rampGeom.height * (1 - (xl + rampGeom.base / 2) / rampGeom.base);

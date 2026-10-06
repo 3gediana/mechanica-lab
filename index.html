@@ -225,6 +225,13 @@
   .pgrid .u { font-size: 9px; color: var(--faint); font-family: var(--mono); }
   .plist { margin: 6px 0 0; padding-left: 16px; }
   .plist li { font-size: 11px; color: var(--dim); line-height: 1.8; }
+  /* 建场自查行（AG-V）：✗ 红 / ⚠ 琥珀 / ✓ 弱化 */
+  .vrow { display: flex; align-items: baseline; gap: 7px; padding: 3px 0; font-size: 11px; line-height: 1.65; }
+  .vrow .mk { flex: none; width: 12px; text-align: center; }
+  .vrow .tx { min-width: 0; word-break: break-word; }
+  .vrow.v-error { color: var(--danger); }
+  .vrow.v-warn { color: var(--accent); }
+  .vrow.v-ok { color: var(--faint); }
   .pmeta { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 12px; margin-bottom: 10px; }
   .pmeta .k { font-size: 10px; color: var(--faint); }
 
@@ -525,6 +532,14 @@
         <button id="btnApplyParse" class="hot">创建场景实体</button>
         <button id="btnClearParse">清空</button>
       </div>
+    </div>
+    <div class="grp" id="verifyGrp" style="display:none">
+      <div class="grp-h">建场自查 <span id="verifyBadge" class="badge" style="margin-left:auto"></span></div>
+      <div id="verifyBody"></div>
+      <div class="btnrow" style="margin-top:8px">
+        <button id="btnRerunVerify" title="重新执行静态核对、运动探针与理论对照（结束后自动重置到初始态）">重跑自查</button>
+      </div>
+      <div class="hint" style="margin-top:6px">自查三步：静态核对（放置/穿透/连接）→ 自动修复 → 运行探针（卡死/飞出/数值/能量，确定性步进后重置）→ 与题目理论的确定性对照。</div>
     </div>
     <div class="grp" id="assumpGrp" style="display:none">
       <div class="grp-h">假设与修正记录</div>

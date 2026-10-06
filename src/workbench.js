@@ -11,8 +11,9 @@ import { Runtime, FIXED_H, attachRegistry } from './engine/runtime.js';
 import { Viewport } from './engine/viewport.js';
 import { getPreset, PRESETS, PRESET_CAMERA } from './engine/presets.js';
 import { createMaterials } from './materials.js';
-import { normalizeParse, planToOverrides } from './engine/parse-schema.js';
+import { normalizeParse, planToOverrides, ballOnRamp } from './engine/parse-schema.js';
 import { explainRun } from './engine/explain.js';
+import { auditStatic, auditMotion, summarize, rampGeomFromParams } from './engine/agent-verify.js';
 import { renderThumb } from './engine/thumbs.js';
 import { PerfMon } from './perfmon.js';
 import { SoundEngine } from './sound.js';
@@ -648,13 +649,13 @@ function stepOnce() {
   runtime.stepOnce();
   updateSimbarStatic();
 }
-function resetSim() {
+function resetSim(silent = false) {
   mode = 'edit'; paused = false;
   viewport.setGizmoEnabled(true);
   rebuildAll();                    // 全量重建 = 回到文档初始态
   sound.ui('reset');
   updateSimbarStatic();
-  toast('已重置到初始态');
+  if (!silent) toast('已重置到初始态');   // 探针等程序化重置走 silent（AG-V）
 }
 function updateSimbarStatic() {
   const runDis = mode === 'run';   // UI-24：gizmo/框选是编辑态专属，运行态明确禁用
@@ -2806,6 +2807,7 @@ function bindAgentPanel() {
   };
   $('btnParse').onclick = () => parseQuestion();
   $('btnParseText').onclick = () => { if (tryLocalAgentCommand($('agentTextReq').value)) return; parseTextQuestion(); };
+  $('btnRerunVerify').onclick = () => runAgentVerify(false);
   $('agentTextReq').addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) {
       ev.preventDefault();
@@ -3521,6 +3523,8 @@ function applyAgentPlan() {
     rebuildAll();
     endHistoryBatch(wasEmpty ? 'Agent 按解析建场' : `Agent 混合建场（更新 ${batchReused}+新增 ${batchCreated}${batchRemoved ? `+删除 ${batchRemoved}` : ''}）`);
   }
+  // AG-V：建场完成自动自查（静态→修复→探针→理论），报告进 Agent 页签
+  if (agentVerifyCtx && agentVerifyCtx.items.length) runAgentVerify(true);
 }
 
 // 批内删除（Agent 建场历史批次专用）：级联 attach/joint 清理，不 rebuild 不进历史（外层 endHistoryBatch 统一记账）
@@ -3694,6 +3698,266 @@ function applyAgentPlanInner(M, reportCounts) {
   // 不再强制跳检查器页签（UI-48）：操作明细就在本页签，跳走会打断核对；相机自动取景代偿（UI-49）
   $('explainGrp').style.display = 'block';
   viewport.focusScene();
+  // AG-V 自查上下文：本次解析建出的实体/连接快照（探针与静核只对 Agent 建的东西负责，
+  // 用户手动加的对象不进核对范围）；rewrites 在混合复用时取建场后的实际位姿
+  agentVerifyCtx = {
+    plan: agentPlan,
+    kind: agentPlan.kind || '',
+    items: [],
+    attaches: [],
+  };
+  const rampOv = matches.map((m) => m.o).find((o) => o.type === 'ramp');
+  agentVerifyCtx.ramp = rampOv ? { params: rampOv.params } : null;
+  for (const { o, idx, reuseId } of matches) {
+    const id = created[idx];
+    const e = id != null ? getEntity(doc, id) : null;
+    if (!e) continue;
+    agentVerifyCtx.items.push({
+      id: e.id, type: e.type, name: e.name,
+      params: e.params || {}, pos: [...e.transform.pos], rotY: (e.transform.rot || [0, 0, 0])[1] || 0,
+      isDynamic: e.physics.body === 'dynamic',
+      given: agentPlan.entities[idx] ? agentPlan.entities[idx].given : {},
+      planIdx: idx,
+    });
+  }
+  let avSeq = 0;
+  for (const at of (agentPlan.attaches || [])) {
+    if ((agentChanges.find((c) => c.type === 'attach' && c.idx === avSeq) || {}).skipped) { avSeq++; continue; }
+    avSeq++;
+    const ea = getEntity(doc, created[at.from]), eb = getEntity(doc, created[at.to]);
+    if (!ea || !eb) continue;
+    agentVerifyCtx.attaches.push({
+      type: at.type, aName: ea.name, bName: eb.name,
+      aPos: [...ea.transform.pos], bPos: [...eb.transform.pos],
+      length: at.length ?? null, restLength: at.restLength ?? null,
+    });
+  }
+}
+
+// ============ 建场自查（AG-V）：静态核对 → 自动修复 → 运动探针 → 理论对照 ============
+// 用户需求：Agent 要能自己发现自己建的系统与题目的误差、自身的 bug（球没放对位置/卡死等）。
+// 探针=同步确定性步进（rAF 不介入），跑完重置回初始态，不脏文档不进历史（修复走独立批次）。
+let agentVerifyCtx = null;
+let agentVerifyState = null;
+let verifyBusy = false;
+
+function runAgentVerify(auto = true) {
+  if (verifyBusy) return;
+  if (!agentVerifyCtx) { if (!auto) toast('没有可自查的建场记录'); return; }
+  verifyBusy = true;
+  try {
+    runAgentVerifyInner();
+  } finally {
+    verifyBusy = false;
+  }
+}
+
+function runAgentVerifyInner() {
+  const ctx = agentVerifyCtx;
+  // ---- 1. 静态核对：穿透（26 向射线）+ 坡面语义/题给位置/连接（纯函数） ----
+  const penetrations = {};
+  for (const it of ctx.items) penetrations[it.id] = entityPoseBlocked(it.id, it.pos) || 0;
+  let findings = auditStatic({ ...ctx, penetrations });
+  // ---- 2. 自动修复（一轮 ≤6 处）：嵌入抬升 / 坡面重算落点 / 题给位置还原 ----
+  let repaired = 0;
+  const fixables = findings.filter((f) => f.sev === 'error' && f.repair);
+  if (fixables.length) {
+    const fixes = [];
+    for (const f of fixables.slice(0, 6)) {
+      const it = ctx.items.find((x) => x.id === f.id);
+      if (!it) continue;
+      let np = null;
+      // 修复候选位必须过实机网格口径（entityPoseBlocked，与定罪的同一把尺）才落地——
+      // 探针网格/实机网格在斜坡楔体边缘会有分叉，双尺必翻车（complex 场景实测）。
+      // 阶梯到 1.2m 管深嵌（方块嵌斜坡要 >0.5m）；环搜搬家兜底（己身占位不干扰）。
+      const spotOk = (c) => entityPoseBlocked(it.id, c) === 0;
+      if (f.repair === 'lift') {
+        const cands = [0.02, 0.05, 0.1, 0.2, 0.35, 0.5, 0.8, 1.2].map((lift) => [it.pos[0], it.pos[1] + lift, it.pos[2]]);
+        const spot = placementFindSpot(it.type, it.params, it.pos, it.rotY, it.isDynamic);
+        if (spot) cands.push(spot);
+        np = cands.find(spotOk) || null;
+      } else if (f.repair === 'onramp' && ctx.ramp) {
+        np = ballOnRamp(rampGeomFromParams(ctx.ramp.params), it.params.radius ?? 0.15);
+        if (!spotOk(np)) {
+          const cands = [0.02, 0.05, 0.1, 0.2].map((lift) => [np[0], np[1] + lift, np[2]]);
+          np = cands.find(spotOk) || np;
+        }
+      } else if (f.repair === 'restore' && it.given.position) {
+        const gp = [...it.given.position];
+        const cands = [gp, ...[0.02, 0.05, 0.1, 0.2, 0.35, 0.5, 0.8, 1.2].map((lift) => [gp[0], gp[1] + lift, gp[2]])];
+        const spot = placementFindSpot(it.type, it.params, gp, it.rotY, it.isDynamic);
+        if (spot) cands.push(spot);
+        np = cands.find(spotOk) || null;
+      }
+      if (np) fixes.push({ id: it.id, name: it.name, to: np });
+    }
+    if (fixes.length) {
+      beginHistoryBatch();
+      try {
+        for (const fx of fixes) {
+          opUpdateEntity(fx.id, { transform: { pos: fx.to.map((v) => +v.toFixed(3)) } },
+            'Agent 自查修正 ' + fx.name, { rebuild: false, rerender: false });
+          const it = ctx.items.find((x) => x.id === fx.id);
+          if (it) it.pos = [...fx.to];
+        }
+      } finally {
+        rebuildAll();
+        endHistoryBatch(`Agent 自查自动修正 ${fixes.length} 处放置`);
+      }
+      repaired = fixes.length;
+      // 修复后重算静态：修好的不再列（换一条修复注记），没修好的保留原样
+      const pen2 = {};
+      for (const it of ctx.items) pen2[it.id] = entityPoseBlocked(it.id, it.pos) || 0;
+      const reaudit = auditStatic({ ...ctx, penetrations: pen2 });
+      const stillBad = reaudit.filter((f) => f.sev === 'error');
+      findings = [
+        ...reaudit.filter((f) => f.sev !== 'ok'),
+        ...findings.filter((f) => f.sev !== 'error' || !f.repair),
+        stillBad.length
+          ? { sev: 'warn', cat: '静态·修复', item: '自动修复', msg: `尝试自动修正 ${repaired} 处放置，仍有 ${stillBad.length} 处未解决（可手动调整后重跑自查）` }
+          : { sev: 'ok', cat: '静态·修复', item: '自动修复', msg: `已自动修正 ${repaired} 处放置（独立历史条目，Ctrl+Z 可撤销）` },
+      ];
+    }
+  }
+  // ---- 3. 运动探针 + 理论对照（需要动态体才有意义；理论要在重置前算——报告/碰撞数据活在 runtime） ----
+  if (mode !== 'edit') resetSim(true);
+  if (doc.entities.some((e) => e.physics.body === 'dynamic' || e.physics.gravitating)) {
+    const probe = motionProbe();
+    findings.push(...auditMotion(probe));
+    const tf = verifyTheory(probe);
+    if (tf) findings.push(tf);
+    resetSim(true);   // 探针跑完回初始态（在理论提取之后——collisionReports 随重置清空）
+  }
+  agentVerifyState = { findings, summary: summarize(findings), repaired, at: Date.now() };
+  renderAgentVerify();
+  const s = agentVerifyState.summary;
+  toast(s.error ? `自查发现 ${s.error} 处问题（见 Agent 页签）`
+    : s.warn ? `自查通过，${s.warn} 处提醒（见 Agent 页签）` : '自查全部通过');
+}
+
+// 确定性运动探针：同步步进 needT 秒（照抄 runAndExplain 的题型窗口与预采基准），
+// 每 12 步（0.1s）采全体位姿 + 系统动能；解释器主体系列复用 runtime.startRecording。
+function motionProbe() {
+  const hasRamp = doc.entities.some((e) => e.type === 'ramp');
+  const isAstro = doc.entities.some((e) => e.physics.gravitating);
+  const isRotation = doc.kind === 'rotation';
+  const isSpring = doc.entities.some((e) => e.type === 'spring');
+  const isAtwood = doc.entities.some((e) => e.type === 'pulley');
+  const isHinge = doc.entities.some((e) => e.joints && e.joints.some((j) => j.type === 'revolute'));
+  const hasGround = doc.entities.some((e) => e.type === 'ground');
+  const isProjectile = !hasRamp && !isSpring && !isAtwood && !isHinge && !isAstro && hasGround
+    && doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic').length === 1;
+  const isMomentum = !hasRamp && !isAstro && !isRotation && !isSpring && !isAtwood && !isHinge && !isProjectile;
+  const needT = isProjectile ? 2.5 : (isHinge ? 5.5 : (isAtwood ? 1.6 : (isSpring ? 6.5 : (isAstro ? 11 : (isRotation ? 3.5 : (isMomentum ? 2.0 : 4))))));
+  const ball = doc.entities.find((e) => (e.type === 'sphere' || e.type === 'celestial') && e.physics.body === 'dynamic')
+    || doc.entities.find((e) => e.physics.body === 'dynamic');
+  if (isRotation) rotationWithDrift();
+  if (isAstro) { astroWithDrift(); if (!trailsOn) setTrails(true); }
+  if (isMomentum) {
+    const en0 = runtime.energyTotals();
+    if (!momentumBase || momentumBase.epoch !== runtime.epoch) {
+      momentumBase = { epoch: runtime.epoch, KE: en0.ke, E: en0.ke + en0.pe };
+    }
+  }
+  if (ball) runtime.startRecording(ball.id);
+  play();
+  const entities = [];
+  for (const [id] of runtime.binds) {
+    const e = getEntity(doc, id);
+    if (!e || (e.physics.body !== 'dynamic' && !e.physics.gravitating)) continue;
+    entities.push({
+      id, name: e.name,
+      isDynamic: e.physics.body === 'dynamic',
+      gravitating: !!e.physics.gravitating,
+      locked: !!e.locked,
+      v0: e.physics.linvel ? Math.hypot(e.physics.linvel[0], e.physics.linvel[1], e.physics.linvel[2]) : 0,
+    });
+  }
+  const samples = [];
+  const ke = [];
+  const every = 12;
+  const total = Math.ceil(needT * 120);
+  for (let s = 1; s <= total; s++) {
+    runtime.stepOnce();
+    if (s % every === 0) {
+      const states = {};
+      for (const it of entities) {
+        const t = runtime.telemetry(it.id);   // 全字段遥测（telemetryInto 的 out 有形状契约，直接用分配版）
+        if (t) states[it.id] = { p: [...t.pos], v: [...t.vel] };
+      }
+      samples.push({ t: runtime.simT, states });
+      ke.push(runtime.energyTotals().ke);
+    }
+  }
+  const series = runtime.stopRecording();
+  const flags = { isAstro, isRotation, isHinge, isAtwood };
+  return { samples, ke, entities, sceneFlags: { hasGround }, series, flags };
+}
+
+function verifyTheory({ series, flags }) {
+  if (!series || series.length < 5) return null;
+  const r = explainRun(agentVerifyCtx.plan, doc, series, runtime.collisionReports,
+    flags.isAstro ? astroWithDrift() : null,
+    flags.isRotation ? rotationWithDrift() : null,
+    flags.isAtwood ? atwoodInfo() : null);
+  if (!r) return null;
+  if (!r.supported) {
+    return { sev: 'ok', cat: '理论对照', item: '题型', msg: `${r.reason || '该题型暂无确定性解释器'}（已做运动健全性检查）` };
+  }
+  if (r.pass === false) {
+    // 「测不出偏差」（errPct=null，如球被挡没走完测量段）≠「与理论不符」——前者提醒后者定罪
+    if (r.errPct == null) {
+      return { sev: 'warn', cat: '理论对照', item: agentVerifyCtx.plan.questionType,
+        msg: '无法完成理论对照（预期运动段未走完或测量量缺失），若演示符合题意可忽略' };
+    }
+    return { sev: 'error', cat: '理论对照', item: agentVerifyCtx.plan.questionType,
+      msg: `与题目理论不符（偏差 ${r.errPct.toFixed(1)}%）——建场可能与题意有出入` };
+  }
+  if (r.pass === true) {
+    return { sev: 'ok', cat: '理论对照', item: agentVerifyCtx.plan.questionType,
+      msg: `实测与理论吻合（偏差 ${r.errPct != null ? r.errPct.toFixed(2) + '%' : '—'}）` };
+  }
+  return { sev: 'ok', cat: '理论对照', item: agentVerifyCtx.plan.questionType,
+    msg: (r.summary || '解释器已运行').slice(0, 90) };
+}
+
+function renderAgentVerify() {
+  const grp = $('verifyGrp'), body = $('verifyBody'), badge = $('verifyBadge');
+  if (!grp || !agentVerifyState) return;
+  const { findings, summary } = agentVerifyState;
+  grp.style.display = 'block';
+  badge.textContent = `${summary.ok}✓ ${summary.warn}⚠ ${summary.error}✗`;
+  badge.className = 'badge ' + (summary.error ? 'given' : summary.warn ? 'given' : '');
+  body.innerHTML = '';
+  const notable = findings.filter((f) => f.sev !== 'ok');
+  const oks = findings.filter((f) => f.sev === 'ok');
+  const row = (f) => {
+    const el = document.createElement('div');
+    el.className = 'vrow v-' + f.sev;
+    const mark = f.sev === 'error' ? '✗' : f.sev === 'warn' ? '⚠' : '✓';
+    el.innerHTML = `<span class="mk"></span><span class="tx"></span>`;
+    el.querySelector('.mk').textContent = mark;
+    el.querySelector('.tx').textContent = `[${f.cat}] ${f.msg}`;
+    return el;
+  };
+  for (const f of notable) body.appendChild(row(f));
+  if (oks.length) {
+    body.appendChild(row(oks[0]));
+    if (oks.length > 1) {
+      const more = document.createElement('div');
+      more.className = 'vrow v-ok';
+      more.innerHTML = '<span class="mk"></span><span class="tx"></span>';
+      more.querySelector('.mk').textContent = '✓';
+      more.querySelector('.tx').textContent = `其余 ${oks.length - 1} 项正常`;
+      body.appendChild(more);
+    }
+  }
+  if (!findings.length) {
+    const el = document.createElement('div');
+    el.className = 'hint';
+    el.textContent = '本次建场没有可核对的 Agent 实体（全部被拒绝或复用未变）。';
+    body.appendChild(el);
+  }
 }
 
 function resetAgentPanel() {
@@ -3707,12 +3971,15 @@ function resetAgentPanel() {
   agentCorrections = [];
   agentChanges = [];
   agentExplain = null;
+  agentVerifyCtx = null;
+  agentVerifyState = null;
   $('dropZone').style.display = 'block';
   $('camWrap').style.display = 'none';
   $('imgPrevWrap').style.display = 'none';
   $('parseStatusGrp').style.display = 'none';
   $('parseResultGrp').style.display = 'none';
   $('explainGrp').style.display = 'none';
+  $('verifyGrp').style.display = 'none';
   setAgentStage('idle', '未开始：上传/拍照题目图片，或用下方示例数据');
 }
 
@@ -4183,6 +4450,9 @@ window.MECH = {
     text: document.getElementById('scaleReadout') ? document.getElementById('scaleReadout').textContent : '' }),
   ghostState: () => viewport.ghostState(),
   poseBlocked: (id, pos) => entityPoseBlocked(id || selectedId, pos),   // 挪动防穿模探针
+  // AG-V 建场自查通道（p37 断言用）
+  agentVerifyState: () => agentVerifyState,
+  runAgentVerify: () => runAgentVerify(false),
   // 放置防穿模测试探针：已存在实体按其 type/params/位姿重建假想体，返回当前穿透深度（0=不嵌）
 
   sensorState: (id) => runtime.sensorReadings.get(id) || null,
