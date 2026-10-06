@@ -163,3 +163,13 @@ export function summarize(findings) {
   for (const f of findings) s[f.sev]++;
   return s;
 }
+
+// AG-V3：自查发现 → 模型修订简报（纯函数）。error 全量携带、warn 截前 maxWarn 条——
+// 修订提示词里 error 是必须消除的靶子，warn 是参考；全量塞会稀释重点还烧 token。
+export function patchBrief(findings, maxWarn = 6) {
+  const errs = findings.filter((f) => f.sev === 'error');
+  const warns = findings.filter((f) => f.sev === 'warn').slice(0, maxWarn);
+  return [...errs, ...warns].map((f) =>
+    `[${f.sev === 'error' ? '错误' : '提醒'}] ${f.cat}·${f.item}: ${f.msg}`
+  );
+}

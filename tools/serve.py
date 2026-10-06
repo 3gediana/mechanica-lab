@@ -168,6 +168,34 @@ def call_step_text(text):
     }])
 
 
+PARSE_PATCH_PROMPT = """你是物理沙盒建场计划修订器。一次建场已执行，沙盒自动自查（放置穿透检测、运动探针、理论对照）发现了问题。请修订计划，使场景符合题目并消除问题。
+
+修订规则：
+- 输出与原计划完全同 schema 的严格 JSON（单行紧凑，无 markdown 代码块、无解释文字）。
+- 只改有必要改的字段：优先调 position/velocity/length/angleDeg 等几何与初条件，其次 mass/friction。
+- 题目明确给出的数值（题给质量/角度/初速等）绝不允许改动——如果自查问题源于题给数值本身，保持原样并在 assumptions 里说明。
+- 沙盒世界约定：y 向上，地面在 y=0，动态体默认贴地静置；初速单位 m/s，位置单位米。
+- 修不好/拿不准的地方保持原样，不要为消除报错而编造数值或删除实体。
+- 常见处方：运动逃逸=初速过大或缺地面（补 ground 实体）；卡滞=嵌入/被夹（挪开或抬升）；穿透=位置错（重算落点）；理论偏差大=布局与题意不符（按题意重摆）。
+
+当前计划 JSON：
+"""
+
+
+def call_step_patch(text, plan, verify):
+    """AG-V3 修订通道：自查报告回喂模型，输出修订后的完整计划（同一 schema）。"""
+    brief = (verify or {}).get("issues") or []
+    payload = (PARSE_PATCH_PROMPT
+               + json.dumps(plan, ensure_ascii=False)
+               + "\n\n自查问题（错误必须消除，提醒酌情参考）：\n"
+               + ("\n".join(brief) if brief else "（无明细，仅汇总计数）")
+               + "\n\n题目文字（可能为空，以它为准校对计划）：\n"
+               + (text or "（无文字，按当前计划与自查问题修订）"))
+    if len(payload) > 12000:
+        payload = payload[:12000]
+    return call_step_messages([{"role": "user", "content": payload}])
+
+
 class H(http.server.SimpleHTTPRequestHandler):
     extensions_map = {**http.server.SimpleHTTPRequestHandler.extensions_map,
                       ".mjs": "text/javascript", ".wasm": "application/wasm"}
@@ -196,7 +224,7 @@ class H(http.server.SimpleHTTPRequestHandler):
         super().do_GET()
 
     def do_POST(self):
-        if self.path not in ("/api/parse-question", "/api/parse-text"):
+        if self.path not in ("/api/parse-question", "/api/parse-text", "/api/parse-patch"):
             self._json(404, {"ok": False, "error": "未知接口"})
             return
         if not load_key():
@@ -221,6 +249,13 @@ class H(http.server.SimpleHTTPRequestHandler):
                     self._json(413, {"ok": False, "error": "文字过长（上限 4000 字符）"})
                     return
                 parse = call_step_text(text)
+            elif self.path == "/api/parse-patch":
+                # AG-V3 修订通道：当前计划 + 自查问题清单回喂模型，出修订计划（同 schema）
+                plan = req.get("plan")
+                if not isinstance(plan, dict) or not plan.get("entities"):
+                    self._json(400, {"ok": False, "error": "修订请求缺少有效计划"})
+                    return
+                parse = call_step_patch(str(req.get("text", "")).strip(), plan, req.get("verify"))
             else:
                 data_url = req.get("image", "")
                 if not data_url.startswith("data:image/") or "," not in data_url:

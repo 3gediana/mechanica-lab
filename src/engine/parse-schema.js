@@ -486,6 +486,8 @@ export function planToOverrides(plan) {
       o.transform = { pos: [0, (o.params.height / 2) + 0.02, 0.8 + spreadZ], rot: [0, 0, 0] };
     } else if (e.type === 'ground') {
       o.params = { sx: e.given.length ?? 10, sy: 0.1, sz: e.given.width ?? 8 };   // AG-20
+      // 显式地面也要有 physics（AG-V3 修：模型修订计划常补 ground，缺 body 下游读 physics.body 炸）
+      o.physics = { body: 'fixed', friction: e.given.friction ?? 0, restitution: e.given.restitution ?? 0.05 };
       o.transform = { pos: [0, -0.05, 0], rot: [0, 0, 0] };
     }
     out.push(o);

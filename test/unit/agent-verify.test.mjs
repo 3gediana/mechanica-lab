@@ -2,7 +2,7 @@
 // 运行：node --test test/unit/agent-verify.test.mjs（零浏览器依赖）
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { auditStatic, auditMotion, summarize, rampGeomFromParams } from '../../src/engine/agent-verify.js';
+import { auditStatic, auditMotion, summarize, rampGeomFromParams, patchBrief } from '../../src/engine/agent-verify.js';
 import { normalizeParse, planToOverrides, ballOnRamp } from '../../src/engine/parse-schema.js';
 
 // ---------- 散开布局：同类型多件不再叠在同一点（复杂场景前置） ----------
@@ -145,4 +145,26 @@ test('auditMotion: 光滑增速（斜面从静止加速）不误报', () => {
 test('summarize 计数', () => {
   assert.deepEqual(summarize([{ sev: 'ok' }, { sev: 'ok' }, { sev: 'warn' }, { sev: 'error' }]),
     { ok: 2, warn: 1, error: 1 });
+});
+
+test('patchBrief: error 全量在前、warn 截断、ok 不进简报', () => {
+  const F = [
+    { sev: 'ok', cat: '理论对照', item: '斜面', msg: '吻合' },
+    { sev: 'warn', cat: 'w1', item: 'i1', msg: 'm1' },
+    { sev: 'error', cat: 'e1', item: 'i2', msg: 'm2' },
+    { sev: 'warn', cat: 'w2', item: 'i3', msg: 'm3' },
+  ];
+  const brief = patchBrief(F);
+  assert.equal(brief.length, 3, brief.join('|'));
+  assert.ok(brief[0].startsWith('[错误] e1·i2'), brief[0]);
+  assert.ok(brief[1].startsWith('[提醒] w1·i1'), brief[1]);
+});
+test('patchBrief: warn 超限截断（maxWarn 默认 6）', () => {
+  const F = [{ sev: 'error', cat: 'e', item: 'i', msg: 'm' }];
+  for (let i = 0; i < 9; i++) F.push({ sev: 'warn', cat: 'w', item: 'i' + i, msg: 'm' + i });
+  assert.equal(patchBrief(F).length, 7);
+  assert.equal(patchBrief(F, 2).length, 3);
+});
+test('patchBrief: 空发现 → 空简报', () => {
+  assert.deepEqual(patchBrief([]), []);
 });

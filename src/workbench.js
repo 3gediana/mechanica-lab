@@ -13,7 +13,7 @@ import { getPreset, PRESETS, PRESET_CAMERA } from './engine/presets.js';
 import { createMaterials } from './materials.js';
 import { normalizeParse, planToOverrides, ballOnRamp } from './engine/parse-schema.js';
 import { explainRun } from './engine/explain.js';
-import { auditStatic, auditMotion, summarize, rampGeomFromParams } from './engine/agent-verify.js';
+import { auditStatic, auditMotion, summarize, rampGeomFromParams, patchBrief } from './engine/agent-verify.js';
 import { renderThumb } from './engine/thumbs.js';
 import { PerfMon } from './perfmon.js';
 import { SoundEngine } from './sound.js';
@@ -731,7 +731,7 @@ function openFile(file) {
 
 // ============ UI 绑定 ============
 function bindUI() {
-  $('btnNew').onclick = () => { applyDoc(createEmptyDoc('未命名场景'), '新建'); $('sceneName').value = doc.name; };
+  $('btnNew').onclick = () => { applyDoc(createEmptyDoc('未命名场景'), '新建'); $('sceneName').value = doc.name; agentPatchRounds = 0; };
   // 预置下拉单源化（MDL-41）：选项由 PRESETS 自动生成，消除 index.html 手写双份漂移；
   // 分组只做归类，未列出的预置自动落「更多」组
   const PRESET_GROUPS = [
@@ -2818,6 +2818,7 @@ function bindAgentPanel() {
   $('btnApplyParse').onclick = () => applyAgentPlan({ vivid: true });
   $('btnClearParse').onclick = () => { resetAgentPanel(); };
   $('btnRunExplain').onclick = () => runAndExplain();
+  $('btnExportCSV').onclick = exportSeriesCSV;
   $('btnVeilRetry').onclick = () => location.reload();
   $('btnCopyExplain').onclick = () => {
     const r = agentExplain;
@@ -2842,10 +2843,10 @@ function bindAgentPanel() {
 
 // ============ Agent 面板当前任务（阶段徽标状态机） ============
 function setAgentStage(stage, text) {
-  const STAGES = { idle: '未开始', uploaded: '图片就绪', parsing: '解析中', parsed: '待确认', building: '建场中', built: '已建场', explaining: '运行解释中', explained: '已解释', error: '出错' };
+  const STAGES = { idle: '未开始', uploaded: '图片就绪', parsing: '解析中', parsed: '待确认', building: '建场中', built: '已建场', patching: '模型修订中', explaining: '运行解释中', explained: '已解释', error: '出错' };
   const el = $('taskStage'), tx = $('taskText');
   if (!el) return;
-  el.innerHTML = (STAGES[stage] || stage) + (stage === 'parsing' || stage === 'explaining' ? '<span class="spinner"></span>' : '');
+  el.innerHTML = (STAGES[stage] || stage) + (stage === 'parsing' || stage === 'explaining' || stage === 'patching' ? '<span class="spinner"></span>' : '');
   el.className = 'badge' + (stage === 'explained' ? ' given' : (stage === 'built' ? ' given' : (stage === 'error' ? '' : (stage === 'parsing' ? ' given' : ''))));
   if (text) tx.textContent = text;
   const opsEl = $('taskOps');
@@ -3026,6 +3027,7 @@ function adoptServerParse(out) {
   agentPlan = n.plan;
   agentPlanApplied = false;
   agentCorrections = [];
+  agentPatchRounds = 0;   // 全新计划：修订轮数清零
   // 低置信警示（AG-39）：模型自报置信度低时明确提示逐项核对，不静默放行
   const warnings = [...n.errors];
   if (n.plan.confidence < 0.35) {
@@ -3178,6 +3180,7 @@ function tryLocalAgentCommand(raw) {
   else if (/^清空/.test(t)) { $('btnNew').click(); }
   else if (/^(新建|新场景)/.test(t)) { $('btnNew').click(); }
   else if (/^(保存|存档)$/.test(t)) { $('btnSave').click(); }
+  else if (/^导出(数据|csv)$/i.test(t)) { exportSeriesCSV(); }
   else if (/^(帮助|快捷键|怎么用)$/.test(t)) { $('helpOverlay').classList.toggle('on'); }
   else return false;
   setParseStatus(`本地指令已执行：${t}（未使用模型）`);
@@ -3238,6 +3241,7 @@ function adoptParse(raw, statusLine) {
   agentPlan = n.plan;
   agentPlanApplied = false;
   agentCorrections = [];
+  agentPatchRounds = 0;   // 全新计划：修订轮数清零
   renderParseResult(n.errors);
   setAgentStage('parsed', '解析完成，检查/修正后创建实体');
   setParseStatus(statusLine || '解析结果已载入，请检查/修正后再创建实体');
@@ -3530,12 +3534,12 @@ async function applyAgentPlan(opts = {}) {
     if (agentVerifyCtx && agentVerifyCtx.items.length) runAgentVerify(true);
     return;
   }
-  await applyAgentPlanVivid(M, wasEmpty);
+  await applyAgentPlanVivid(M, wasEmpty, opts);
 }
 
 // vivid 分批建场（AG-V2）：删除先行，实体逐件落场（每件重建→出生下落立刻可见），
 // 连接件/关节在共享后处理收尾，整批一条历史。节奏自适应：总量压在 ~1s 内（测试 sleep 兼容）。
-async function applyAgentPlanVivid(M, wasEmpty) {
+async function applyAgentPlanVivid(M, wasEmpty, opts = {}) {
   const rejected = new Set(agentChanges.filter((c) => c.skipped)
     .map((c) => c.type + (c.idx != null ? ':' + c.idx : '')));
   beginHistoryBatch();
@@ -3611,7 +3615,9 @@ async function applyAgentPlanVivid(M, wasEmpty) {
     batchReused = nReused; batchCreated = nCreated;
     agentPostPass(M, created, rejected, mixed, nReused, nCreated, matches);
   } finally {
-    endHistoryBatch(wasEmpty ? 'Agent 按解析建场' : `Agent 混合建场（更新 ${batchReused}+新增 ${batchCreated}${batchRemoved ? `+删除 ${batchRemoved}` : ''}）`);
+    endHistoryBatch(opts.patch
+      ? `Agent 模型修订重建（第 ${agentPatchRounds} 轮，自查未过自动触发）`
+      : (wasEmpty ? 'Agent 按解析建场' : `Agent 混合建场（更新 ${batchReused}+新增 ${batchCreated}${batchRemoved ? `+删除 ${batchRemoved}` : ''}）`));
   }
   if (agentVerifyCtx && agentVerifyCtx.items.length) await runAgentVerify(true);
 }
@@ -3836,6 +3842,11 @@ function agentPostPass(M, created, rejected, mixed, nReused, nCreated, matches) 
 let agentVerifyCtx = null;
 let agentVerifyState = null;
 let verifyBusy = false;
+// AG-V3 语义自修正：自查剩余 error 时把报告回喂模型出修订计划→重建→复验。
+// 上限 2 轮防打转；失败（网络/无效输出）后钉死轮数，宁可交给手动也不无限烧 API。
+let agentPatchBusy = false;
+let agentPatchRounds = 0;
+const AGENT_PATCH_MAX = 2;
 
 async function runAgentVerify(auto = true) {
   if (verifyBusy) return;
@@ -3845,6 +3856,65 @@ async function runAgentVerify(auto = true) {
     await runAgentVerifyInner();
   } finally {
     verifyBusy = false;
+    // 修订触发放在 verify 闭周期外：patch 内部会重放完整建场+verify，
+    // 若在 verifyBusy=true 时递归会被自锁挡掉（首版设计踩过）。
+    scheduleAgentPatch();
+  }
+}
+
+function scheduleAgentPatch() {
+  const st = agentVerifyState;
+  if (!st || !st.summary.error) return;
+  if (agentPatchBusy || agentPatchRounds >= AGENT_PATCH_MAX) return;
+  if (!agentPlan || parseBusy || mode !== 'edit') return;
+  maybeAgentPatch().catch(() => { setAgentStage('built', '自查未过；模型修订失败'); agentPatchBusy = false; });
+}
+
+async function maybeAgentPatch() {
+  const st = agentVerifyState;
+  if (!st || agentPatchBusy || agentPatchRounds >= AGENT_PATCH_MAX) return;
+  agentPatchBusy = true;
+  const rnd = agentPatchRounds + 1;
+  const fail = (msg) => {
+    setAgentStage('built', `自查未过；${msg}`);
+    setParseStatus(msg + '（可手动调整后重跑自查）', true);
+    agentPatchRounds = AGENT_PATCH_MAX;   // 失败即停：不让静默的重试循环烧 key
+  };
+  setAgentStage('patching', `自查未过，模型修订中（第 ${rnd}/${AGENT_PATCH_MAX} 轮）…`);
+  setParseStatus(`自查发现 ${st.summary.error} 处未解决问题，正在请模型修订计划（第 ${rnd}/${AGENT_PATCH_MAX} 轮）…`, false, true);
+  try {
+    let out = await (await fetchParse('/api/parse-patch', {
+      text: ($('agentTextReq') && $('agentTextReq').value.trim()) || '',
+      plan: agentPlan,
+      verify: { summary: st.summary, issues: patchBrief(st.findings) },
+    })).json();
+    if (!out.ok && isRetryableParseError(out.error)) {
+      out = await (await fetchParse('/api/parse-patch', {
+        text: ($('agentTextReq') && $('agentTextReq').value.trim()) || '',
+        plan: agentPlan,
+        verify: { summary: st.summary, issues: patchBrief(st.findings) },
+      })).json();
+    }
+    if (!out.ok || !out.parse) { fail('模型修订失败：' + (out.error || '空响应')); return; }
+    const n = normalizeParse(out.parse);
+    if (!n.ok) { fail('修订计划无效：' + n.errors.join('; ')); return; }
+    agentPlan = n.plan;
+    agentPlanApplied = false;
+    agentPatchRounds = rnd;
+    renderParseResult([`第 ${rnd} 轮模型修订（自查未过自动触发）`]);
+    setParseStatus(`模型已修订计划（第 ${rnd} 轮），重新建场验证…`, false, true);
+    await applyAgentPlan({ vivid: true, patch: true });   // 尾部自带完整复验→可再触发下一轮
+    // 关互斥（AG-72）：上面那句把 parseBusy 置真后没人收尾，重武装 schedule 会被 parseBusy 卡死（实测）
+    setParseStatus(`模型修订第 ${rnd} 轮已重建并复验，结果见自查报告`, false);
+  } catch (e) {
+    fail((e && e.name === 'AbortError' ? '模型修订超时' : '模型修订请求失败')
+      + (e && e.message ? '：' + String(e.message).slice(0, 120) : ''));
+  } finally {
+    agentPatchBusy = false;
+    // 再武装：本轮重建后的场景若仍有 error，schedule 在这里补触发（V2 finally 时 busy 还挂着
+    // 会被挡掉——不补这条，第 2 轮永远不会来，脏修订计划的封顶路径实测卡死）。轮数上限在
+    // schedule 内判定，天然收敛到 ≤AGENT_PATCH_MAX。
+    scheduleAgentPatch();
   }
 }
 
@@ -3920,6 +3990,7 @@ async function runAgentVerifyInner() {
   if (doc.entities.some((e) => e.physics.body === 'dynamic' || e.physics.gravitating)) {
     setAgentStage('verifying', '自查：运行探针…');
     const probe = await motionProbe();
+    snapshotSeries(probe.series, (probe.entities[0] || {}).name, agentVerifyCtx && agentVerifyCtx.plan.questionType);   // DE-1：探针数据也可导出
     findings.push(...auditMotion(probe));
     const tf = verifyTheory(probe);
     if (tf) findings.push(tf);
@@ -4147,6 +4218,7 @@ async function runAndExplain() {
   if (isMomentum) await new Promise((res) => setTimeout(res, 300));   // 缓冲几步让报告速度稳定
   if (mode === 'run' && !paused) pauseToggle();
   const series = runtime.stopRecording();
+  snapshotSeries(series, ball.name, agentPlan.questionType);   // DE-1：导出数据源快照（重置不丢）
   agentExplain = explainRun(agentPlan, doc, series, runtime.collisionReports,
     isAstro ? astroWithDrift() : null, isRotation ? rotationWithDrift() : null, isAtwood ? atwoodInfo() : null);
   renderExplanation();
@@ -4155,6 +4227,36 @@ async function runAndExplain() {
   btn.disabled = false;
   btn.textContent = '重新运行解释';
   explainBusy = false;
+}
+
+// ============ 数据导出（DE-1）：最近一次运行/自查探针的采样 → CSV ============
+// 解释/探针跑完 runtime 都会重置，recording 随之清空——快照成 lastSeries 才能导出。
+let lastSeries = null;   // { points:[{t,pos,vel,speed,rotz}], entityName, label, at }
+function snapshotSeries(points, entityName, label) {
+  if (!points || !points.length) return;
+  lastSeries = {
+    points: points.map((p) => ({ t: p.t, pos: [...p.pos], vel: [...(p.vel || [0, 0, 0])], speed: p.speed, rotz: p.rotz })),
+    entityName: entityName || '动态体', label: label || '', at: Date.now(),
+  };
+}
+function exportSeriesCSV() {
+  if (!lastSeries || !lastSeries.points.length) {
+    toast('还没有可导出的数据——先「运行并生成解释」或建场自查');
+    return;
+  }
+  const rows = [['t_s', 'x_m', 'y_m', 'z_m', 'vx_mps', 'vy_mps', 'vz_mps', 'speed_mps', 'rotz_rad']];
+  for (const p of lastSeries.points) {
+    rows.push([p.t, p.pos[0], p.pos[1], p.pos[2], p.vel[0], p.vel[1], p.vel[2], p.speed, p.rotz ?? '']);
+  }
+  const csv = '\uFEFF' + rows.map((r) => r.map((v) => (typeof v === 'number' ? +v.toFixed(5) : v)).join(',')).join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `mechanica-${(lastSeries.label || doc.name || 'data').replace(/[\\/:*?"<>|]/g, '')}-`
+    + `${new Date(lastSeries.at).toISOString().slice(0, 19).replace(/[T:]/g, '')}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  toast(`已导出 ${lastSeries.points.length} 行采样（${lastSeries.entityName}·60Hz）`);
 }
 
 function renderAstroExplain(r, box) {
@@ -4557,7 +4659,9 @@ window.MECH = {
   // AG-V 建场自查通道（p37 断言用）
   agentVerifyState: () => agentVerifyState,
   runAgentVerify: () => runAgentVerify(false),
-  agentBusy: () => verifyBusy,   // 自查进行中（建场分批/探针），测试屏障用
+  agentBusy: () => verifyBusy || agentPatchBusy,   // 自查/模型修订进行中（建场分批/探针/回喂），测试屏障用
+  agentPatchState: () => ({ rounds: agentPatchRounds, busy: agentPatchBusy, max: AGENT_PATCH_MAX }),   // AG-V3 修订轮次（测试断言用）
+  lastSeriesInfo: () => lastSeries && { n: lastSeries.points.length, entityName: lastSeries.entityName, label: lastSeries.label },   // DE-1
   // 放置防穿模测试探针：已存在实体按其 type/params/位姿重建假想体，返回当前穿透深度（0=不嵌）
 
   sensorState: (id) => runtime.sensorReadings.get(id) || null,

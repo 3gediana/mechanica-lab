@@ -122,6 +122,7 @@ export const PRESETS = {
           body: 'dynamic', mass: 2, friction: 0, restitution: 0.8,
           linvel: [1.5, 0, 0], angvel: [0, 0, 0],
           linDamping: 0, angDamping: 0, gravityScale: 1,
+          spawnDrop: false,   // 能量守恒是本场景教学主体：出生下落的 4cm 幻影势能会污染 E0 基线（p22 实测 -5.5%）
         },
         render: { material: 'chrome' },
         measured: true,
@@ -135,6 +136,7 @@ export const PRESETS = {
           body: 'dynamic', mass: 1, friction: 0, restitution: 0.8,
           linvel: [0, 0, 0], angvel: [0, 0, 0],
           linDamping: 0, angDamping: 0, gravityScale: 1,
+          spawnDrop: false,   // 能量守恒是本场景教学主体：出生下落的 4cm 幻影势能会污染 E0 基线（p22 实测 -5.5%）
         },
         render: { material: 'brass' },
         measured: true,

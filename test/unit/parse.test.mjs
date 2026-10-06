@@ -260,3 +260,16 @@ test('removals 缺省=空数组（既有 fixture 不受影响）', () => {
   const n = normalizeParse(FX('incline'));
   assert.deepEqual(n.plan.removals, []);
 });
+
+test('planToOverrides: 显式 ground 实体带 physics（AG-V3 修订计划补地面不再炸）', () => {
+  const raw = FX('incline');
+  raw.entities.push({ type: 'ground', name: '地面', given: { length: 12, width: 8, friction: 0.2 }, confidence: 0.9 });
+  const n = normalizeParse(raw);
+  assert.equal(n.ok, true, n.errors && n.errors.join('; '));
+  const ov = planToOverrides(n.plan);
+  const g = ov.find((o) => o.type === 'ground');
+  assert.ok(g, 'override 缺 ground');
+  assert.equal(g.physics.body, 'fixed');
+  assert.equal(g.physics.friction, 0.2);
+  assert.equal(g.params.sx, 12);
+});

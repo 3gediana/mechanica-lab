@@ -251,6 +251,23 @@
 
 **测试**：p38-spawnlife 10 断言（出生悬高/入稳/doc 不污染、绳 8 段+×1.03 松弛+verlet 垂弧+中段运动、弹簧线圈几何）；p36 F 段等自查落地条件化；p26 加 agentBusy 屏障（MECH.agentBusy 暴露）。样张：agv2-rope-swing.png（挂重摆动）、agv2-spring-coil.png（线圈）。
 
+## 语义自修正闭环 + 数据导出（AG-V3 + DE-1，自主选题：自查只报不修语义错误=闭环缺口；物理实验数据处理无出口）
+
+**AG-V3 语义自修正**（AG-V 收口：静态几何有自动修复，语义级错误——飞出/卡死/理论偏差——当时只报告不行动）：
+- **触发链**：runAgentVerify 尾部（verify 闭周期外）scheduleAgentPatch → 剩余 error>0 且轮数 <2 → maybeAgentPatch：patchBrief(findings)（error 全量+warn 截 6，纯函数）+当前 plan+题干文字 → POST `/api/parse-patch` → 模型出修订计划（同 schema）→ normalizeParse → renderParseResult 重算 agentChanges → applyAgentPlan(vivid, patch:true) 重建 → 尾部自动完整复验。**轮数上限 2**；失败（网络/无效输出）钉死轮数不再重试——宁可交手动不无限烧 key；新解析/新建场景清零。
+- **两个实测抓出来的坑**：① **verifyBusy 自锁**——patch 若在 verify 的 try 内触发，重建尾部 await runAgentVerify 会被外层 verifyBusy 挡成空转；schedule 必须放 finally。② **重武装缺失+parseBusy 卡死**——第 2 轮的 schedule 发生在 V2 的 finally（agentPatchBusy 还挂着被挡），mustAgentPatch 收尾补 scheduleAgentPatch()；且 patch 流程里 `setParseStatus(…, busy=true)` 后无收尾调用——**parseBusy 是 setParseStatus 第三参驱动的**（AG-72 互斥），置真没人关=后续 schedule 永远被挡（脏修订计划实测卡死在 1 轮）。两条都在 p39 封顶场景固化。
+- **服务端**：PARSE_PATCH_PROMPT（只改必改字段、题给数值绝不许动、修不好保持原样不编造；常见处方：逃逸=限速/补地面、卡滞=挪开、理论偏差=按题意重摆）+ call_step_patch（payload 截 12k）+ `/api/parse-patch` 端点（plan 必须带 entities）。
+- **连带修掉 latent schema bug**：planToOverrides 的 ground 分支漏设 o.physics（显式 ground 实体一贯下游读 physics.body 即炸）——模型修订计划常补地面，首测即触雷。
+
+**DE-1 数据导出**：解释运行与自查探针的 recording 在 reset 时即清——新增 snapshotSeries 快照（两处采集点）+ exportSeriesCSV：t/x/y/z/vx/vy/vz/speed/rotz 九列（BOM+Excel 直开，题型标签+时间戳文件名）；「运行解释」组内「导出数据」按钮 + 本地指令「导出数据」；空数据 toast 引导。
+
+**测试**：单测 +4（patchBrief 3 + ground physics 1）=102/102；p39-agent-patch 13 断言（脏计划检出→修订落地→复验清零→不再触发；修订仍脏→恰好 2 轮封顶不洗白；干净零触发；服务失败自动重试 1 次→钉死轮数→重跑自查不烧 API）；p40-data-export 9 断言（快照重置不丢、CSV 结构/行数/t 单调/速度非零、本地指令同通道、空数据引导）；MECH 通道 +agentPatchState/+lastSeriesInfo，agentBusy 扩为 verifyBusy||agentPatchBusy。
+
+**回归连带揪出两笔上轮遗留**（全量回归 5 失败逐一定性：p0/p33/p38 为并发负载抖动，复跑即绿；下两笔为真）：
+1. **p22 动量预置能量守恒 -5.5%（111f424 上复现，非本轮引入）**：AG-V2 出生下落把静止球 B 抬 4cm，能量曲线 E0 基线把 m·g·h≈0.39J 幻影势能计了进去，落地入稳即成「损耗」——碰撞本身完全弹性（1.5→0.5/2.0 m/s，KE 全等）。修复后 E0=6.6628/E1=6.6625（守恒到千分位）。教训：**出生下落对「以能量基线为教学主体的预置」是污染源**，`spawnDrop:false` 是给策展场景留的诚实开关；另——**给重复文本块打补丁必须区域锚定**（momentum 与 momentum2d 的球 B physics 块逐字相同，首版补丁插错门，页面级 doc 探针才抓到；"复跑变绿"可能是采样时机运气，E0 千分位级稳定才算修好）。
+2. **p19 console 出现 404**：8722 服务器进程还是旧 serve.py（改端点后没重启），verify 出错→patch 回喂→真实 fetch 打到不存在的 /api/parse-patch。教训：**改 serve.py 必须重启 dev server**（python 无热重载）。
+另：run-all 头部补 MECH_BASE 警告——老套件默认 8721、新套件默认 8722，不 export MECH_BASE 一次回归会打到两个树（本轮实测 5 个假失败全是对着别家 worktree 旧代码跑出来的）。
+
 ## 环境与约定（本轮新增）
 
 - 测试套件支持 `MECH_BASE` 环境变量覆盖服务地址（默认 8721 不变）——双 agent 并行开发各用各的服务端口，互不干扰。
