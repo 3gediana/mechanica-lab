@@ -86,19 +86,21 @@ try {
     const b = document.getElementById('btnCons');
     if (b && !b.classList.contains('hot')) b.click();
   });
-  // 两级断言（UI 写入竞态容忍）：宽度读数是 0.15s UI tick 的 CSS 副产物，批负载下 rAF 偶发
-  // 饥饿会拖过等待窗——此时退回验证数据层（astro 分支活跃 + 百分比已组合），教学性质不变。
+  // 两级断言（UI 写入竞态容忍）：能量条已改 transform:scaleX 驱动（WIG-Anim 不动布局属性），
+  // 从 computed transform 的 a 分量反推展开比例；批负载下 rAF 偶发饥饿会拖过等待窗——
+  // 此时退回验证数据层（astro 分支活跃 + 百分比已组合），教学性质不变。
   const energyOk = await page.waitForFunction(() => {
-    const ke = parseFloat(document.getElementById('ebFill').style.width);
-    const pe = parseFloat(document.getElementById('ebFillPE').style.width);
+    const readFrac = (id) => new DOMMatrixReadOnly(getComputedStyle(document.getElementById(id)).transform).a;
+    const ke = readFrac('ebFill');
+    const pe = readFrac('ebFillPE');
     if (ke > 0 && pe > 0) return 'widths';
     const pct = document.getElementById('ebPct').textContent;
     const astro = window.MECH.astroState();
     if (pct.endsWith('%') && pct !== '基准≈0' && astro && astro.driftE != null) return 'data';
     return false;
   }, null, { timeout: 8000 }).then((r) => r.jsonValue()).catch(() => 'timeout');
-  const keW = await page.evaluate(() => document.getElementById('ebFill').style.width);
-  const peW = await page.evaluate(() => document.getElementById('ebFillPE').style.width);
+  const keW = await page.evaluate(`new DOMMatrixReadOnly(getComputedStyle(document.getElementById('ebFill')).transform).a`);
+  const peW = await page.evaluate(`new DOMMatrixReadOnly(getComputedStyle(document.getElementById('ebFillPE')).transform).a`);
   const ebPct = await page.evaluate(() => document.getElementById('ebPct').textContent);
   if (energyOk !== 'widths' && energyOk !== 'data') {
     const diag = await page.evaluate(() => ({

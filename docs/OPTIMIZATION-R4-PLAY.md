@@ -205,6 +205,31 @@
 残留会滚雪球（w1 A4 实测 ±1e7）。w1 A4c 对照组改右上净空拖拽（向下拖压进地板=新语义正确拦截）。
 回归：run-all 38 套 ALL GREEN + 单测 78/78；p35 扩至 11 断言。
 
+## UI 第二轮精致化 + Agent 能力扩展（skill 方法论驱动，用户「还是太丑/太有AI味」+「全部优化 Agent 能力」）
+
+**方法**：装 Vercel 官方 `web-interface-guidelines` skill（本地快照 `~/.agents/skills/web-interface-guidelines`，156 条 MUST/SHOULD/NEVER）+ 既有 `design-taste-frontend`（taste-skill，其 9/11/14 节 AI-tell 清单、形状锁、色彩锁适用工具 UI）。截图审计→逐项修→视觉验收。
+
+**UI 修复清单**（index.html 为主，classic/listen 同步 token）：
+| 项 | 修复 |
+|----|------|
+| 滚动条 | Windows 默认亮灰粗条→8px 深色细条（webkit+FF 双写）——精致感头号杀手 |
+| 层次 | 三档体系：贴边面板无影+顶部内高光 `--hl`；浮层（守恒条/曲线/HUD/toast/帮助）双层投影 `--shadow-float` |
+| 形状锁 | 全站 2px（comp-item 4→2、thumb 3→2、need2 圆角改父 overflow 裁切） |
+| 深色原生控件 | `color-scheme: dark` + `theme-color` + 原生 select 显式底色（Windows 修复） |
+| 缩略图发白 | 浅底 `rgba(255,255,255,.04)`→深底 `rgba(0,0,0,.30)` 衬金属材质 |
+| 对比度 | --dim #82878f→#8f949c（≥4.5:1）、--faint #565b62→#6b7078；数据色令牌化 --pe/--ke |
+| a11y | toast `aria-live`+role、errbar role=alert、parseStatus aria-live、删除钮 role=button+aria-label、焦点环加强(offset 2px)、sceneName focus 不再吞 outline、reduced-motion 全局冻结、touch-action、overscroll-contain |
+| 主操作 | simbar「运行」安静填底（accent 8% 底+1px 描边），一眼可辨 |
+| 能量条 | width/left 动画→transform scaleX+translateX（合成器路径，WIG-Anim） |
+| 加载幕 | 静态细线→琥珀段往复进度（reduced-motion 下自动冻结） |
+| 帮助浮层 | 快捷键列 kbd 片块化；新增 Ctrl+Enter 条目 |
+| 杂项 | 「✈ 飞到观察点」去 emoji（全站零 emoji）；listen.html 字体栈漂移修复 |
+
+**Agent 能力扩展**：
+1. **本地快速指令通道（AG-L1，workbench `tryLocalAgentCommand`）**：日常操控零 API 费零等待——运行/暂停/继续/重置/单步、慢放/原速/N倍速、显示|隐藏|裸名翻转 9 种叠加层（分解联动受力）、全局/顶/正/侧视角、聚焦X、删除选中/删除X/清空（走 undo 栈）、新建/保存/帮助。复合句（含逗号/「再/然后」）与「解释」类自动回落模型通道；未命中原路进 step-5-preview。入口=文字框按钮+Ctrl+Enter。
+2. **removals 删除指令全链路（AG-R1）**：parse-schema 接受 `removals:[名称|{target}]`（去重≤6）→ 变更预览勾选项（含「无匹配将跳过」态）→ 建场批内先删后建（防「换成X」误删新建体；级联 attach/joint 清理 `removeInBatch`，不走 opRemoveEntity 避免嵌套历史批次）→ 历史条目含删除计数。服务端 PARSE_PROMPT 同步 schema+规则。
+3. 测试：单测 +3（removals 归一/截断/缺省）=81/81；新 `p36-agent-cmds.mjs` 21 断言（出网保险丝 route abort 保证零 API 依赖；能量条断言随 transform 化同步改 DOMMatrixReadOnly 读法）。
+
 ## 环境与约定（本轮新增）
 
 - 测试套件支持 `MECH_BASE` 环境变量覆盖服务地址（默认 8721 不变）——双 agent 并行开发各用各的服务端口，互不干扰。

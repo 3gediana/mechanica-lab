@@ -123,6 +123,14 @@ export function normalizeParse(raw) {
     }
   }
 
+  // 删除指令（AG-R1）：模型可输出 removals（字符串或 {target}）表示要移除的既有对象。
+  // 这里只做去重/截断/字符串化；「名字包含 or 类型别名」匹配与预览勾选在应用层做。
+  const removals = (Array.isArray(raw.removals) ? raw.removals : [])
+    .map((r) => str(r && typeof r === 'object' ? r.target : r, ''))
+    .filter(Boolean)
+    .filter((r, i, a) => a.indexOf(r) === i)
+    .slice(0, 6);
+
   const plan = {
     fixture: raw._fixture === true,
     questionType: str(raw.questionType, '未知题型'),
@@ -130,6 +138,7 @@ export function normalizeParse(raw) {
     gravity: num(gravityRaw, [0.01, 50]),
     G: num(raw.G, [1e-14, 1e6]),            // 场景引力常数（天体题给；null=保持 doc 现值）
     kind: KIND_MAP[str(raw.kind, '')] || str(raw.kind, ''),   // rotation = 角动量/转台类（需要自动 joint 布局）
+    removals,                                        // 要删除的既有对象（混合搭建「去掉某物」语义）
     attaches,
     joint,
     entities,                                        // 保留 given 供 UI 标来源

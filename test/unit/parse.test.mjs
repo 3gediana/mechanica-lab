@@ -241,3 +241,22 @@ test('atwood 摆球数≠2 回退通用布局而非 0 实体（AG-95）', () => 
   assert.ok(out.length >= 4, `应回退通用布局产出全部实体，实际 ${out.length}`);
   assert.ok(n.plan.uncertain.some((u) => u.includes('阿特伍德')));
 });
+
+// ---------- removals（AG-R1 删除指令：混合搭建「去掉某物」语义） ----------
+test('removals：字符串与 {target} 对象混写，去重并截断（≤6）', () => {
+  const raw = { questionType: '混合', entities: [{ type: 'box', given: { mass: 1 } }],
+    removals: ['小球', { target: '斜面' }, '小球', { target: '' }, 'x'.repeat(100)] };
+  const n = normalizeParse(raw);
+  assert.equal(n.ok, true);
+  assert.deepEqual(n.plan.removals, ['小球', '斜面', 'x'.repeat(80)]);
+});
+test('removals 超过 6 条截断到 6', () => {
+  const raw = { questionType: '混合', entities: [{ type: 'box', given: {} }],
+    removals: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] };
+  const n = normalizeParse(raw);
+  assert.equal(n.plan.removals.length, 6);
+});
+test('removals 缺省=空数组（既有 fixture 不受影响）', () => {
+  const n = normalizeParse(FX('incline'));
+  assert.deepEqual(n.plan.removals, []);
+});

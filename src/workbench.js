@@ -1261,7 +1261,7 @@ function renderOutlineRow(box, e, inGroup = false) {
     row.dataset.id = e.id;
     row.className = 'ol-row' + (selectedIds.includes(e.id) ? ' sel' : '');
     if (inGroup) row.style.borderLeft = '2px solid rgba(217,164,65,.25)';
-    row.innerHTML = `<span class="nm"></span><span class="ty"></span><span class="lock" title="锁定（防误选/防拖动）"></span><span class="del" title="删除">×</span>`;
+    row.innerHTML = `<span class="nm"></span><span class="ty"></span><span class="lock" title="锁定（防误选/防拖动）"></span><span class="del" title="删除" role="button" aria-label="删除该对象">×</span>`;
     const nm = row.querySelector('.nm');
     nm.textContent = e.name;
     nm.ondblclick = () => {
@@ -1525,7 +1525,7 @@ function renderInspector() {
   if (e.type === 'viewpoint') {
     const grpV = grp('观察点');
     const fly = document.createElement('button');
-    fly.textContent = '✈ 飞到观察点';
+    fly.textContent = '飞到观察点';
     fly.style.cssText = 'width:100%;padding:6px;cursor:pointer';
     fly.onclick = () => viewport.flyToPose(e.transform.pos, e.params.target || [0, 0.5, 0]);
     grpV.appendChild(fly);
@@ -1933,9 +1933,10 @@ function updateRotationCons() {
 
 function updateEnergyBar(rate, keFrac = 1) {
   const pct = Math.max(0, Math.min(rate, 1.5)) * 100 / 1.5;   // 条量程 0-150%，66.7% 刻度=100%
-  setSt($('ebFill'), 'width', (pct * keFrac) + '%');           // KE 段（琥珀）
-  setSt($('ebFillPE'), 'width', (pct * (1 - keFrac)) + '%');   // PE 段（蓝，堆叠）
-  setSt($('ebFillPE'), 'left', (pct * keFrac) + '%');
+  // transform 合成器动画（WIG-Anim 不动 width/left）：fill=KE 段压左，fillpe=PE 段平移到 KE 段右侧再展开
+  const keW = pct * keFrac, peW = pct * (1 - keFrac);
+  setSt($('ebFill'), 'transform', `scaleX(${keW / 100})`);
+  setSt($('ebFillPE'), 'transform', `translateX(${keW}%) scaleX(${peW / 100})`);
   setSt($('ebFill'), 'background', rate > 1.02 ? 'var(--text)' : 'var(--accent)');
   setTxt($('ebPct'), (rate * 100).toFixed(1) + '%');
 }
@@ -1963,7 +1964,7 @@ function updateConsbar() {
   const en = runtime.energyTotals();
   if (momentumBase.E < 0.05) {
     // 初始 E≈0（无动态体/全悬浮静止）：保持率无意义，隐藏比例条数字
-    setSt($('ebFill'), 'width', '0%');
+    setSt($('ebFill'), 'transform', 'scaleX(0)');
     setTxt($('ebPct'), '基准≈0');
   } else {
     const keFrac = en.ke + en.pe > 0 ? Math.max(0, Math.min(1, en.ke / (en.ke + en.pe))) : 1;
@@ -2804,7 +2805,13 @@ function bindAgentPanel() {
     fileInput.value = '';
   };
   $('btnParse').onclick = () => parseQuestion();
-  $('btnParseText').onclick = () => parseTextQuestion();
+  $('btnParseText').onclick = () => { if (tryLocalAgentCommand($('agentTextReq').value)) return; parseTextQuestion(); };
+  $('agentTextReq').addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) {
+      ev.preventDefault();
+      if (!tryLocalAgentCommand($('agentTextReq').value)) parseTextQuestion();
+    }
+  });
   $('btnFixtureParse').onclick = () => loadFixtureParse();
   $('btnApplyParse').onclick = () => applyAgentPlan();
   $('btnClearParse').onclick = () => { resetAgentPanel(); };
@@ -3073,6 +3080,112 @@ async function parseQuestion() {
   }
 }
 
+// ============ Agent 本地快速指令（零 API 费的确定性通道，AG-L1） ============
+// 文字要求先过本地动词表：运行/暂停/重置/删除/叠加层/倍速/视角等日常操控不烧钱不等待，
+// 直接执行并 toast 反馈；未命中（搭建类长句）返回 false 落回 step-5-preview 解析通道。
+const LOCAL_TYPE_ALIAS = {
+  球: 'sphere', 小球: 'sphere', 钢球: 'sphere', 斜面: 'ramp', 斜坡: 'ramp', 楔块: 'ramp',
+  方块: 'box', 滑块: 'box', 木块: 'box', 圆柱: 'cylinder', 转台: 'cylinder',
+  地面: 'ground', 地板: 'ground', 滑轮: 'pulley', 天体: 'celestial', 行星: 'celestial', 恒星: 'celestial',
+};
+// 目标名 → 叠加层开关按钮 id（名称单词直接点按=翻转；配 显示/隐藏 动词走 set* 强制态）
+const LOCAL_OVERLAY = {
+  矢量: ['btnVectors', (on) => setVectors(on)], 受力: ['btnForces', (on) => setForces(on)],
+  分解: ['btnDecompose', null], 轨迹: ['btnTrails', (on) => setTrails(on)],
+  曲线: ['btnCurves', (on) => setCurves(on)], 守恒: ['btnCons', (on) => setCons(on)],
+  音效: ['btnSound', (on) => setSound(on)], 震屏: ['btnShake', (on) => setShake(on)],
+  性能: ['btnPerf', (on) => setPerfHud(on)], 帧率: ['btnPerf', (on) => setPerfHud(on)],
+};
+function tryLocalAgentCommand(raw) {
+  const t = String(raw || '').trim().replace(/[。！!？?～~]+$/g, '');
+  if (!t || t.length > 24) return false;               // 长句=搭建要求，交模型
+  // 复合句（多步指令）本地通道做不了「先删再建」这类编排，整句交模型走评审链路
+  if (/[，,；;：:]/.test(t) || /再|然后|并且|接着|同时|之后/.test(t)) return false;
+  const wantsOn = /显示|打开|开启|看看/.test(t);
+  const wantsOff = /隐藏|关闭|关掉/.test(t);
+  // —— 叠加层 ——
+  for (const [nm, [btnId, setFn]] of Object.entries(LOCAL_OVERLAY)) {
+    if (!t.includes(nm)) continue;
+    if (t.includes('解释')) return false;               // 「运行解释」类是模型通道的活
+    if ((wantsOn || wantsOff) && setFn) {
+      setFn(wantsOn);
+      toast(`${wantsOn ? '显示' : '隐藏'}${nm}`);
+    } else {
+      if (btnId === 'btnDecompose' && !forcesOn) setForces(true);   // 分解依赖受力，先联动开启
+      document.getElementById(btnId).click();           // 裸名称=翻转
+    }
+    setParseStatus(`本地指令已执行：${t}（未使用模型）`);
+    return true;
+  }
+  // —— 运行控制 ——
+  if (/^(运行|开始|跑起来|演示)$/.test(t)) { play(); }
+  else if (/^(暂停|停一下|停止)$/.test(t)) { pauseToggle(); }
+  else if (/^继续$/.test(t)) { pauseToggle(); }
+  else if (/^(重置|复位|回到初始)$/.test(t)) { resetSim(); }
+  else if (/^(单步|下一步)$/.test(t)) { stepOnce(); }
+  // —— 倍速 ——
+  else if (/慢(动作|放)|慢速/.test(t)) { setSpeed(0.1); toast('时间倍率 0.1x'); }
+  else if (/原速|正常速度|一倍速|1倍速/.test(t)) { setSpeed(1); toast('时间倍率 1x'); }
+  else if (/快进|加速|最快/.test(t)) { setSpeed(t.includes('最') ? 4 : 2); toast(`时间倍率 ${t.includes('最') ? 4 : 2}x`); }
+  else if (/^(\d+(\.\d+)?)\s*倍速$/.test(t)) {
+    const v = parseFloat(t) || 1;
+    const near = SPEEDS.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a));
+    setSpeed(near); toast(`时间倍率 ${near}x`);
+  }
+  // —— 视角 ——
+  else if (/全局|总览/.test(t)) { $('btnViewReset').click(); }
+  else if (/顶视图?$/.test(t)) { $('btnViewTop').click(); }
+  else if (/正视图?$|前视图?$/.test(t)) { $('btnViewFront').click(); }
+  else if (/侧视图?$/.test(t)) { $('btnViewSide').click(); }
+  else if (/^聚焦/.test(t)) {
+    const kw = t.replace(/^聚焦/, '').trim();
+    if (kw) {
+      const hit = findLocalEntities(kw);
+      if (hit.length) { selectEntity(hit[0].id); $('btnFocus').click(); }
+      else { toast(`没找到「${kw}」`); setParseStatus(`本地指令：没找到名为「${kw}」的对象`, true); return true; }
+    } else if (selectedIds.length) { $('btnFocus').click(); }
+    else { toast('先选中一个对象再聚焦'); setParseStatus('本地指令：当前没有选中对象', true); return true; }
+  }
+  // —— 删除（经 opRemoveEntity 走 undo 栈，可 Ctrl+Z 撤销） ——
+  else if (/^(删除|删掉|移除)/.test(t) || /删掉$/.test(t)) {
+    if (mode !== 'edit') { toast('运行态不可删除，请先重置'); setParseStatus('本地指令：运行态不可删除，请先重置', true); return true; }
+    if (/选中/.test(t)) {
+      if (!selectedIds.length) { toast('先选中要删除的对象'); setParseStatus('本地指令：当前没有选中对象', true); return true; }
+      const ids = [...selectedIds];
+      for (const id of ids) opRemoveEntity(id);
+      return true;                                       // opRemoveEntity 自带 toast
+    }
+    let kw = t.replace(/^(删除|删掉|移除)/, '').replace(/(所有|全部|每个|各个|这个|那个|该)/g, '').replace(/删掉$/, '').trim();
+    // 「删除全部/清空场景」（剥完限定词后无具体目标）才清场；「删除全部小球」仍按类型删
+    if ((!kw && /全部|所有/.test(t)) || kw === '场景') {
+      const all = doc.entities.map((e) => e.id);
+      if (!all.length) { toast('场景已是空的'); return true; }
+      for (const id of all) opRemoveEntity(id);
+      toast(`已清空场景（${all.length} 个，Ctrl+Z 可撤销）`);
+      setParseStatus(`本地指令已执行：清空场景（${all.length} 个对象，可撤销）`);
+      return true;
+    }
+    if (!kw) { toast('要删什么？例如「删除小球」或「删除选中」'); return true; }
+    const hit = findLocalEntities(kw);
+    if (!hit.length) { toast(`没找到「${kw}」`); setParseStatus(`本地指令：没找到名为「${kw}」的对象（类型或名字都不匹配）`, true); return true; }
+    for (const e of hit) opRemoveEntity(e.id);
+    toast(`已删除 ${hit.length} 个「${kw}」（Ctrl+Z 可撤销）`);
+    setParseStatus(`本地指令已执行：删除 ${hit.length} 个「${kw}」（未使用模型，可撤销）`);
+    return true;
+  }
+  else if (/^清空/.test(t)) { $('btnNew').click(); }
+  else if (/^(新建|新场景)/.test(t)) { $('btnNew').click(); }
+  else if (/^(保存|存档)$/.test(t)) { $('btnSave').click(); }
+  else if (/^(帮助|快捷键|怎么用)$/.test(t)) { $('helpOverlay').classList.toggle('on'); }
+  else return false;
+  setParseStatus(`本地指令已执行：${t}（未使用模型）`);
+  return true;
+}
+function findLocalEntities(kw) {
+  const type = LOCAL_TYPE_ALIAS[kw];
+  return doc.entities.filter((e) => e.name.includes(kw) || (type && e.type === type));
+}
+
 // 文字要求通道（混合搭建）：文字 → 真实模型解析 → 与图片通道同一条评审/预览/建场链路
 async function parseTextQuestion() {
   if (parseBusy) return;
@@ -3185,6 +3298,20 @@ function buildChangePreview() {
       type: 'joint', idx: null,
       label: `建立${jn}约束（实体 ${agentPlan.joint.from}→${agentPlan.joint.to}）`,
       detail: '所依赖实体被拒绝时自动跳过', skipped: false,
+    });
+  }
+  // 删除类变更（AG-R1）：removals 在建场前执行——「把小球换成方块」类指令先删后建才不会误删新建体
+  let rSeq = 0;
+  for (const rm of (agentPlan.removals || [])) {
+    const hit = findLocalEntities(rm);
+    agentChanges.push({
+      type: 'remove', idx: rSeq++,
+      targetIds: hit.map((e) => e.id),
+      label: hit.length
+        ? `删除已有 ${hit.length === 1 ? `「${hit[0].name}」` : `${hit.length} 个匹配「${rm}」的对象`}`
+        : `删除「${rm}」（当前场景无匹配）`,
+      detail: hit.length ? '' : '未找到匹配对象，将跳过',
+      skipped: hit.length === 0,
     });
   }
   let aSeq = 0;
@@ -3384,15 +3511,38 @@ function applyAgentPlan() {
   if (mode !== 'edit') { toast('运行态不可建场，请先重置'); return; }
   const M = window.MECH;
   const wasEmpty = doc.entities.length === 0;
-  let batchReused = 0, batchCreated = 0;
+  let batchReused = 0, batchCreated = 0, batchRemoved = 0;
   beginHistoryBatch();
   rebuildSuspend++;   // 批内 N 次 addComponent 不再各自重建 Rapier 世界，收尾一次（PER-5）
   try {
-    applyAgentPlanInner(M, (r, c) => { batchReused = r; batchCreated = c; });
+    applyAgentPlanInner(M, (r, c, rm) => { batchReused = r; batchCreated = c; batchRemoved = rm || 0; });
   } finally {
     rebuildSuspend--;
     rebuildAll();
-    endHistoryBatch(wasEmpty ? 'Agent 按解析建场' : `Agent 混合建场（更新 ${batchReused}+新增 ${batchCreated}）`);
+    endHistoryBatch(wasEmpty ? 'Agent 按解析建场' : `Agent 混合建场（更新 ${batchReused}+新增 ${batchCreated}${batchRemoved ? `+删除 ${batchRemoved}` : ''}）`);
+  }
+}
+
+// 批内删除（Agent 建场历史批次专用）：级联 attach/joint 清理，不 rebuild 不进历史（外层 endHistoryBatch 统一记账）
+function removeInBatch(id) {
+  const removed = new Set([id]);
+  const queue = [id];
+  while (queue.length) {
+    const tid = queue.shift();
+    const e = getEntity(doc, tid);
+    if (!e) continue;
+    docRemove(doc, tid);
+    for (const other of [...doc.entities]) {
+      if (Array.isArray(other.attach) && other.attach.includes(tid) && !removed.has(other.id)) {
+        removed.add(other.id);
+        queue.push(other.id);
+      }
+    }
+  }
+  for (const e of doc.entities) {
+    if (Array.isArray(e.joints) && e.joints.some((j) => removed.has(j.target))) {
+      e.joints = e.joints.filter((j) => !removed.has(j.target));
+    }
   }
 }
 
@@ -3407,6 +3557,26 @@ function applyAgentPlanInner(M, reportCounts) {
   const overrides = planToOverrides(agentPlan);
   const created = [];
   agentOps.length = 0;
+  // 删除类变更先行（AG-R1）：预览阶段解析好的 targetIds 逐一复核存在性（用户可能在评审间隙手动改过场景）。
+  // 批内不走 opRemoveEntity（它自带 commitChange/rebuild 会嵌套历史批次），手动做级联清理，收尾统一 rebuild。
+  let remSeq = 0;
+  let nRemoved = 0;
+  for (const rm of (agentPlan.removals || [])) {
+    const c = agentChanges.find((x) => x.type === 'remove' && x.idx === remSeq);
+    remSeq++;
+    if (!c || c.skipped) continue;
+    for (const id of (c.targetIds || [])) {
+      const e = getEntity(doc, id);
+      if (!e) continue;
+      removeInBatch(id);
+      nRemoved++;
+      agentOps.push({ op: '删除', target: e.name, ok: true });
+    }
+  }
+  if (nRemoved) {
+    selectedIds = selectedIds.filter((x) => getEntity(doc, x));
+    if (!getEntity(doc, selectedId)) selectedId = selectedIds.length ? selectedIds[selectedIds.length - 1] : null;
+  }
   // 混合搭建：场景非空时优先复用同类型+同刚体类型的已有实体（尊重用户已有对象，
   // 不推翻重建；保留用户命名与材质，仅按题目更新几何/位姿/物理参数）
   const matches = matchOverrides(overrides);
@@ -3438,10 +3608,10 @@ function applyAgentPlanInner(M, reportCounts) {
     }
     created.push(id);
   }
-  reportCounts(nReused, nCreated);
-  setAgentStage('building', mixed
-    ? `混合模式：更新 ${nReused} 个已有实体，新增 ${nCreated} 个，其余对象不动`
-    : '按解析计划创建实体…');
+  reportCounts(nReused, nCreated, nRemoved);
+  setAgentStage('building', (mixed
+    ? `混合模式：更新 ${nReused} 个已有实体，新增 ${nCreated} 个`
+    : '按解析计划创建实体…') + (nRemoved ? `，删除 ${nRemoved} 个` : ''));
   if (mixed) setParseStatus(`混合建场：复用已有同类型实体（保留命名/材质，参数按题给更新）+ 新增 ${nCreated} 个${agentPlan.gravityDefault ? '' : '；重力已按题给调整'}`);
   // atwood 类：onPulley 占位符回填真实滑轮 id，并重建使约束收集生效
   if (agentPlan.entities.some((e) => e.type === 'pulley')) {

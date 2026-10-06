@@ -3,21 +3,29 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0b0c0e">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230b0c0e'/%3E%3Ccircle cx='8' cy='8' r='4.2' fill='none' stroke='%23d9a441' stroke-width='1.6'/%3E%3Ccircle cx='8' cy='3.8' r='1.6' fill='%23d9a441'/%3E%3C/svg%3E">
 <title>MECHANICA · 物理教学工作台</title>
 <style>
   :root {
+    color-scheme: dark;   /* WIG-DM：原生控件（select/滚动条）走深色，Windows 上不再闪白 */
     --bg: #0b0c0e;
     --panel: rgba(13, 14, 16, 0.94);
     --panel-solid: #101114;
     --line: rgba(255, 255, 255, 0.09);
     --line-strong: rgba(255, 255, 255, 0.18);
     --text: #e8e6e1;
-    --dim: #82878f;
-    --faint: #565b62;
+    --dim: #8f949c;                       /* 功能性次级文本，深底上 ≥4.5:1（WIG 对比度） */
+    --faint: #6b7078;                     /* 弱化标签：仅用于非关键装饰性标注 */
     --accent: #d9a441;
     --accent-dim: rgba(217, 164, 65, 0.14);
     --danger: #c96a5a;
+    --pe: #7ba7d9;                        /* 数据色：势能段（图表/能量条专用，非 UI 装饰） */
+    --ke: #7dc87d;                        /* 数据色：动能/系统 KE */
+    /* 层次三档（WIG-Design：分层阴影 ambient+direct、色相向背景靠）：
+       面板贴边无影+顶部内高光；浮层（consbar/曲线/HUD/toast/浮窗）加双层投影 */
+    --hl: inset 0 1px 0 rgba(255, 255, 255, 0.045);
+    --shadow-float: 0 10px 28px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.35);
     --mono: "Cascadia Mono", Consolas, ui-monospace, "SF Mono", Menlo, monospace;
     --sans: system-ui, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
     --topbar-h: 46px;
@@ -26,8 +34,18 @@
     --right-w: 292px;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  :focus-visible { outline: 1px solid rgba(217,164,65,.65); outline-offset: 1px; }   /* UI-2 键盘可达 */
-  button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible { outline: 1px solid rgba(217,164,65,.65); outline-offset: 1px; }
+  /* 形状锁（WIG 嵌套圆角子≤父）：全站一律 2px——按钮/输入/面板/缩略图/徽标同族，不再混 3/4px */
+  :focus-visible { outline: 1px solid rgba(230, 183, 92, 0.85); outline-offset: 2px; }   /* UI-2 键盘可达 */
+  button { font-family: var(--sans); touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+  /* 深色窄滚动条（Windows 默认亮灰粗条是精致感头号杀手） */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.13); border-radius: 2px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.22); }
+  * { scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.16) transparent; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  }
   html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); font-family: var(--sans); }
   button { font-family: var(--sans); }
   #stage { position: fixed; inset: 0; }
@@ -38,6 +56,7 @@
     position: fixed; top: 0; left: 0; right: 0; height: var(--topbar-h); z-index: 20;
     display: flex; align-items: center; gap: 14px; padding: 0 14px;
     background: var(--panel); border-bottom: 1px solid var(--line);
+    box-shadow: var(--hl);
     user-select: none;
   }
   #topbar .brand { display: flex; align-items: baseline; gap: 9px; margin-right: 4px; flex: none; }
@@ -49,20 +68,22 @@
     background: transparent; border: 1px solid transparent; color: var(--text);
     font-family: var(--sans); font-size: 12px; padding: 4px 8px; width: 130px; border-radius: 2px;
   }
-  #sceneName:hover, #sceneName:focus { border-color: var(--line-strong); outline: none; }
+  #sceneName:hover { border-color: var(--line-strong); }
+  #sceneName:focus { border-color: rgba(217, 164, 65, 0.55); }
+  #sceneName:focus:not(:focus-visible) { outline: none; }
   .tb-group { display: flex; align-items: stretch; border: 1px solid var(--line); border-radius: 2px; }
   .tb-group button, .tb-group select {
     appearance: none; background: transparent; border: none; border-right: 1px solid var(--line);
     color: var(--dim); font-size: 11px; letter-spacing: .1em; padding: 7px 10px 6px; cursor: pointer;
     white-space: nowrap; transition: color .12s, background .12s;
   }
+  .tb-group select { background-color: var(--panel-solid); font-family: var(--mono); }   /* WIG-DM：原生 select 显式底色（Windows 修复） */
   .tb-group button:last-child, .tb-group select:last-child { border-right: none; }
   .tb-group button:hover, .tb-group select:hover { color: var(--text); background: rgba(255,255,255,.035); }
   .tb-group button:active { transform: translateY(1px); }
   /* 开关热态：琥珀文字+底线指示，不再整块填色（四个叠加开关齐亮时读作一排琥珀色块，视觉过噪） */
   .tb-group button.hot { color: var(--accent); background: transparent; box-shadow: inset 0 -2px 0 rgba(217,164,65,.55); }
-  .tb-group button:disabled, .tb-group select:disabled { color: var(--faint); cursor: default; background: transparent; }
-  .tb-group select { font-family: var(--mono); }
+  .tb-group button:disabled, .tb-group select:disabled { color: var(--faint); cursor: default; }
   .tb-group select option { background: var(--panel-solid); color: var(--text); }
   #topbar .spacer { flex: 1; }
   #linkClassic { font-size: 10px; color: var(--faint); text-decoration: none; letter-spacing: .12em; }
@@ -77,28 +98,28 @@
   /* ============ 左侧：组件目录 + 场景对象 ============ */
   #left {
     position: fixed; top: var(--topbar-h); bottom: var(--simbar-h); left: 0; width: var(--left-w); z-index: 15;
-    background: var(--panel); border-right: 1px solid var(--line);
+    background: var(--panel); border-right: 1px solid var(--line); box-shadow: var(--hl);
     display: flex; flex-direction: column; overflow: hidden;
   }
   .panel-title {
     font-size: 10px; color: var(--faint); letter-spacing: .24em; text-indent: .24em;
     padding: 10px 14px 8px; border-bottom: 1px solid var(--line); user-select: none;
   }
-  #catalogList { flex: 1; overflow-y: auto; padding-bottom: 8px; }
+  #catalogList { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 8px; }
   .cat-head { font-size: 10px; color: var(--dim); letter-spacing: .12em; padding: 10px 14px 4px; user-select: none; }
   /* 组件目录网格（城建游戏式卡片目录）：auto-fill 自适应列数，窄栏 2 列、加宽 3-4 列 */
   .cat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 6px; padding: 4px 12px 10px; }
   .comp-item {
     display: flex; flex-direction: column; align-items: center; gap: 4px;
-    padding: 7px 3px 6px; cursor: pointer; border-radius: 4px;
+    padding: 7px 3px 6px; cursor: pointer; border-radius: 2px; overflow: hidden;
     background: rgba(255,255,255,.02); border: 1px solid transparent;
     transition: background .12s, border-color .12s;
     position: relative;
   }
   .comp-item .thumbbox { position: relative; flex: none; }
   .comp-item .thumb {
-    width: 54px; height: 54px; display: block; border-radius: 3px;
-    background: rgba(255,255,255,.04); border: 1px solid var(--line);
+    width: 54px; height: 54px; display: block; border-radius: 2px;
+    background: rgba(0, 0, 0, 0.30); border: 1px solid var(--line);   /* 深底衬金属/玻璃材质，不再发白 */
     object-fit: contain;
   }
   .comp-item:hover { background: rgba(255,255,255,.055); border-color: rgba(217,164,65,.5); }
@@ -110,11 +131,11 @@
     cursor: pointer; padding: 1px 2px; user-select: none; text-shadow: 0 1px 2px rgba(0,0,0,.6); }
   .comp-item:hover .plus { color: var(--accent); }
   .comp-item .fav:hover { color: var(--accent); }
-  /* 连接/绑定语义徽标：压缩略图右下角小条 */
+  /* 连接/绑定语义徽标：压缩略图右下角小条（父 overflow:hidden 裁齐，形状锁 0px 内角） */
   .comp-item .need2 { position: absolute; right: 0; bottom: 0; font-size: 8px; color: var(--accent);
-    background: rgba(20,22,26,.85); border: 1px solid rgba(217,164,65,.4); border-right: 0; border-bottom: 0;
-    padding: 0 3px; border-radius: 3px 0 3px 0; white-space: nowrap; line-height: 1.5; }
-  #outline { max-height: 34%; overflow-y: auto; border-top: 1px solid var(--line); }
+    background: rgba(16, 17, 20, 0.88); border: 1px solid rgba(217,164,65,.4); border-right: 0; border-bottom: 0;
+    padding: 0 3px; white-space: nowrap; line-height: 1.5; }
+  #outline { max-height: 34%; overflow-y: auto; overscroll-behavior: contain; border-top: 1px solid var(--line); }
   .ol-row {
     display: flex; align-items: center; gap: 6px; padding: 6px 10px 6px 14px; cursor: pointer;
     border-left: 2px solid transparent; font-size: 12px; color: var(--dim);
@@ -123,7 +144,7 @@
   .ol-row.sel { background: var(--accent-dim); border-left-color: var(--accent); color: var(--text); }
   .ol-row .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }   /* UI-8 长名截断 */
   .ol-row .ty { font-family: var(--mono); font-size: 9px; color: var(--faint); letter-spacing: .06em; }
-  .ol-row .del { margin-left: auto; color: var(--faint); font-size: 13px; padding: 0 4px; visibility: hidden; }
+  .ol-row .del { margin-left: auto; color: var(--faint); font-size: 13px; padding: 2px 8px; visibility: hidden; }
   .ol-row:hover .del { visibility: visible; }
   .ol-row .del:hover { color: var(--danger); }
   .ol-empty { padding: 10px 14px; font-size: 11px; color: var(--faint); }
@@ -131,8 +152,8 @@
   /* ============ 右侧：属性检查器 ============ */
   #right {
     position: fixed; top: var(--topbar-h); bottom: var(--simbar-h); right: 0; width: var(--right-w); z-index: 15;
-    background: var(--panel); border-left: 1px solid var(--line);
-    overflow-y: auto; overflow-x: hidden;
+    background: var(--panel); border-left: 1px solid var(--line); box-shadow: var(--hl);
+    overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
   }
   #inspEmpty { padding: 22px 16px; font-size: 11px; color: var(--faint); line-height: 1.9; }
   .grp { border-bottom: 1px solid var(--line); padding: 10px 14px 12px; }
@@ -211,7 +232,7 @@
   #simbar {
     position: fixed; left: 0; right: 0; bottom: 0; height: var(--simbar-h); z-index: 20;
     display: flex; align-items: center; gap: 14px; padding: 0 16px;
-    background: var(--panel); border-top: 1px solid var(--line); user-select: none;
+    background: var(--panel); border-top: 1px solid var(--line); box-shadow: var(--hl); user-select: none;
   }
   #simbar .sgroup { display: flex; align-items: stretch; border: 1px solid var(--line); border-radius: 2px; }
   #simbar button {
@@ -222,14 +243,18 @@
   #simbar button:last-child { border-right: none; }
   #simbar button:hover { color: var(--text); background: rgba(255,255,255,.035); }
   #simbar button:active { transform: translateY(1px); }
-  #simbar button.primary { color: var(--accent); }
+  #simbar button.primary {
+    color: var(--accent); background: rgba(217, 164, 65, 0.08);
+    box-shadow: inset 0 0 0 1px rgba(217, 164, 65, 0.30);   /* 主操作安静填底：一眼可辨但不吵 */
+  }
+  #simbar button.primary:hover { background: rgba(217, 164, 65, 0.13); }
   #simbar button.hot { color: var(--accent); background: transparent; box-shadow: inset 0 -2px 0 rgba(217,164,65,.55); }
   #simbar button:disabled { color: var(--faint); cursor: default; }
   #simbar .ro { font-family: var(--mono); font-size: 11px; color: var(--dim); letter-spacing: .04em; white-space: nowrap; }
   #simbar .ro b { color: var(--accent); font-weight: 400; font-variant-numeric: tabular-nums; }
   #simbar .spacer { flex: 1; }
   #simbar select {
-    appearance: none; background: transparent; border: 1px solid var(--line); border-radius: 2px;
+    appearance: none; background-color: var(--panel-solid); border: 1px solid var(--line); border-radius: 2px;
     color: var(--dim); font-family: var(--mono); font-size: 11px; padding: 5px 8px; cursor: pointer;
   }
   #simbar select option { background: var(--panel-solid); }
@@ -239,6 +264,7 @@
     position: fixed; left: calc(var(--left-w) + 12px); bottom: calc(var(--simbar-h) + 38px);
     z-index: 18; display: none;
     background: var(--panel); border: 1px solid var(--line); border-radius: 2px;
+    box-shadow: var(--shadow-float);
     padding: 8px 16px; font-family: var(--mono);
   }
   #consbar.on { display: block; }
@@ -250,9 +276,13 @@
   #consbar .v { font-size: 12px; color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; }
   #consbar .v.acc { color: var(--accent); }
   #consbar .erow { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
-  #consbar .ebar { flex: 1; height: 6px; background: rgba(255,255,255,.07); position: relative; border-radius: 1px; }
-  #consbar .efill { height: 100%; width: 0%; background: var(--accent); transition: width .15s; }
-  #consbar .efillpe { position: absolute; top: 0; height: 100%; width: 0%; background: #7ba7d9; opacity: .75; transition: width .15s; }
+  /* 能量条用 transform:scaleX 合成器动画（WIG-Anim：不动 width/left 布局属性），
+     PE 段叠加在同一轨道：fill=KE 段（左侧），fillpe=PE 段（KE 段右侧起） */
+  #consbar .ebar { flex: 1; height: 6px; background: rgba(255,255,255,.07); position: relative; border-radius: 2px; overflow: hidden; }
+  #consbar .efill, #consbar .efillpe { position: absolute; top: 0; left: 0; height: 100%; width: 100%;
+    transform-origin: left center; transform: scaleX(0); transition: transform .15s linear; }
+  #consbar .efill { background: var(--accent); }
+  #consbar .efillpe { background: var(--pe); opacity: .75; }
   #consbar .emark { position: absolute; left: 66.67%; top: -2px; width: 1px; height: 10px; background: var(--line-strong); }
   #consbar .erow .k { flex: 0 0 auto; }
   #consbar .erow .v { flex: 0 0 52px; text-align: right; font-family: var(--mono); font-size: 11px; color: var(--accent); }
@@ -269,7 +299,8 @@
     position: fixed; right: calc(var(--right-w) + 12px); top: calc(var(--topbar-h) + 10px); z-index: 14;
     font-family: var(--mono); font-size: 10px; color: var(--dim);
     background: rgba(11,12,14,.78); padding: 9px 11px 8px; border: 1px solid var(--line);
-    border-radius: 2px; user-select: none; pointer-events: none; min-width: 132px;
+    border-radius: 2px; box-shadow: var(--shadow-float);
+    user-select: none; pointer-events: none; min-width: 132px;
   }
   #perfHud .ph-hd { display: flex; align-items: baseline; gap: 5px; padding-bottom: 6px; margin-bottom: 6px;
     border-bottom: 1px solid var(--line); }
@@ -290,7 +321,8 @@
   /* 时间曲线面板 */
   #curvePanel {
     position: fixed; right: calc(var(--right-w) + 10px); bottom: calc(var(--simbar-h) + 10px); z-index: 18;
-    display: none; background: var(--panel); border: 1px solid var(--line); border-radius: 2px; padding: 6px;
+    display: none; background: var(--panel); border: 1px solid var(--line); border-radius: 2px;
+    box-shadow: var(--shadow-float); padding: 6px;
   }
   #curvePanel.on { display: block; }
   #curvePanel { width: 334px; }   /* 锚定画布宽：图例长行（多体场景 7×2 项）不许把面板撑宽到左邻守恒条底下 */
@@ -313,7 +345,11 @@
   }
   #veil.gone { opacity: 0; pointer-events: none; }
   #veil .brand { font-size: 15px; letter-spacing: .42em; text-indent: .42em; color: var(--text); font-weight: 300; }
-  #veil .rule { width: 44px; height: 1px; background: var(--line-strong); }
+  /* 加载进度：44px 轨道上琥珀段往复（reduced-motion 下全局冻结为静态细线） */
+  #veil .rule { width: 44px; height: 1px; background: var(--line-strong); position: relative; overflow: hidden; }
+  #veil .rule::after { content: ""; position: absolute; top: 0; left: 0; width: 16px; height: 100%;
+    background: var(--accent); animation: veilslide 1.1s ease-in-out infinite alternate; }
+  @keyframes veilslide { from { transform: translateX(-4px); } to { transform: translateX(32px); } }
   #veil .status { font-family: var(--mono); font-size: 11px; color: var(--dim); letter-spacing: .08em; }
   #veil .status.err { color: var(--danger); }
   #btnVeilRetry { display: none; appearance: none; background: transparent; border: 1px solid var(--line-strong);
@@ -327,6 +363,7 @@
   #toast {
     position: fixed; top: calc(var(--topbar-h) + 12px); left: 50%; transform: translateX(-50%);
     z-index: 45; background: var(--panel-solid); border: 1px solid var(--line-strong); border-radius: 2px;
+    box-shadow: var(--shadow-float);
     color: var(--text); font-size: 11px; letter-spacing: .08em; padding: 8px 16px;
     opacity: 0; pointer-events: none; transition: opacity .25s;
   }
@@ -342,11 +379,14 @@
     background: rgba(5,6,8,.72); align-items: center; justify-content: center; }
   #helpOverlay.on { display: flex; }
   #helpOverlay .card { background: var(--panel-solid); border: 1px solid var(--line-strong); border-radius: 2px;
+    box-shadow: var(--shadow-float);
     padding: 18px 22px; min-width: 320px; max-width: 460px; }
   #helpOverlay h2 { font-size: 11px; color: var(--accent); letter-spacing: .22em; font-weight: 500; margin-bottom: 12px; }
   #helpOverlay table { border-collapse: collapse; width: 100%; }
   #helpOverlay td { font-size: 11px; color: var(--dim); padding: 3px 0; }
   #helpOverlay td.k { font-family: var(--mono); color: var(--text); padding-right: 18px; white-space: nowrap; }
+  #helpOverlay td.k span { display: inline-block; padding: 1px 7px; border: 1px solid var(--line);
+    border-radius: 2px; background: rgba(255,255,255,.04); font-size: 10px; line-height: 1.6; }
 </style>
 <script type="importmap">
 {
@@ -447,7 +487,7 @@
       </div>
       <input type="file" id="agentFile" accept="image/*" style="display:none">
       <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
-        <select id="fixtureSel" title="选择示例题型" style="appearance:none;background:transparent;border:1px solid var(--line);border-radius:2px;color:var(--dim);font-family:var(--mono);font-size:10px;padding:3px 6px;max-width:150px">
+        <select id="fixtureSel" title="选择示例题型" style="appearance:none;background-color:var(--panel-solid);border:1px solid var(--line);border-radius:2px;color:var(--dim);font-family:var(--mono);font-size:10px;padding:3px 6px;max-width:150px">
           <option value="incline">斜面下滑</option>
           <option value="momentum">一维对撞</option>
           <option value="momentum2d">二维斜碰</option>
@@ -470,7 +510,7 @@
     </div>
     <div class="grp" id="parseStatusGrp" style="display:none">
       <div class="grp-h">解析状态</div>
-      <div id="parseStatus" class="hint" style="margin-top:0"></div>
+      <div id="parseStatus" class="hint" style="margin-top:0" aria-live="polite"></div>
     </div>
     <div class="grp" id="parseResultGrp" style="display:none">
       <div class="grp-h">结构化解析 <span id="parseSrcBadge" class="badge" style="margin-left:auto"></span></div>
@@ -479,7 +519,7 @@
       <div id="parseLists"></div>
       <div id="changePreview" style="display:none;margin-top:10px">
         <div class="k" style="font-size:10px;color:var(--faint);margin-bottom:4px">待执行变更（勾选确认，取消勾选=拒绝该条）</div>
-        <div id="changePreviewList" style="max-height:150px;overflow:auto"></div>
+        <div id="changePreviewList" style="max-height:150px;overflow:auto;overscroll-behavior:contain"></div>
       </div>
       <div class="btnrow" style="margin-top:10px">
         <button id="btnApplyParse" class="hot">创建场景实体</button>
@@ -595,29 +635,30 @@
 
 <div id="scaleReadout">网格 1 格 = 1 m</div>
 
-<div id="toast"></div>
-<div id="errbar"></div>
+<div id="toast" aria-live="polite" role="status"></div>
+<div id="errbar" role="alert"></div>
 
 <div id="helpOverlay" title="按 Esc 关闭">
   <div class="card">
     <h2>快捷键速查</h2>
     <table>
-      <tr><td class="k">空格</td><td>运行 / 暂停</td></tr>
-      <tr><td class="k">Shift+空格</td><td>慢动作 0.1x 互切（记忆原档）</td></tr>
-      <tr><td class="k">- / =</td><td>时间倍率降 / 升档（0.1~4x）</td></tr>
-      <tr><td class="k">.</td><td>单步推进一个固定步长</td></tr>
-      <tr><td class="k">R</td><td>重置到初始态</td></tr>
-      <tr><td class="k">B</td><td>自动子弹时间开关（强碰撞慢放）</td></tr>
-      <tr><td class="k">P（运行态）</td><td>图钉：钉住 / 放开选中体</td></tr>
-      <tr><td class="k">W / E</td><td>移动 / 旋转 gizmo</td></tr>
-      <tr><td class="k">F</td><td>聚焦选中对象</td></tr>
-      <tr><td class="k">Ctrl+Z / Ctrl+Shift+Z</td><td>撤销 / 重做</td></tr>
-      <tr><td class="k">Ctrl+D</td><td>复制选中对象</td></tr>
-      <tr><td class="k">Ctrl+S</td><td>保存场景 JSON</td></tr>
-      <tr><td class="k">Delete</td><td>删除选中对象</td></tr>
-      <tr><td class="k">方向键</td><td>微调选中对象位置（Shift 大步）</td></tr>
-      <tr><td class="k">?</td><td>打开 / 关闭本速查</td></tr>
-      <tr><td class="k">Esc</td><td>关闭浮层 / 退出框选</td></tr>
+      <tr><td class="k"><span>空格</span></td><td>运行 / 暂停</td></tr>
+      <tr><td class="k"><span>Shift+空格</span></td><td>慢动作 0.1x 互切（记忆原档）</td></tr>
+      <tr><td class="k"><span>- / =</span></td><td>时间倍率降 / 升档（0.1~4x）</td></tr>
+      <tr><td class="k"><span>.</span></td><td>单步推进一个固定步长</td></tr>
+      <tr><td class="k"><span>R</span></td><td>重置到初始态</td></tr>
+      <tr><td class="k"><span>B</span></td><td>自动子弹时间开关（强碰撞慢放）</td></tr>
+      <tr><td class="k"><span>P</span>（运行态）</td><td>图钉：钉住 / 放开选中体</td></tr>
+      <tr><td class="k"><span>W / E</span></td><td>移动 / 旋转 gizmo</td></tr>
+      <tr><td class="k"><span>F</span></td><td>聚焦选中对象</td></tr>
+      <tr><td class="k"><span>Ctrl+Z / Ctrl+Shift+Z</span></td><td>撤销 / 重做</td></tr>
+      <tr><td class="k"><span>Ctrl+D</span></td><td>复制选中对象</td></tr>
+      <tr><td class="k"><span>Ctrl+S</span></td><td>保存场景 JSON</td></tr>
+      <tr><td class="k"><span>Delete</span></td><td>删除选中对象</td></tr>
+      <tr><td class="k"><span>方向键</span></td><td>微调选中对象位置（Shift 大步）</td></tr>
+      <tr><td class="k"><span>Ctrl+Enter</span></td><td>Agent 文字框：解析输入的要求</td></tr>
+      <tr><td class="k"><span>?</span></td><td>打开 / 关闭本速查</td></tr>
+      <tr><td class="k"><span>Esc</span></td><td>关闭浮层 / 退出框选</td></tr>
     </table>
   </div>
 </div>

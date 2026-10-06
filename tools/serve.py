@@ -19,6 +19,7 @@ PARSE_PROMPT = """你是大学物理题解析器。看图中的物理题，输�
  "kind": "题型类别：斜面/抛体类留空，两球碰撞留空，天体引力填 astro，转台/角动量/转动惯量类填 rotation，定滑轮/阿特伍德/两侧悬挂类填 atwood，弹簧振子/胡克定律类填 spring，铰链/复摆/刚性杆摆类填 hinge",
  "goal": "实验或求解目标",
  "gravity": 数值m/s2 或 null,
+ "removals": ["要从当前场景删除的既有对象名称或类型（用户明确要求删除/去掉/拿走时才给），没有则空数组"],
  "entities": [
    {"type": "ramp|sphere|box|cylinder|ground|celestial",
     "name": "实体名",
@@ -40,6 +41,7 @@ PARSE_PROMPT = """你是大学物理题解析器。看图中的物理题，输�
 - 转台初始角速度写在其 given.angvel = [0, ω, 0]。
 - 复摆/铰链摆（kind 填 hinge）：摆杆写 box（given.length=杆长），悬点/锚点写 box 或 ground（given.position=锚点坐标）。
 - 抛体题：单个 sphere，given.velocity=[vx,vy,0]，可给 given.position 为抛出点。
+- 混合搭建里用户要求"删除/去掉/拿走"某对象：把对象名或类型写进 removals（如 ["小球"]），不要假装它不存在。
 输出纪律：所有数值必须是 JSON 数字（不要字符串、不要带单位）；实体不超过 12 个，无关实体一律不列。
 示例（斜面题的输出形状，内容以题为准）：
 {"questionType":"斜面下滑","kind":"","goal":"求底端速度","gravity":null,"entities":[{"type":"ramp","name":"斜面","given":{"angleDeg":30,"length":2},"confidence":0.95},{"type":"sphere","name":"小球","given":{"mass":1},"confidence":0.9}],"observations":["底端速度"],"anchorPoints":[],"keyPoints":[],"environment":"不计摩擦","unknowns":[],"uncertain":[],"joint":null,"assumptions":[],"confidence":0.9}
