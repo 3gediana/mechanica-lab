@@ -130,6 +130,35 @@ try {
     check('D1 重跑自查刷新报告', at2 > at1, `${at1}→${at2}`);
   });
 
+  // ==== F. 防双建（UX-audit F1）：双击「创建场景实体」不得翻倍实体/连接件 ====
+  await withPage(async (page) => {
+    await page.evaluate(() => document.getElementById('btnNew').click());
+    await page.evaluate(() => document.getElementById('tabAgent').click());
+    await page.evaluate(() => window.MECH.loadFixture('spring'));
+    await page.waitForFunction(() => {
+      const b = document.getElementById('btnApplyParse');
+      return b && !b.disabled && document.getElementById('changePreview').style.display !== 'none';
+    }, null, { timeout: 30000, polling: 300 });
+    await page.dblclick('#btnApplyParse');
+    await page.waitForFunction(() => window.MECH.agentVerifyState() != null && !window.MECH.agentBusy(),
+      null, { timeout: 60000, polling: 300 });
+    await page.waitForTimeout(500);
+    const doc = await page.evaluate(() => {
+      const d = window.MECH.doc();
+      return { n: d.entities.length, springN: d.entities.filter((e) => e.type === 'spring').length };
+    });
+    check('F1 双击建场不翻倍', doc.springN === 1, JSON.stringify(doc));
+    // 三连点同样收敛（in-flight 锁 + 端对去重的双重防线）
+    await page.click('#btnApplyParse');
+    await page.waitForFunction(() => !window.MECH.agentBusy(), null, { timeout: 60000, polling: 300 });
+    await page.waitForTimeout(400);
+    const doc3 = await page.evaluate(() => {
+      const d = window.MECH.doc();
+      return { n: d.entities.length, springN: d.entities.filter((e) => e.type === 'spring').length };
+    });
+    check('F2 三击后弹簧仍 1 根', doc3.springN === 1, JSON.stringify(doc3));
+  });
+
   // ==== E. console 净 ====
   check('E1 无 console 错误', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));
 } finally {

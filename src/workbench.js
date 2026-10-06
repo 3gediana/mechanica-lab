@@ -1062,7 +1062,11 @@ function addCatalogRow(box, c, faved = false) {
     badge.textContent = c.isSensor ? '绑 1 实体' : '需两实体';
     row.querySelector('.thumbbox').appendChild(badge);
   }
-  row.onclick = () => { viewport.hideGhost(); opAddComponent(c.id, {}, { resolvePlacement: true }); };
+  row.onclick = () => {
+    viewport.hideGhost(); opAddComponent(c.id, {}, { resolvePlacement: true });
+    // UX-audit F3：搜索框焦点残留会吃掉 Ctrl+Z（文本撤销抢在场景撤销前）——加件即还焦点
+    if (document.activeElement === $('catalogSearch')) $('catalogSearch').blur();
+  };
   // ghost preview（Round 27 修复：此前 showGhost 从未被调用=死代码）。
   // sticky 语义：hover 选中组件后 ghost 持续跟随鼠标（吸附档位联动），
   // 直到点击放置（hideGhost）或 hover 其他组件替换——移出目录行不消失
@@ -1092,6 +1096,20 @@ function addCatalogRow(box, c, faved = false) {
   box.appendChild(row);
 }
 
+// 目录搜索别名（UX-audit F2 首用视角）：教师口语词汇 → 卡片标签。
+// 「斜面」搜不到叫「斜坡」的卡片=首用者卡死点；双向都收。
+const CATALOG_SEARCH_ALIAS = {
+  斜面: ['斜坡'], 斜坡: ['斜面'], 小球: ['球'], 物块: ['方块'], 块: ['方块'],
+  定滑轮: ['滑轮'], 滑轮: ['定滑轮'], 绳子: ['绳'], 弹簧绳: ['弹簧', '绳'],
+};
+function catalogItemMatches(c, q) {
+  if (c.label.toLowerCase().includes(q) || c.desc.toLowerCase().includes(q)) return true;
+  for (const [term, alts] of Object.entries(CATALOG_SEARCH_ALIAS)) {
+    if (q.includes(term) && alts.some((a) => c.label.toLowerCase().includes(a))) return true;
+  }
+  return false;
+}
+
 function renderCatalog() {
   const box = $('catalogList');
   box.innerHTML = '';
@@ -1114,7 +1132,7 @@ function renderCatalog() {
     let hit = 0;
     for (const cat of registry.catalog()) {
       for (const c of cat.items) {
-        if (c.label.toLowerCase().includes(q) || c.desc.toLowerCase().includes(q)) {
+        if (catalogItemMatches(c, q)) {
           addCatalogRow(g, c, favs.includes(c.id));
           hit++;
         }
@@ -3514,9 +3532,23 @@ function recordCorrection(field, from, to) {
 // 确认建场：全部经 window.MECH 白名单操作（与目录添加/Agent 未来调用同一条路径）。
 // opts.vivid（面板「创建场景实体」按钮）：分批落场+分块探针，用户全程看得到搭建过程（AG-V2）；
 // 默认（MECH.loadParse 等程序通道）：同步一次落场，行为与历史版本一致（测试兼容）。
+let applyAgentBusy = false;   // UX-audit F1：vivid 建场分批 await 期间双击会交错重入（实测双击=双份弹簧）
 async function applyAgentPlan(opts = {}) {
+  // agentPatchBusy 通行：patch 重放链自身单飞（agentPatchBusy 守卫），且它由 verify 的
+  // finally 同步调度——此刻外层建的锁还没走到 finally 释放（微任务竞态实测吞掉 patch 的
+  // apply→verify 不重跑→多烧一轮）。锁只挡用户双击。
+  if (applyAgentBusy && !agentPatchBusy) { toast('正在建场，请等这一批完成'); return; }
   if (!agentPlan) { toast('没有可用的解析结果'); return; }
   if (mode !== 'edit') { toast('运行态不可建场，请先重置'); return; }
+  applyAgentBusy = true;
+  try {
+    await applyAgentPlanGuarded(opts);
+  } finally {
+    applyAgentBusy = false;
+  }
+}
+
+async function applyAgentPlanGuarded(opts = {}) {
   const M = window.MECH;
   const wasEmpty = doc.entities.length === 0;
   if (!opts.vivid) {
@@ -3783,6 +3815,11 @@ function agentPostPass(M, created, rejected, mixed, nReused, nCreated, matches) 
     if (!fromId || !toId) { agentOps.push({ op: '连接 ' + at.type, target: '#' + at.from + ' ' + '#' + at.to, ok: false }); continue; }
     const ea = getEntity(doc, fromId), eb = getEntity(doc, toId);
     if (!ea || !eb) continue;
+    // UX-audit F1：同类型+同端对的连接件已存在则跳过——重复应用同一计划（双击/改勾选重放）
+    // 不再翻倍弹簧/绳（实测双击 btnApplyParse = 2 根弹簧）
+    const dup = doc.entities.find((e) => e.type === at.type && Array.isArray(e.attach) && e.attach.length === 2
+      && ((e.attach[0] === fromId && e.attach[1] === toId) || (e.attach[0] === toId && e.attach[1] === fromId)));
+    if (dup) { agentOps.push({ op: '连接已存在，跳过 ' + at.type, target: ea.name + ' 与 ' + eb.name, ok: true }); continue; }
     const pa = ea.transform.pos, pb = eb.transform.pos;
     const dist = Math.hypot(pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]);
     const params = at.type === 'rope'

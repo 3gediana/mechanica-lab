@@ -268,6 +268,19 @@
 2. **p19 console 出现 404**：8722 服务器进程还是旧 serve.py（改端点后没重启），verify 出错→patch 回喂→真实 fetch 打到不存在的 /api/parse-patch。教训：**改 serve.py 必须重启 dev server**（python 无热重载）。
 另：run-all 头部补 MECH_BASE 警告——老套件默认 8721、新套件默认 8722，不 export MECH_BASE 一次回归会打到两个树（本轮实测 5 个假失败全是对着别家 worktree 旧代码跑出来的）。
 
+## 主动排雷 ux-audit（用户「不想用一个有 bug 的产品」→ systematic-debugging + ux-audit 双 skill 纪律走查）
+
+**方法**：5 线程交互走查（备课主链/手工搭建+撤销删除/预置+运行态竞态/键盘帮助+首用视角/AG-V3 真实模型全链），50 条 Interaction Manifest 带时间戳选择器，截图+console 全程取证；报告落 `tools/ui-test/_audit/REPORT.md`。**self-critique：drafted 5 → kept 3**（2 条是我探针失手非应用行为——取证后复验推翻自己，审计纪律防栽赃）。
+
+**三个真 finding（全部当场修+实证）**：
+1. **F1 (High) 双击「创建场景实体」翻倍连接件**（实测 2 根弹簧）：applyAgentPlan 无重入锁（vivid 分批 await 期间可交错重入）+ agentPlanApplied 置位但入口不查 + agentPostPass 连接件无条件新建。修复：in-flight 锁 applyAgentBusy + 连接件端对去重（同类型+同 attach 对=跳过）。**保留「改勾选再应用」的合法重放**（去重后重放幂等，不做硬禁用）。回归固化进 p37（双击/三击后 springN===1）。**二段坑：锁与 patch 链的微任务竞态**——patch 重放由 verify 的 finally 同步调度，此刻外层建的锁尚未走到 finally 释放，首版锁把 patch 的 apply 静默吞掉（verify 不重跑→补烧一轮，p39 rounds 1→2 实测、全量回归 30s 超时抓现行）。修复：`applyAgentBusy && !agentPatchBusy` 通行（patch 链自身有 agentPatchBusy 单飞）。教训：**给 async 链加锁先画出「谁在谁的 await 里被调度」**——锁放在外层入口，内层被外层 await 的链会撞上未释放的锁。
+2. **F2 (Medium·首用) 目录搜索「斜面」找不到「斜坡」**：教师词汇与卡片标签不一致，搜索无别名。修复：CATALOG_SEARCH_ALIAS 双向别名表 + catalogItemMatches（斜面↔斜坡/小球→球/物块→方块/滑轮↔定滑轮/绳子→绳）。
+3. **F3 (Low·键盘) 搜索框焦点残留吃掉 Ctrl+Z**：点卡片加件后焦点留在输入框，文本撤销抢先。修复：加件即 blur。
+
+**AG-V3 真实模型首次真调（此前只测过桩）**：parse-patch 直调实测——模型修订**语义正确**（补地面承接、题给 30m/s 与 2kg 一字未动、假设写明「题目无地面，按沙盒约定补 y=0 地面」）；UI 全链真实解析（11s/置信 95%）→ 建场 → 自查 0 error → 解释 → CSV 全通，console 零错误。parse-patch 首连 502 系上游瞬时抖动，客户端 isRetryableParseError 自动重试已覆盖（curl 重试即成功）——**不改**。
+
+**Allowlist**：WebGL `GL Driver ... GPU stall due to ReadPixels` 为本机 RTX 5060 驱动噪音（在案），非应用产生。
+
 ## 环境与约定（本轮新增）
 
 - 测试套件支持 `MECH_BASE` 环境变量覆盖服务地址（默认 8721 不变）——双 agent 并行开发各用各的服务端口，互不干扰。
