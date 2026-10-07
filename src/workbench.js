@@ -20,6 +20,13 @@ import { SoundEngine } from './sound.js';
 import { JuiceFX } from './engine/juice.js';
 
 const $ = (id) => document.getElementById(id);
+// 图标钮文案只写 .lab span（直写 textContent 会抹掉内联 svg 图标）
+const setBtnText = (id, txt) => {
+  const b = $(id);
+  if (!b) return;
+  const lab = b.querySelector('.lab');
+  (lab || b).textContent = txt;
+};
 const veil = $('veil'), veilStatus = $('veilStatus'), errbar = $('errbar');
 
 // PL-51 DOM 读数脏检查：textContent 只在文本真变时写（0.15s 节流后仍每帧比较，
@@ -765,10 +772,10 @@ function updateSimbarStatic() {
   $('btnBoxSel').disabled = runDis;
   $('btnSnap').disabled = runDis;
   $('btnPlay').disabled = mode === 'run' && !paused;
-  $('btnPlay').textContent = mode === 'run' && paused ? '继续' : '运行';
+  setBtnText('btnPlay', mode === 'run' && paused ? '继续' : '运行');
   $('btnPlay').classList.toggle('hot', mode === 'run' && paused);
   $('btnPause').disabled = mode !== 'run';
-  $('btnPause').textContent = paused ? '继续' : '暂停';
+  setBtnText('btnPause', paused ? '继续' : '暂停');
   $('btnPause').classList.toggle('hot', mode === 'run' && paused);
   $('btnStep').disabled = false;
   $('btnReset').disabled = false;
@@ -827,6 +834,7 @@ function persistScenes(list) {
 // 当前视口截图 → 160×90 jpeg 缩略图（编辑态才有意义；渲染后调用）
 function snapshotThumb() {
   try {
+    viewport.render();   // WebGL 默认 present 后清背缓冲：先重画一帧再取（同 btnSnapshot 的做法）
     const src = viewport.renderer.domElement;
     const cv = document.createElement('canvas');
     cv.width = 160; cv.height = 90;
@@ -1372,7 +1380,7 @@ function cycleSnap() {
   viewport.setGhostSnapMode(snapMode);   // ghost 跟随联动同一吸附档位
   const btn = $('btnSnap');
   btn.classList.toggle('hot', snapMode !== 'off');
-  btn.textContent = SNAP_LABEL[snapMode];
+  setBtnText('btnSnap', SNAP_LABEL[snapMode]);
   toast(SNAP_LABEL[snapMode] + '（拖动 gizmo 释放时生效）');
 }
 
@@ -1547,8 +1555,9 @@ function addCatalogRow(box, c, faved = false) {
   const img = row.querySelector('.thumb');
   if (url) img.src = url; else img.style.display = 'none';
   const fav = row.querySelector('.fav');
-  fav.textContent = faved ? '已藏' : '收';
-  fav.style.color = faved ? 'var(--accent)' : 'var(--faint)';
+  fav.textContent = faved ? '★' : '☆';   // 未收藏只在悬停显形：裸「收」字读作裁断徽标（视觉门 agent/scene 取证）
+  fav.classList.toggle('on', faved);
+  fav.style.color = faved ? 'var(--accent-hi)' : '';
   fav.onclick = (ev) => { ev.stopPropagation(); toggleFavorite(c.id); };
   row.querySelector('.nm').textContent = c.label;
   // 兼容性提示（Goal 第六章目录条文）：物理行为/放置要求进 tooltip + 两实体类徽标（压缩略图右下角）
@@ -2861,7 +2870,7 @@ function toggleFrameRec() {
   if (runtime.recFrames) {
     runtime.recFrames = false;
     $('btnRec').classList.remove('hot');
-    $('btnRec').textContent = '录制';
+    setBtnText('btnRec', '录制');
     $('btnReplay').disabled = runtime.frames.length < 2;
     toast(`已录制 ${runtime.frames.length} 帧`);
   } else {
@@ -2869,7 +2878,7 @@ function toggleFrameRec() {
     runtime.frames = [];
     runtime.recFrames = true;
     $('btnRec').classList.add('hot');
-    $('btnRec').textContent = '停止录制';
+    setBtnText('btnRec', '停止录制');
     play();
     toast('录制中（最长约 30s）');
   }
@@ -2917,7 +2926,7 @@ function setSound(on) {
   sound.setMuted(!on);
   const btn = $('btnSound');
   btn.classList.toggle('hot', sound.muted === false);
-  btn.textContent = sound.muted ? '静音' : '音效';
+  setBtnText('btnSound', sound.muted ? '静音' : '音效');
   btn.title = sound.muted ? '声音已关——点击开启碰撞/状态音效' : '声音开启中——点击静音（状态会记住）';
 }
 // 碰撞 juice（层 3，PL-20..22）：粒子池 + 震屏 + 升级碰撞环；场景就绪后在 init 里构造
@@ -3841,8 +3850,9 @@ function bindVoiceInput() {
   const stop = (note) => {
     voiceState.on = false;
     try { voiceState.rec && voiceState.rec.stop(); } catch { /* 已停 */ }
-    btn.textContent = '口述';
     btn.classList.remove('hot');
+    btn.classList.remove('listening');
+    setBtnText('btnMic', '口述');
     const bp = $('btnParseText');
     if (bp) bp.disabled = false;
     $('agentTextReq').placeholder = '例：在现有斜面上放一个质量 2 kg 的小球，光滑无初速，从顶端释放…（Ctrl+Enter 直接解析；也可点「口述」用语音输入）';
@@ -3878,8 +3888,9 @@ function bindVoiceInput() {
     try {
       rec.start();
       voiceState.on = true;
-      btn.textContent = '● 口述中…（再点结束）';
+      setBtnText('btnMic', '口述中…（再点结束）');
       btn.classList.add('hot');
+      btn.classList.add('listening');
       $('btnParseText').disabled = true;   // 边听边解析会打架：听写完再解析
       $('agentTextReq').placeholder = '正在聆听…请念题目（识别结果会追加进来）';
       toast('正在聆听——请念题目，说完再点一次「口述中」结束');
@@ -4930,7 +4941,7 @@ async function runAndExplain() {
   explainBusy = true;
   const btn = $('btnRunExplain');
   btn.disabled = true;
-  btn.textContent = '运行并记录中…';
+  setBtnText('btnRunExplain', '运行并记录中…');
   const isMomentum = !hasRamp && !isAstro && !isRotation && !isSpring && !isAtwood && !isHinge && !isProjectile;
   const needT = isProjectile ? 2.5 : (isHinge ? 5.5 : (isAtwood ? 1.6 : (isSpring ? 6.5 : (isAstro ? 11 : (isRotation ? 3.5 : 4)))));
   const u0 = ball.physics.linvel[0];
@@ -4972,7 +4983,7 @@ async function runAndExplain() {
   setAgentStage(agentExplain && agentExplain.supported ? 'explained' : 'built', agentExplain && agentExplain.supported ? '解释已生成' : '暂无该题型解释器');
   $('btnCopyExplain').disabled = !(agentExplain && agentExplain.supported);
   btn.disabled = false;
-  btn.textContent = '重新运行解释';
+  setBtnText('btnRunExplain', '重新运行解释');
   explainBusy = false;
 }
 

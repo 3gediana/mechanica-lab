@@ -345,3 +345,19 @@
 **其余 7 波**：大纲（显隐眼珠/搜索过滤/滚动跟随/约束徽标关系名/计数）、目录（搜索 Enter 放置/参数 title/无结果建议/Esc 清词）、检查器（三轴习惯色/聚焦全选/范围 title/运行态横幅/参数提示字典 17 键/复制聚焦删除操作行/label 点字联动）、视口（双击聚焦/空白双击全景/Home/网格显隐记忆/截图 PNG/运行态抓手光标/hover 手型）、工具栏（帮助 ? 按钮/预置回位可重选/叠加图例 title×4/读数 tooltip×3/动态声音 title）、Agent 面板（解析耗时/置信度色阶/变更全选行/fixture 回显/文字框 ↑↓ 历史）、解释（✓✗ 前缀/复制按钮/CSV 带场景名）。
 
 **台账**：docs/UX-DETAILS-R4.md 逐条 D1-D150（波1 场景管理 29/波2 大纲目录 10/波3 检查器 27/波4 视口 9/波5 全局 16/波6 Agent 18/全局健壮 26/收尾 15）。新测试 p44-inputs-scenes（文字解析桩全链/粘贴/口述降级/库全链/删除确认/排序记忆 12 断言）。
+
+## UI 全面重设计·精密仪器暗色工作台（用户「现在的 UI 实在太丑，一堆按键的堆砌，没有一点工作台的感觉」）
+
+**流程**：视觉样张先行过验收（铁律）——before 样张（`tools/ui-test/_ui-sample/before-*.png`）→ 施工 → after 三视角样张 → documents:visual-judge 独立评审三轮（第 1 轮 after-scene PASS / after-agent FAIL / after-lib FAIL，修复后第 2 轮全 PASS）。
+
+**设计系统（token 化，一处定义全站消费）**：中性阶梯（冷石墨 #0b0c0e→#1a1d23，不发蓝不发棕）；琥珀 #d9a441 唯一强调色（品牌色保留，favicon/皮带纹同源）；形状锁=控件 4px/岛面板 10px/chip·badge 999 药丸；阴影两档（岛 ambient / 浮层双层）。**旧 token 名（--text/--dim/--faint/--panel-solid…）全部原地换值保留**——workbench.js 23 处内联样式引用旧名，零迁移成本。
+
+**布局：浮动岛**——左右面板从「焊死四边」改为离缝 8px 圆角浮动岛（边线+ambient 影），3D 视口四边透气成为主角；顶栏 44px/底栏 48px 轨道。刻意不用 backdrop-filter（WebGL 常驻动画上做模糊是 GPU 坑，5060 驱动本就不稳）。
+
+**图标系统**：Tabler outline（MIT）46 枚 inline sprite（`#i-*` symbol，stroke=2 统一线族）；顶栏/底栏 30+ 文字钮全面图标化（移动/旋转/缩放/正交/网格/框选/文件五钮/传输四钮/叠加六钮/录制回放/音效震屏截图）。文字只留三处状态钮（吸附/音效/口述——测试红线要求 textContent 可断言）+视图组单字 chip（全局/顶/前/侧/聚焦）。**主操作唯一实底**：运行=琥珀实底药丸（传输组其余全 ghost）；`.hot` 切换态=琥珀字+13% 淡底+细描边。
+
+**JS 配套（最小改动）**：`setBtnText` helper——10 处 `btn.textContent=` 直写改写 `.lab` span（直写会抹掉内联 svg；p11/p33/p44 的文案断言原样保住）；`snapshotThumb` 先 `viewport.render()` 再 drawImage（WebGL present 后背缓冲已清，场景库缩略图一直是黑帧——R42 引入即坏，视觉门揪出）；目录收藏角标「收」→ ☆/★（未收藏悬停显形，裸汉字读作裁断徽标）。
+
+**连带打磨**：面板标题加琥珀竖标+场景对象计数并入标题（原重复两行「场景对象」）；搜索框统一图标前缀内衬场；场景库弹层从全内联样式改类系统（圆角 14/卡片 hover 浮起/操作钮 ghost 化）；fixture 链接缩短+dotted 下划线不再三行换行糊（视觉门 fail 项）；toast 药丸化+滑入； 口述热态琥珀呼吸（reduced-motion 全局冻结）。
+
+**回归**：红线冒烟 p0/p11/p33-play/p44 先绿（吸附循环文案/静音精确相等/口述中/场景库全链）；全量 38 套 ALL GREEN（834s）；units 106/106。施工图与红线清单：docs/UI-REDESIGN-PLAN-R4.md。
