@@ -114,10 +114,11 @@ js = (ROOT / "src/workbench.js").read_text(encoding="utf-8")
 used = set(re.findall(r"\$\('([^']+)'\)", js))
 missing = used - html_ids
 if missing: fails.append(f"workbench.js 引用了不存在的 DOM id: {missing}")
-handlers = set(re.findall(r"\$\('([A-Za-z]\w+)'\)\.onclick", js))
+# 按钮存活核验（R43 收紧）：每个 <button> 的 id 必须在 workbench.js 里被引用——
+# 旧版只认 `$('id').onclick =` 字面模式，局部变量赋值（const b = $('id'); b.onclick）会误报
 btns = set(re.findall(r'<button id="([^"]+)"', html))
-no_handler = btns - handlers
-if no_handler: fails.append(f"按钮无 onclick: {no_handler}")
+no_handler = btns - used
+if no_handler: fails.append(f"按钮无 JS 绑定: {no_handler}")
 
 # 5. 契约字段：track-curve.js 必须导出 main.js 用到的 META 字段
 tc = (ROOT / "src/track-curve.js").read_text(encoding="utf-8") if (ROOT / "src/track-curve.js").exists() else ""
@@ -127,10 +128,12 @@ for field in ["releasePoint", "stopper", "segments", "pylonAnchors", "tubeRadius
 for seg in ["platform", "loop"]:
     if seg not in tc: warns.append(f"track-curve.js 未见到段 {seg}")
 
-# 6. em-dash / emoji 红线（UI 文案区）
+# 6. em-dash / emoji 红线（UI 文案区）——中文破折号「——」是正常标点放行，单只 — 仍禁（AI 味分隔符）；
+#    ✓✗⚠ 是 AG-V 自查/解释行的语义状态标记，白名单放行
+_html_no_zh_dash = html.replace("——", "")
 for ch, name in [("\u2014", "em-dash"), ("\u2013", "en-dash")]:
-    if ch in html: fails.append(f"index.html 出现 {name}")
-emoji = re.findall(r"[\U0001F300-\U0001FAFF\u2600-\u27BF]", html)
+    if ch in _html_no_zh_dash: fails.append(f"index.html 出现 {name}")
+emoji = [c for c in re.findall(r"[\U0001F300-\U0001FAFF\u2600-\u27BF]", html) if c not in "✓✗⚠"]
 if emoji: fails.append(f"index.html 出现 emoji: {emoji[:3]}")
 
 # 7. 材质键契约（ENG-10）：registry.MATERIAL_OPTIONS 的每个 key 必须是 materials.js 返回的材质键
