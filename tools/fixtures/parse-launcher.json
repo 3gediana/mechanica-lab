@@ -50,15 +50,15 @@
   "attaches": [
     {
       "type": "spring",
-      "from": 0,
-      "to": 1,
+      "from": 1,
+      "to": 2,
       "stiffness": 20,
       "restLength": 1.2,
-      "damping": 0.2
+      "damping": 0
     }
   ],
   "observations": [
-    "弹射初速（理论 √(k/m)·x≈1.8 m/s）",
+    "弹射初速（理论 √(k/m)·x = √(20/0.5)×0.4 ≈ 2.53 m/s）",
     "弹簧拉伸后的回拉振荡"
   ],
   "assumptions": [
