@@ -9,11 +9,13 @@ const TYPE_MAP = {
   天体: 'celestial', 行星: 'celestial', 恒星: 'celestial', 卫星: 'celestial',
   传送带: 'conveyor', 输送带: 'conveyor',
   // 中文别名兜底（AG-12）：模型偶发无视英文枚举直接输出中文类型，能消化的都收下
-  楔子: 'ramp', 楔块: 'ramp', 斜坡: 'ramp',
-  小球: 'sphere', 质点: 'sphere', 钢球: 'sphere',
+  楔子: 'ramp', 楔块: 'ramp', 斜坡: 'ramp', 坡: 'ramp', 坡道: 'ramp', 斜板: 'ramp',
+  小球: 'sphere', 质点: 'sphere', 钢球: 'sphere', 铁球: 'sphere', 球体: 'sphere',
   滑块: 'box', 物块: 'box', 木块: 'box', 木板: 'box', 细杆: 'box', 摆杆: 'box',
+  砝码: 'box', 重物: 'box', 货物: 'box', 轻杆: 'box', 棒: 'box', 挡板: 'box', 台阶: 'box',
   圆盘: 'cylinder', 转盘: 'cylinder',
   传送带: 'conveyor', 输送带: 'conveyor', 传输带: 'conveyor',
+  桌面: 'ground', 平台: 'ground', 台面: 'ground', 高台: 'ground', 地板: 'ground',
 };
 
 // kind 中文/近义归一（AG-99）：模型偶发输出中文 kind，布局分派全靠英文枚举，不归一直接走通用路径丢关节
@@ -32,8 +34,30 @@ const RANGES = {
   momentOfInertia: [0.001, 1e6], momentInertia: [0.001, 1e6],   // 转台类：模型两种拼写都收
 };
 
+// given 键别名归一（AG-527）：模型偶发输出 mu/μ→friction、v0→velocity、m→mass、theta→angleDeg
+const GIVEN_KEY_ALIAS = {
+  mu: 'friction', 'μ': 'friction', 摩擦系数: 'friction', 摩擦因数: 'friction',
+  v0: 'velocity', 初速度: 'velocity', 初速: 'velocity',
+  m: 'mass', 质量: 'mass',
+  theta: 'angleDeg', angle: 'angleDeg', 角度: 'angleDeg', 倾角: 'angleDeg',
+  len: 'length', 长: 'length', 长度: 'length',
+  h: 'height', 高: 'height', 高度: 'height',
+  w: 'width', 宽: 'width', 宽度: 'width',
+  r: 'radius', 半径: 'radius',
+  L: 'momentOfInertia', I: 'momentOfInertia', 转动惯量: 'momentOfInertia',
+};
+
+// 数值解析（AG-519）：模型偶发输出 "30°"/"≈9.8"/"2.5m" 这类带装饰字符的字符串——
+// 先剥掉单位/比较符号/空白再 Number，仍失败才判 null（范围校验照走，零信任不破）
+function parseLoose(v) {
+  if (typeof v === 'number') return v;
+  if (typeof v !== 'string') return NaN;
+  const s = v.replace(/[°º≈~<>≥≤\s]|m\/s|kg|m$|cm$|kg\/m³|N\/m$|rad|度|米|千克/gi, '');
+  return Number(s);
+}
+
 function num(v, [min, max]) {
-  const n = Number(v);
+  const n = parseLoose(v);
   if (!Number.isFinite(n)) return null;
   if (n < min || n > max) return null;
   return n;
@@ -51,7 +75,9 @@ export function normalizeParse(raw) {
     if (!type) { errors.push(`未知实体类型: ${e.type}（已跳过）`); continue; }
     const given = {};
     const dropped = [];
-    for (const [k, v] of Object.entries(e.given || {})) {
+    for (const [k0, v] of Object.entries(e.given || {})) {
+      // AG-527 given 键别名归一（mu→friction / v0→velocity / m→mass / theta→angleDeg…）
+      const k = GIVEN_KEY_ALIAS[k0] || k0;
       if (k === 'velocity') {
         const arr = Array.isArray(v) ? v.map((x) => Number(x)) : null;
         if (arr && arr.length === 3 && arr.every(Number.isFinite)) given.velocity = arr;
@@ -77,8 +103,10 @@ export function normalizeParse(raw) {
       }
       if (!(k in RANGES)) { dropped.push(k); continue; }   // 未知键丢弃不猜，但让用户看见（AG-9）
       const n = num(v, RANGES[k]);
-      if (n === null) errors.push(`${e.name || type}.${k} 值无效（${v}），已忽略`);
-      else given[k] = n;
+      if (n === null) {
+        const hint = Number.isFinite(parseLoose(v)) ? '（注意单位需为 SI：m/kg/s，cm/g/km·h 请先换算）' : '';
+        errors.push(`${e.name || type}.${k} 值无效（${v}），已忽略${hint}`);
+      } else given[k] = n;
     }
     if (dropped.length) droppedNotes.push(`${e.name || type}：字段 ${dropped.join('/')} 沙盘不支持，已忽略`);
     entities.push({ type, name: String(e.name || type).slice(0, 24), confidence: clamp01(e.confidence), given });

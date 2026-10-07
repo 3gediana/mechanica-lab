@@ -12,24 +12,24 @@
 | 编号 | 位置 | 问题 → 改法 | P | S/M/L |
 |---|---|---|---|---|
 | AG-501 | tools/serve.py:47-48 (PARSE_PROMPT few-shot) | 全 prompt 仅 1 个斜面示例,天体/传送带/弹簧 attach/转台全靠规则长文描述，长尾题型输出形状漂移 → 增补 2~3 个单行 few-shot(带 attaches 的弹簧题、celestial 轨道题、conveyor 题),纯文本改动 | P1 | S |
-| AG-502 | tools/serve.py:19 (kind 枚举) | prompt 只列 astro/rotation/atwood/spring/hinge 五类，未明说「碰撞/动量/平抛/自由落体/传送带 kind 必须留空」,模型偶发自造中文 kind → 补一行负面清单「其余题型 kind 一律留空」 | P1 | S |
-| AG-503 | tools/serve.py:16-64 (PARSE_PROMPT) | 无单位换算规则，题图「30cm/500g/72km/h/2min」可能原样输出后被 RANGES 拒 → 补显式规则「所有数值一律换算 SI(m/kg/s,速度 m/s,角度 deg)」 | P1 | S |
-| AG-504 | tools/serve.py:185 vs 16 | 世界坐标约定(y 向上/地面 y=0/斜面底端在 +x/贴地静置)只写在 PARSE_PATCH_PROMPT,首解析 prompt 没有，position 语义漂移 → 把同一段约定复制进 PARSE_PROMPT | P1 | S |
+| AG-502 ✅B3a | tools/serve.py:19 (kind 枚举) | prompt 只列 astro/rotation/atwood/spring/hinge 五类，未明说「碰撞/动量/平抛/自由落体/传送带 kind 必须留空」,模型偶发自造中文 kind → 补一行负面清单「其余题型 kind 一律留空」 | P1 | S |
+| AG-503 ✅B3a | tools/serve.py:16-64 (PARSE_PROMPT) | 无单位换算规则，题图「30cm/500g/72km/h/2min」可能原样输出后被 RANGES 拒 → 补显式规则「所有数值一律换算 SI(m/kg/s,速度 m/s,角度 deg)」 | P1 | S |
+| AG-504 ✅B3a | tools/serve.py:185 vs 16 | 世界坐标约定(y 向上/地面 y=0/斜面底端在 +x/贴地静置)只写在 PARSE_PATCH_PROMPT,首解析 prompt 没有，position 语义漂移 → 把同一段约定复制进 PARSE_PROMPT | P1 | S |
 | AG-505 | tools/serve.py:55 | 「未给 g 填 null」正确,但题面明示「取 g=10」时模型仍可能输出 null → 补规则「题面明示 g 取值时输出该值，仍禁止把答案数值当 g」 | P2 | S |
 | AG-506 | tools/serve.py:46 (输出纪律) | 「实体不超过 16 个」无超限行为约定，模型静默砍实体 → 补「超限时保留与 observations 直接相关的实体，被舍弃的写进 unknowns」 | P2 | S |
 | AG-507 | tools/serve.py:16-39 (schema 块) | schema 多行缩进+行内中文注释占大量 prompt token,思考型模型响应慢被进一步放大 → 压缩为单行紧凑 schema+要点列表，省 ~30% prompt token | P2 | S |
 | AG-508 | tools/serve.py:134-158 (call_step_messages) | finish_reason=length(思考流+正文超 8192)时静默走提取链失败，用户只见「无法解析」→ 检测 finish_reason,失败文案区分「输出被截断」并自动重试一次 | P1 | M |
 | AG-509 | tools/serve.py:122-127 (temperature) | 解析与修订共用 temperature=0.2,patch 通道要的是确定性重写 → patch 请求单独降 0~0.1,减少修订引入新偏差 | P2 | S |
 | AG-510 | tools/serve.py:171-176 (call_step_text) | 文字通道复用「看图中的物理题」导语，与纯文字输入语义矛盾 → 文字通道换独立导语「根据以下文字描述的物理题…」,schema/规则不变 | P2 | S |
-| AG-511 | tools/serve.py:60 (attaches 说明) | prompt 只教 spring;客户端已支持 rope(attaches.type='rope' 归一)但模型无从知晓 → 补 rope 语义一句(轻绳不可伸长，length=绳长，缺省按端距×1.03) | P1 | S |
-| AG-512 | tools/serve.py:50 (type 词表) | 词表缺「桌面/平台/台面/高台/墙」的表达，模型自造 type 被整实体丢弃 → 补「桌面=ground、墙/挡板=box(fixed=1)」 | P1 | S |
+| AG-511 ✅B3a | tools/serve.py:60 (attaches 说明) | prompt 只教 spring;客户端已支持 rope(attaches.type='rope' 归一)但模型无从知晓 → 补 rope 语义一句(轻绳不可伸长，length=绳长，缺省按端距×1.03) | P1 | S |
+| AG-512 ✅B3a | tools/serve.py:50 (type 词表) | 词表缺「桌面/平台/台面/高台/墙」的表达，模型自造 type 被整实体丢弃 → 补「桌面=ground、墙/挡板=box(fixed=1)」 | P1 | S |
 | AG-513 | tools/serve.py:44 (抛体规则) | 抛体只说 velocity 三分量，未说抛出点默认语义 → 补「抛出点写 given.position(缺省 [0,0.6,0]),客户端自动补地面」 | P3 | S |
 | AG-514 | tools/serve.py:34 (uncertain) | 未引导模型对图片质量自检，低质图静默出低置信计划 → 补「图片模糊或字段读不准时，存疑项写进 uncertain 并降 confidence」 | P2 | S |
 | AG-515 | tools/serve.py:35 (joint schema) | joint 的 axis/limits/anchor 无单位与默认值说明，模型乱填 → 补「axis 单位向量、limits 单位 m、anchor 相对体心，默认 [0.15,1.05]/[0,0,0]」 | P2 | S |
 | AG-516 | tools/serve.py:64 (输出纪律) | 思考模型常在 reasoning 里先起草完整 JSON 再输出，双倍 token+延迟+截断风险 → 补「不要在思考中起草完整 JSON,直接给最终结果」 | P3 | S |
-| AG-517 | src/engine/parse-schema.js:4-17 (TYPE_MAP) | 别名缺口:坡/坡道/斜板→ramp、铁球/球体→sphere、砝码/重物/货物→box、轻杆/棒→box,整实体被丢 → 纯数据扩表 | P1 | S |
-| AG-518 | src/engine/parse-schema.js:28-33 (RANGES) | 范围拒绝只有「值无效」，无单位提示(30 若是 cm、500 若是 g) → 拒绝报错文案带换算建议(「若单位为 cm 请 ÷100」),评审界面可见 | P2 | S |
-| AG-519 | src/engine/parse-schema.js:35-40 (num) | 字符串数值("30°"、"≈9.8"、"6.67e-11")直接 Number 失败被丢 → num() 先剥离单位/比较符号字符再解析,仍失败才报错(解析成功仍过范围，零信任不破) | P1 | S |
+| AG-517 ✅B3a | src/engine/parse-schema.js:4-17 (TYPE_MAP) | 别名缺口:坡/坡道/斜板→ramp、铁球/球体→sphere、砝码/重物/货物→box、轻杆/棒→box,整实体被丢 → 纯数据扩表 | P1 | S |
+| AG-518 ✅B3a | src/engine/parse-schema.js:28-33 (RANGES) | 范围拒绝只有「值无效」，无单位提示(30 若是 cm、500 若是 g) → 拒绝报错文案带换算建议(「若单位为 cm 请 ÷100」),评审界面可见 | P2 | S |
+| AG-519 ✅B3a | src/engine/parse-schema.js:35-40 (num) | 字符串数值("30°"、"≈9.8"、"6.67e-11")直接 Number 失败被丢 → num() 先剥离单位/比较符号字符再解析,仍失败才报错(解析成功仍过范围，零信任不破) | P1 | S |
 | AG-520 | src/engine/parse-schema.js:55-71 (velocity/position) | 向量只查有限性不查量级，\|v\|=5000 或 position=1e6 直进场景炸取景 → velocity/position/angvel 加合理上限(如 \|v\|≤200、\|p\|≤500),超限报错丢弃 | P1 | S |
 | AG-521 | src/engine/parse-schema.js:98-99 (attaches type) | attach type 只认 'rope' 否则一律当 spring,'string'/'绳'/'链' 被静默错挂 → 加 ATTACH_TYPE_MAP 别名归一，未知值报错 | P1 | S |
 | AG-522 | src/engine/parse-schema.js:117-132 (joint) | joint 未查 from===to(attach 有查)，且 axis/anchor/limits 逐项 Number 后可能 NaN 进 plan → 补 from==to 拒绝 + 数组逐项有限性校验，非法回退默认并 errors | P1 | S |
@@ -37,7 +37,7 @@
 | AG-524 | src/engine/parse-schema.js:49-85 (entities 循环) | prompt 限 16 实体但客户端不设上限，模型超限全建 → entities 截断到 16 并 uncertain 提示「超出上限的 N 个已丢弃」 | P2 | S |
 | AG-525 | src/engine/parse-schema.js:84 (name) | name 只截 24 字符不查重，同名实体使 removals/findLocalEntities 匹配歧义 → 重名自动加后缀并 uncertain 说明 | P3 | S |
 | AG-526 | src/engine/parse-schema.js:20-26 (KIND_MAP) | 无「防误判」负清单:模型输出 kind='碰撞'/'动量'/'平抛'/'传送带' 原样保留 → 显式映射为 ''(与 prompt 负清单呼应) | P3 | S |
-| AG-527 | src/engine/parse-schema.js:54-81 (given 键) | 模型偶发输出 mu/μ→friction、v0→velocity、m→mass、theta→angleDeg,全被丢进 droppedNotes → 加 GIVEN_KEY_ALIAS 归一(归一后仍走 RANGES 校验) | P1 | S |
+| AG-527 ✅B3a | src/engine/parse-schema.js:54-81 (given 键) | 模型偶发输出 mu/μ→friction、v0→velocity、m→mass、theta→angleDeg,全被丢进 droppedNotes → 加 GIVEN_KEY_ALIAS 归一(归一后仍走 RANGES 校验) | P1 | S |
 | AG-528 | src/engine/parse-schema.js:28-33,147 | RANGES.mass [0.01,10000] 对 celestial 过窄(真实行星量级被拒),而 PEDIT celestial 允许 1e6 → celestial 质量独立放宽(≤1e30)或按类型选范围 | P1 | S |
 | AG-529 | src/engine/parse-schema.js:170-173 (gravity 缺省) | gravity 缺省恒 9.81,国内教材大量题按 g=10 出题，理论对照系统性偏差 ~2% → gravityDefault 时评审行加「9.81/10」一键切换(记 correction) | P1 | S |
 | AG-530 | src/engine/parse-schema.js:180-194 (光滑注入) | 光滑正则只扫 questionType/goal/environment/assumptions,写在 keyPoints/observations 的「光滑」漏注入 → 扫描范围并入 keyPoints | P2 | S |

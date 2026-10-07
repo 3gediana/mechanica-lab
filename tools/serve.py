@@ -47,7 +47,7 @@ PARSE_PROMPT = """你是大学物理题解析器。看图中的物理题，输�
 示例（斜面题的输出形状，内容以题为准）：
 {"questionType":"斜面下滑","kind":"","goal":"求底端速度","gravity":null,"entities":[{"type":"ramp","name":"斜面","given":{"angleDeg":30,"length":2},"confidence":0.95},{"type":"sphere","name":"小球","given":{"mass":1},"confidence":0.9}],"observations":["底端速度"],"anchorPoints":[],"keyPoints":[],"environment":"不计摩擦","unknowns":[],"uncertain":[],"joint":null,"assumptions":[],"confidence":0.9}
 规则：
-- type 必须从八个值中选：斜面/楔子=ramp，球=sphere，方块/物块=box，圆柱=cylinder，地面=ground，定滑轮/滑轮=pulley，恒星/行星/卫星/天体=celestial，传送带/输送带=conveyor。无关实体不要列。
+- type 必须从八个值中选：斜面/楔子/坡道=ramp，球/铁球/球体=sphere，方块/物块/砝码/重物/墙/挡板=box，圆柱=cylinder，地面/桌面/平台/台面/高台=ground，定滑轮/滑轮=pulley，恒星/行星/卫星/天体=celestial，传送带/输送带=conveyor。无关实体不要列。墙/挡板类 box 记得 given.fixed=1。
 - 定滑轮/阿特伍德题：kind 填 atwood，滑轮 type=pulley（given 带 radius 和 position），两物体 type 用 sphere 或 box（given 带各自的 mass；若题目给初速度写 velocity）。
 - 天体/引力题（恒星/行星/卫星绕转）：kind 填 astro，恒星/行星/卫星 type 一律填 celestial（不要填 sphere），中心天体和绕转体 given 都带 mass。轨道半径是位置不是尺寸：不要写进 radius（radius 是渲染尺寸，省略即可）；把绕转体位置写进 position（相对中心天体，如卫星在 x 方向 4 米处填 [4,0,0]，中心填 [0,0,0]）。速度写 velocity 三分量，方向与位置连线垂直（圆轨道切向）。题给场景引力常数时输出顶层 "G" 字段（数值），未给则省略。
 - given 只写题目文字或图中明确给出的数值；没给的键不要写。
@@ -61,6 +61,10 @@ PARSE_PROMPT = """你是大学物理题解析器。看图中的物理题，输�
 - 「同一高度/同时释放」等多物体对比题：每个物体都要写 given.position 且高度一致（红队实测：模型把其中一个球放在地面=保真错误）。
 - 传送带题：type=conveyor，given 带 length（带长 m）、speed（带速 m/s，方向沿 +x，反向给负值）、friction（带面动摩擦因数 μ）。被输送的物体 type 用 sphere 或 box，不写 position 时沙盘自动放在带的左端带面上（「轻放上去」类题的默认语义）。
 - 缺失的重要条件写进 unknowns；你补充的工程默认值写进 assumptions；按惯例处理但无题图依据的写进 uncertain。
+- 单位换算（AG）：所有数值一律换算成 SI 再输出：cm→m（÷100）、g→kg（÷1000）、km/h→m/s（÷3.6）、min→s（×60）；角度保持度数。
+- 坐标约定（AG）：y 竖直向上、地面 y=0、斜面底端在其 +x 侧；「放在地面/桌面上静置」不写 position。
+- 除 astro/rotation/atwood/spring/hinge 外（碰撞/动量/抛体/平抛/自由落体/传送带/圆周等），kind 一律留空字符串，不要自造类别词。
+- 轻绳连接也走 attaches：type 填 "rope"，length 写绳长 m（缺省按两端距离×1.03 自动给），绳不可伸长只传拉力。
 - 只输出 JSON 本体，且必须紧凑：单行、无缩进、无多余空格与换行。"""
 
 

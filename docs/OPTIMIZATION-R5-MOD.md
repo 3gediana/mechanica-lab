@@ -82,13 +82,13 @@
 | MOD-559 | parse-elliptic.json | gravity:10 对天体题无意义(应对齐 celestial 惯例 null);goal 一句塞三条观察过长；e≈0.15 的能量方程推导应写进 assumptions | 高 | S |
 | MOD-560 | parse-freefall.json | “2m 高”与球心口径差 2r=0.3m(理论 t=0.583s 而非 0.632s,差 8%),建议 keyPoints 直接给球心落差理论值，避免教师手算对照落空 | 高 | S |
 | MOD-561 | parse-friction-race.json | 建议加 μ=0.3 中档第三箱(3 车道，斜面/地面自动加宽已支持)与滑行时间观察项；理论 d=2.0/0.33m 可写入 keyPoints 自证 | 高 | S |
-| MOD-562 | parse-hinge.json | assumptions 写“初始摆角 1.2 rad”但 hingeLayout 硬编码 swing=0.4 rad——题设与建场两张皮，改文案或让 layout 消费题给摆角(小扩展) | 高 | S |
+| MOD-562 ✅B2pre | parse-hinge.json | assumptions 写“初始摆角 1.2 rad”但 hingeLayout 硬编码 swing=0.4 rad——题设与建场两张皮，改文案或让 layout 消费题给摆角(小扩展) | 高 | S |
 | MOD-563 | parse-horizontal-throw.json | 建议补“落地速度方向角 φ=arctan(gt/vx)”观察项；t=0.566s/R=2.83m 自证值写入 keyPoints | 高 | S |
 | MOD-564 | parse-incline.json | 球已显式 friction:0,“光滑”语义注入仍会追加冗余 inferred 假设条目；unknowns“半径取默认”与 assumptions 重复；建议加 θ=45° 变体档 | 高 | S |
 | MOD-565 | parse-inelastic.json | 等质量动能损失恰 50%,建议写入 observations 作定量目标；p41 加 restitution≈0 结构断言 | 高 | S |
 | MOD-566 | parse-inertia.json | 建议 observations 加“任意相等时间间隔位移相等”判据与速度传感器绑定提示；确认运行≥4s 才能读出匀速 | 中 | S |
-| MOD-567 | parse-launcher.json | 实错：goal 标注理论弹速 1.8m/s,但 x√(k/m)=0.4×√40=2.53m/s——修正数值或调参(如 x=0.285)使自洽；建议 damping 0.2→0 使能量账干净 | 高 | S |
-| MOD-568 | parse-momentum.json | 自相矛盾：unknowns 说“恢复系数题目未给需取默认”，assumptions 却说“取 0.8(题目给定)”——删 unknowns 项；悬浮理想化(gravityScale=0)应写进 assumptions | 高 | S |
+| MOD-567 ✅B2pre | parse-launcher.json | 实错：goal 标注理论弹速 1.8m/s,但 x√(k/m)=0.4×√40=2.53m/s——修正数值或调参(如 x=0.285)使自洽；建议 damping 0.2→0 使能量账干净 | 高 | S |
+| MOD-568 ✅B2pre | parse-momentum.json | 自相矛盾：unknowns 说“恢复系数题目未给需取默认”，assumptions 却说“取 0.8(题目给定)”——删 unknowns 项；悬浮理想化(gravityScale=0)应写进 assumptions | 高 | S |
 | MOD-569 | parse-momentum2d.json | 瞄准几何(z 偏移 0.22 vs 半径和 0.30)决定散射角但题面未言明，keyPoints 应写明瞄准参数便于复现；e=1 版让位给新模型 MOD-528 | 高 | S |
 | MOD-570 | parse-oblique45.json | 建议补飞行时间 T=2vsinθ/g=0.707s 观察项；assumptions 应写明“落回同高(球心)口径”，否则教师按地面起抛算 R=2.5m 与实测差半径 | 高 | S |
 | MOD-571 | parse-plank.json | 定量结论可入 observations:共速 v=m1v0/(m1+m2)=0.3m/s、相对滑移 Δs=v0²/(2(a1+a2))≈0.26m<板长(不滑离)；ground friction 0 已正确 | 高 | S |
@@ -98,7 +98,7 @@
 | MOD-575 | parse-rolling.json | goal 建议附自证值 v=√(4gh/3)=4.08m/s(h=1.25m);“斜面 0.2 与圆柱 0.2 成对取 min 合成”的机制应写进 assumptions | 高 | S |
 | MOD-576 | parse-spin.json | 与 spin-real 定位重叠，建议明确分工：spin 定性观察 I-ω 反比、spin-real 定量求末态 ω;建议 p41 加 prismatic joint 与转台 angvel 结构断言 | 高 | S |
 | MOD-577 | parse-spin-real.json | 条件缺失：滑块初始 r=0.7 由 rotationLayout 硬编码，题面与 assumptions 均未写；assumptions 应补“momentOfInertia=6.5 反解盘质量 ½MR²=I 自动生效”与理论末态 ω=22.44/9.88≈2.27rad/s 的验证口径 | 高 | S |
-| MOD-578 | parse-spring.json | 歧义：assumptions“初始拉伸 1.2m”实为安装长(rest 0.8+拉伸 0.4,springLayout 硬编码 stretch=0.4),建议改写为“弹簧安装长 1.2m(原长 0.8+拉伸 0.4)”或让 layout 消费题给振幅 | 高 | S |
+| MOD-578 ✅B2pre | parse-spring.json | 歧义：assumptions“初始拉伸 1.2m”实为安装长(rest 0.8+拉伸 0.4,springLayout 硬编码 stretch=0.4),建议改写为“弹簧安装长 1.2m(原长 0.8+拉伸 0.4)”或让 layout 消费题给振幅 | 高 | S |
 | MOD-579 | parse-vertical-throw.json | 建议加“落回速度≈−8m/s(往返对称)”EXPECT 断言与运行时长≥1.6s 保证；可加 v0=12 变体档(H=7.2m,注意取景拉远) | 高 | S |
 | MOD-580 | p41-model-coverage.mjs | EXPECT 表仅 19 条，缺 atwood/celestial/hinge/incline/momentum/momentum2d/projectile/spin/spin-real/spring 共 10 个 fixture 未进回归——补全(分别加 atwoodInfo 断言、gravitating 标志、revolute joint、ramp 几何等)；同时在表头注释统一各 explain 理论窗口(3%/5%/8%/35% 并存)的容忍理由，过松的(见 MOD-555)一并对齐 | 高 | S |
 

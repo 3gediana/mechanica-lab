@@ -312,3 +312,39 @@ test('自由落体例外：无初速+高位放置保留重力（对撞悬浮语�
   const o3 = planToOverrides(n3.plan).find((o) => o.type === 'sphere');
   assert.equal(o3.physics.gravityScale, 0, '缺省贴地球仍走对撞悬浮');
 });
+
+test('R5-AG-517：中文别名扩表（坡/铁球/桌面/砝码）', () => {
+  const plan = { kind: '', gravity: 10, attaches: [], entities: [
+    { type: '坡', name: '坡', given: { angleDeg: 30, length: 2 } },
+    { type: '铁球', name: '铁球', given: { mass: 1 } },
+    { type: '桌面', name: '桌面', given: { length: 6 } },
+    { type: '砝码', name: '砝码', given: { mass: 0.5 } },
+  ] };
+  const n = normalizeParse(plan);
+  const types = n.plan.entities.map((e) => e.type).sort();
+  assert.deepEqual(types, ['box', 'ground', 'ramp', 'sphere'], JSON.stringify(types));
+});
+
+test('R5-AG-519：字符串数值剥单位（"30°"/"≈2.5m"/"6 m/s"）', () => {
+  const plan = { kind: '', gravity: 10, attaches: [], entities: [
+    { type: 'ramp', name: '斜面', given: { angleDeg: '30°', length: '≈2m' } },
+    { type: 'sphere', name: '球', given: { mass: '1.0千克', velocity: ['6 m/s', 0, 0] } },
+  ] };
+  const n = normalizeParse(plan);
+  const ramp = n.plan.entities.find((e) => e.type === 'ramp');
+  const ball = n.plan.entities.find((e) => e.type === 'sphere');
+  assert.equal(ramp.given.angleDeg, 30, 'angleDeg=' + ramp.given.angleDeg);
+  assert.equal(ramp.given.length, 2, 'length=' + ramp.given.length);
+  assert.equal(ball.given.mass, 1, 'mass=' + ball.given.mass);
+});
+
+test('R5-AG-527：given 键别名（mu→friction / m→mass / theta→angleDeg）', () => {
+  const plan = { kind: '', gravity: 10, attaches: [], entities: [
+    { type: 'box', name: '块', given: { m: 2, mu: 0.2, theta: 30 } },
+  ] };
+  const n = normalizeParse(plan);
+  const g = n.plan.entities[0].given;
+  assert.equal(g.mass, 2, 'mass=' + g.mass);
+  assert.equal(g.friction, 0.2, 'friction=' + g.friction);
+  assert.equal(g.angleDeg, 30, 'angleDeg=' + g.angleDeg);
+});
