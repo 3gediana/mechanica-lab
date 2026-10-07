@@ -539,6 +539,34 @@ try {
     await page.evaluate(() => { window.MECH.resetSim(); });
   }
 
+  // ---- 6b. FX-551 静音视觉等价：静音期碰撞的粒子/震屏照发（视路独立于音路） ----
+  {
+    await page.evaluate(() => window.MECH.setMuted(true));
+    const j0 = await page.evaluate(() => window.MECH.juiceState());
+    await page.evaluate(() => { window.MECH.resetSim(); window.MECH.loadPreset('momentum'); window.MECH.play(); });
+    // 碰撞一发生（spawnedTotal 增长）立即读——trauma/环都有秒级衰减，等固定 simT 会读空
+    await page.waitForFunction((j0n) => window.MECH.juiceState().spawnedTotal > j0n, j0.spawnedTotal,
+      { timeout: 20000, polling: 100 });
+    const j1 = await page.evaluate(() => window.MECH.juiceState());
+    check('静音期视觉反馈等价（粒子照发+震屏蓄能）', j1.spawnedTotal > j0.spawnedTotal && (j1.trauma > 0 || j1.rings > 0),
+      `spawned ${j0.spawnedTotal}→${j1.spawnedTotal}, trauma=${j1.trauma}, rings=${j1.rings}`);
+    await page.evaluate(() => { window.MECH.resetSim(); window.MECH.setMuted(false); });
+  }
+
+  // ---- 6c. FX-590 prefers-reduced-motion：系统减弱动态时粒子/环/震屏整体禁发 ----
+  {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => window.MECH && window.MECH.ready(), null, { timeout: 25000 });
+    await page.evaluate(() => { window.MECH.loadPreset('momentum'); window.MECH.play(); });
+    await page.waitForFunction(() => window.MECH.state().simT > 1.2, null, { timeout: 15000, polling: 200 });
+    const j = await page.evaluate(() => window.MECH.juiceState());
+    check('reduced-motion 下瞬时 FX 禁发', j.reducedMotion === true && j.spawnedTotal === 0 && j.rings === 0 && j.trauma === 0,
+      `reduced=${j.reducedMotion} spawned=${j.spawnedTotal} rings=${j.rings} trauma=${j.trauma}`);
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await page.evaluate(() => { window.MECH.resetSim(); });
+  }
+
   check('全程无 console 错误/页面异常', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));
   await page.screenshot({ path: 'shots/p33-final.png' });
 

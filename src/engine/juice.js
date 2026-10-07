@@ -3,8 +3,19 @@
 // 收缩/淡出全参数化；震屏用 trauma² 曲线（小撞不抖大撞短抖），可一键关。
 import * as THREE from 'three';
 
+// FX-507 复用向量（模块级零分配）
+const _nrm = new THREE.Vector3();
+const _zAxis = new THREE.Vector3(0, 0, 1);
+const _gold = new THREE.Color(0xd9a441);
+const _goldHot = new THREE.Color(0xfff0d0);
+
 const P_MAX = 320;             // 粒子池容量（固定，零分配循环）
 const RING_POOL = 24;
+
+// FX-590 红线：系统「减弱动态效果」时 JS 侧瞬时 FX（粒子/环/震屏）整体禁发——
+// 既有 CSS media 冻结只盖 CSS 动画，这里补 JS 动效层。数据层（轨迹/箭头/读数）不受影响。
+export const REDUCED_MOTION = typeof matchMedia === 'function'
+  && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // 材质音色 → 粒子观感（与声音三音色同源映射，同一碰撞同一"材质语言"）。
 // 加法混合下「颜色即亮度」：尘雾系必须用中亮暖色才在暗背景可感；贴地系低 up 短滞空。
@@ -100,7 +111,7 @@ export class JuiceFX {
 
   // 碰撞入参：pos[3]（世界）、strength 0..1（与声音同源的冲量标度）、timbre（材质音色键）
   spawnImpact(pos, strength, timbre) {
-    if (!this.on || strength < 0.03) return;
+    if (!this.on || REDUCED_MOTION || strength < 0.03) return;
     const T = TINT[timbre] || TINT.ceramic;
     const n = Math.round(T.n[0] + (T.n[1] - T.n[0]) * Math.min(1, strength));
     const c = new THREE.Color(T.color);
@@ -173,12 +184,14 @@ export class JuiceFX {
   _savedPos = null;
   _savedRoll = 0;
   applyShake(camera, now) {
-    if (!this.shakeOn || this.trauma <= 0.001) return false;
+    if (!this.shakeOn || REDUCED_MOTION || this.trauma <= 0.001) return false;
     const s = this.trauma * this.trauma;
     if (!this._savedPos) this._savedPos = new THREE.Vector3();
     this._savedPos.copy(camera.position);
     this._savedRoll = camera.rotation.z;
-    const t = now * 47.3;    // 高频抖动种子
+    // FX-528 震频分级：大撞低频大幅（闷锤）、小撞高频小幅（碎碰），trauma 作强度代理查表
+    const freq = this.trauma > 0.55 ? 22 : this.trauma > 0.3 ? 40 : 60;
+    const t = now * freq;    // 高频抖动种子
     const mag = 0.055 * s;
     camera.position.x += Math.sin(t * 1.1) * mag;
     camera.position.y += Math.sin(t * 1.7 + 1.3) * mag * 0.7;
@@ -198,7 +211,8 @@ export class JuiceFX {
   // ---- 升级碰撞环（PL-22）：闪光芯（150ms 快闪）+ 外环（cubic-out 扩张 0.7s） ----
   // freezeAt：诊断时钟（样张取证）——非 null 时环/闪光/震屏冻结在指定时刻的画面
   freezeAt = null;
-  spawnRing(pos, strength) {
+  spawnRing(pos, strength, normal) {
+    if (REDUCED_MOTION) return;
     let grp = this._ringPool.pop();
     if (!grp) {
       const ring = new THREE.Mesh(this._ringGeo, new THREE.MeshBasicMaterial({ color: 0xd9a441, transparent: true, opacity: 0.78, side: THREE.DoubleSide, depthWrite: false }));
@@ -206,12 +220,27 @@ export class JuiceFX {
       grp = { ring, flash };
     }
     grp.ring.position.set(pos[0], pos[1] + 0.015, pos[2]);
-    grp.ring.rotation.x = -Math.PI / 2;
-    grp.ring.scale.setScalar(0.25);
-    grp.ring.material.opacity = 0.78;
     grp.flash.position.copy(grp.ring.position);
-    grp.flash.rotation.x = -Math.PI / 2;
-    grp.flash.scale.setScalar(0.4 + strength * 0.8);
+    // FX-507 环贴接触法向：给法向就立起来（墙面碰撞环垂直贴墙），缺省保持地面档
+    if (normal && (normal[0] || normal[1] || normal[2])) {
+      _nrm.set(normal[0], normal[1], normal[2]).normalize();
+      if (_nrm.y < 0.99) {   // 近水平面仍走 rotation.x 档（等价且省一次四元数）
+        grp.ring.rotation.set(0, 0, 0);
+        grp.ring.quaternion.setFromUnitVectors(_zAxis, _nrm);
+        grp.flash.quaternion.copy(grp.ring.quaternion);
+      } else {
+        grp.ring.rotation.set(-Math.PI / 2, 0, 0);
+        grp.flash.rotation.copy(grp.ring.rotation);
+      }
+    } else {
+      grp.ring.rotation.set(-Math.PI / 2, 0, 0);
+      grp.flash.rotation.copy(grp.ring.rotation);
+    }
+    // FX-501 环随冲击缩放+色阶：小撞细环淡金、大撞粗环亮白金
+    grp.ring.material.color.copy(_gold).lerp(_goldHot, Math.min(1, strength));
+    grp.ring.scale.setScalar(0.25);
+    grp.ring.material.opacity = 0.78 * (0.55 + 0.45 * Math.min(1, strength));
+    grp.flash.scale.setScalar((0.4 + strength * 0.8) * (0.6 + strength));
     grp.flash.material.opacity = 0.95;
     grp.birth = performance.now() / 1000;
     grp.strength = strength;
@@ -232,11 +261,11 @@ export class JuiceFX {
         this._rings.splice(i, 1);
         continue;
       }
-      // 外环 cubic-out 扩张 + 线性淡出
+      // 外环 cubic-out 扩张（FX-501：终径随冲击放大）+ 淡出（峰值已按 strength 降）
       const k = Math.min(1, age / 0.7);
       const ease = 1 - Math.pow(1 - k, 3);
-      g.ring.scale.setScalar(0.25 + ease * (0.9 + g.strength * 1.3));
-      g.ring.material.opacity = 0.78 * (1 - k);
+      g.ring.scale.setScalar((0.25 + ease * (0.9 + g.strength * 1.3)) * (0.6 + g.strength * 0.8));
+      g.ring.material.opacity = (0.78 * (0.55 + 0.45 * Math.min(1, g.strength))) * (1 - k);
       // 闪光芯 150ms 快闪
       const fk = Math.min(1, age / 0.15);
       g.flash.material.opacity = 0.95 * (1 - fk) * (1 - fk);
@@ -247,7 +276,7 @@ export class JuiceFX {
   state() {
     let alive = 0;
     for (let i = 0; i < P_MAX; i++) if (this._age[i] >= 0) alive++;
-    return { alive, spawnedTotal: this.spawnedTotal, trauma: +this.trauma.toFixed(3), shakeOn: this.shakeOn, rings: this._rings.length };
+    return { alive, spawnedTotal: this.spawnedTotal, trauma: +this.trauma.toFixed(3), shakeOn: this.shakeOn, rings: this._rings.length, reducedMotion: REDUCED_MOTION };
   }
 
   // 脏门槛快查（每帧调用，禁遍历）：震屏余能/粒子活着/有环 → 必须继续渲染

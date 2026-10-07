@@ -84,18 +84,28 @@ export class SoundEngine {
 
   // 单个撞击 voice 的完整构建（噪声瞬态 + 非谐模态共振簇）。
   // impact()（实时）与 renderSample()（离线听感验证/wav 导出）共用同一条路径，
-  // 保证"测到的波形 = 听到的波形"。
-  _scheduleVoice(ctx, dest, noiseBuf, timbre, gain, t0, detune, pan = 0) {
+  // 保证"测到的波形 = 听到的波形"。lpFreq：距离低通截止 Hz（FX-548，缺省近场不滤）。
+  _scheduleVoice(ctx, dest, noiseBuf, timbre, gain, t0, detune, pan = 0, lpFreq = 0) {
     const T = TIMBRES[timbre];
     const out = ctx.createGain();
     out.gain.value = gain;
+    // FX-548 距离低通：远撞发闷近撞清脆（每 voice 1 个 BiquadFilter，att 驱动）
+    let tail = out;
+    if (lpFreq && lpFreq < 15000) {
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = lpFreq;
+      lp.Q.value = 0.4;
+      out.connect(lp);
+      tail = lp;
+    }
     const panner = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
     if (panner) {
       panner.pan.value = Math.max(-0.85, Math.min(0.85, pan));
-      out.connect(panner);
+      tail.connect(panner);
       panner.connect(dest);
     } else {
-      out.connect(dest);
+      tail.connect(dest);
     }
 
     // 瞬态：带通噪声短爆
@@ -156,9 +166,10 @@ export class SoundEngine {
     this.dropped = 0;
   }
 
-  // 碰撞入参：{ j(冲量 kg·m/s), matA, matB, pair(实体对键,可选), pan(-1..1), att(距离衰减 0..1) }
+  // 碰撞入参：{ j(冲量 kg·m/s), matA, matB, pair(实体对键,可选), pan(-1..1), att(距离衰减 0..1),
+  //   mass(两体几何平均质量 kg,可选 FX-545 音高随质量) }
   // 返回 true = 实际发声（限流通过）
-  impact({ j, matA, matB, pair, pan = 0, att = 1 }) {
+  impact({ j, matA, matB, pair, pan = 0, att = 1, mass = 1 }) {
     if (this.muted || !this.ctx || this.ctx.state !== 'running' || j < J_MIN) { this.dropped++; return false; }
     const now = this._clock();
     if (now - this._lastGlobal < GLOBAL_MIN_GAP) { this.dropped++; return false; }
@@ -172,8 +183,12 @@ export class SoundEngine {
     const gain = SoundEngine.gainOf(j) * att;
     if (gain < 0.004) { this.dropped++; return false; }
     const t0 = this.ctx.currentTime;
-    const detune = 0.94 + Math.random() * 0.12;   // ±6% 随机音高：同型碰撞不成机枪音
-    this._scheduleVoice(this.ctx, this.master, this._noiseBuf, timbre, gain, t0, detune, pan);
+    // ±6% 随机音高：同型碰撞不成机枪音；FX-545 质量因子：轻 10 倍升/重 10 倍降（钳 ±8%）
+    const massFactor = Math.max(0.92, Math.min(1.08, Math.pow(1 / Math.max(0.05, mass), 0.12)));
+    const detune = (0.94 + Math.random() * 0.12) * massFactor;
+    // FX-548 距离低通：att 1=近场 12kHz 不滤，0=远场 2.2kHz 发闷
+    const lpFreq = att >= 0.98 ? 0 : 2200 + att * 9800;
+    this._scheduleVoice(this.ctx, this.master, this._noiseBuf, timbre, gain, t0, detune, pan, lpFreq);
     this.emitted++;
     this.voices.push({ strength: +(j / J_REF).toFixed(4), gain: +gain.toFixed(4), timbre, pan: +pan.toFixed(3), t: +now.toFixed(3) });
     if (this.voices.length > 8) this.voices.shift();

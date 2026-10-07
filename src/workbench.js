@@ -3098,6 +3098,8 @@ function tickPerfHud(rawDt, rendered, phys, ov, rnd, dom) {
       + row('叠加', s.overlay.p95.toFixed(2) + '<span class="u2">ms</span>')
       + row('渲染', s.render.p95.toFixed(2) + '<span class="u2">ms</span>')
       + row('DOM', s.dom.p95.toFixed(2) + '<span class="u2">ms</span>')
+      + (juice ? '<div class="ph-sec">FX</div>'
+        + row('瞬时', `粒子 <b>${juice.state().alive}</b> · 环 ${juice.state().rings} · 震 ${juice.state().trauma}`) : '')
       + '<div class="ph-sec">画面</div>'
       + row('Draw', String(s.calls))
       + row('三角', (s.tris / 1000).toFixed(0) + 'k')
@@ -3308,16 +3310,26 @@ function tick() {
         const matB = bb ? bb.entity.render.material : null;
         const timbre = SoundEngine.timbreOf(matA, matB);
         const strength = Math.min(1, s.j / 2.2);
+        // FX-507 接触法向（两体质心连线）+ FX-545 质量（几何平均）：环定向与音高随质量
+        let normal = null, mass = 1;
+        if (ba && bb && ba.body && bb.body) {
+          const pa = ba.body.translation(), pb = bb.body.translation();
+          const dx = pa.x - pb.x, dy = pa.y - pb.y, dz = pa.z - pb.z;
+          const len = Math.hypot(dx, dy, dz);
+          if (len > 1e-4) normal = [dx / len, dy / len, dz / len];
+          try { mass = Math.sqrt(Math.max(0.01, ba.body.mass()) * Math.max(0.01, bb.body.mass())); } catch (e) { /* mass() 不可用不拦音 */ }
+        }
         sound.impact({
           j: s.j,
           matA, matB,
           pair: s.a < s.b ? s.a + '|' + s.b : s.b + '|' + s.a,
           pan: (s.pos[0] - target.x) / span,
           att: 1 / (1 + Math.hypot(s.pos[0] - target.x, s.pos[1] - target.y, s.pos[2] - target.z) / (span * 1.2)),
+          mass,
         });
         if (juice) {
           juice.spawnImpact(s.pos, strength, timbre);
-          if (strength > 0.08) juice.spawnRing(s.pos, strength);
+          if (strength > 0.08) juice.spawnRing(s.pos, strength, normal);
         }
         maybeBulletTime(strength);
       }
@@ -5382,6 +5394,7 @@ window.MECH = {
   perfHud: (on) => setPerfHud(on == null ? !perfHudOn : !!on),
   // 层1 声音（p33 断言通道）：引擎状态含 voices 最近发声记录（strength/gain/timbre/pan）
   soundState: () => sound.state(),
+  juiceState: () => (juice ? juice.state() : null),
   clearSoundLog: () => sound.clearLog(),
   // 离线渲染撞击样本（听感机器代理 + wav 导出，与实时同路径）
   renderSample: (timbre, j) => sound.renderSample(timbre, j),
