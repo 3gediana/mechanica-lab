@@ -130,10 +130,15 @@ try {
   await page.screenshot({ path: 'shots/w5/03-explained.png' });
 
   // ===== J6. 保存 → 刷新恢复 → 继续编辑 → 第二场景（重复使用）=====
+  await page.click('#btnSave');          // 保存=入库
+  await page.waitForTimeout(300);
+  await page.click('#btnOpen');
+  await page.waitForTimeout(250);
   const [dl] = await Promise.all([
     page.waitForEvent('download', { timeout: 8000 }),
-    page.click('#btnSave'),
+    page.click('#libExportCurrent'),
   ]);
+  await page.keyboard.press('Escape');
   const p1 = 'shots/w5/journey-saved.json';
   await dl.saveAs(p1);
   await page.reload({ waitUntil: 'domcontentloaded' });

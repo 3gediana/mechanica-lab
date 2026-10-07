@@ -204,11 +204,16 @@ try {
   const delN = (await page.evaluate(() => window.MECH.doc())).entities.length;
   check('A11 Del 删除', delN === 3, `n=${delN}`);
 
-  // ===== A12 保存 JSON（真实下载） =====
+  // ===== A12 保存 JSON（入库 + 库内导出下载） =====
+  await page.click('#btnSave');
+  await page.waitForTimeout(300);
+  await page.click('#btnOpen');
+  await page.waitForTimeout(250);
   const [download] = await Promise.all([
     page.waitForEvent('download', { timeout: 8000 }),
-    page.click('#btnSave'),
+    page.click('#libExportCurrent'),
   ]);
+  await page.keyboard.press('Escape');
   const savedPath = 'shots/w1/saved-scene.mechanica.json';
   await download.saveAs(savedPath);
   const savedJson = JSON.parse(readFileSync(savedPath, 'utf8'));
@@ -221,11 +226,14 @@ try {
   await page.click('#btnNew');
   await page.waitForTimeout(250);
   check('A13 清空: 实体=0', (await page.textContent('#roN')).trim() === '0');
+  await page.click('#btnOpen');
+  await page.waitForTimeout(250);
   const [chooser] = await Promise.all([
     page.waitForEvent('filechooser'),
-    page.click('#btnOpen'),
+    page.click('#libImport'),
   ]);
   await chooser.setFiles(savedPath);
+  await page.keyboard.press('Escape');   // 关库（导入不自动关：用户可能连续导入）
   await page.waitForTimeout(500);
   const reopened = await page.evaluate(() => window.MECH.doc());
   check('A14 打开 JSON 恢复（3实体+初速度）', reopened.entities.length === 3
@@ -234,11 +242,14 @@ try {
   // ===== A15 坏 JSON 走真实打开入口 =====
   const badPath = 'shots/w1/bad.json';
   writeFileSync(badPath, '{"entities": "not-an-array", "version": 1}');
+  await page.click('#btnOpen');
+  await page.waitForTimeout(250);
   const [chooser2] = await Promise.all([
     page.waitForEvent('filechooser'),
-    page.click('#btnOpen'),
+    page.click('#libImport'),
   ]);
   await chooser2.setFiles(badPath);
+  await page.keyboard.press('Escape');
   await page.waitForTimeout(500);
   const toastText = await page.evaluate(() => (document.querySelector('#toast') || {}).textContent || '');
   const stillN = (await page.evaluate(() => window.MECH.doc())).entities.length;
@@ -364,19 +375,27 @@ try {
   // B4 预置保存→重开
   await page.selectOption('#selPreset', 'momentum');
   await page.waitForTimeout(500);
+  await page.click('#btnSave');
+  await page.waitForTimeout(300);
+  await page.click('#btnOpen');
+  await page.waitForTimeout(250);
   const [dl2] = await Promise.all([
     page.waitForEvent('download', { timeout: 8000 }),
-    page.click('#btnSave'),
+    page.click('#libExportCurrent'),
   ]);
+  await page.keyboard.press('Escape');
   const momPath = 'shots/w1/momentum-saved.json';
   await dl2.saveAs(momPath);
   await page.click('#btnNew');
   await page.waitForTimeout(200);
+  await page.click('#btnOpen');
+  await page.waitForTimeout(250);
   const [ch3] = await Promise.all([
     page.waitForEvent('filechooser'),
-    page.click('#btnOpen'),
+    page.click('#libImport'),
   ]);
   await ch3.setFiles(momPath);
+  await page.keyboard.press('Escape');
   await page.waitForTimeout(500);
   const momRe = await page.evaluate(() => window.MECH.doc());
   check('B4 动量预置保存→重开', momRe.entities.length === 3,

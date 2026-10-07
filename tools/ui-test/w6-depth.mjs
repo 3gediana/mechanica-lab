@@ -90,7 +90,7 @@ try {
   await page.waitForTimeout(500);
   await page.click('#tabInspector');   // G1 在 Agent 标签，切回检查器
   await page.waitForTimeout(250);
-  await page.locator('#outline .ol-row', { hasText: '球' }).first().click();
+  await page.locator('#outline .ol-row', { hasText: '球' }).first().locator('.nm').click();
   await page.waitForTimeout(250);
   const massSel = () => page.locator('#inspBody .frow', { has: page.locator('label', { hasText: '质量' }) }).first().locator('input').first();
   const fillMass = async (v) => {

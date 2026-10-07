@@ -14,6 +14,9 @@ export function createEmptyDoc(name = '未命名场景') {
   return {
     version: SCENE_VERSION,
     name,
+    tags: [],                // 场景标签（用户/Agent 自动派生；场景库检索用）
+    sceneId: null,           // 场景库条目 id（保存入库后绑定；null=未入库）
+    savedAt: null,           // 最近一次入库时间戳（场景库排序/展示）
     gravity: -9.81,
     G: 6.674e-11,            // 引力常数（天体场景按教学尺度覆写，如 G=1）
     entities: [],

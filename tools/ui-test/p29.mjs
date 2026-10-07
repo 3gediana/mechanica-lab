@@ -97,12 +97,16 @@ try {
   await page.click('#btnReset');
   await page.waitForTimeout(300);
   const fname = await page.evaluate(() => window.MECH.doc().entities.filter((e) => e.type === 'sphere').length);
+  await page.click('#btnSave');   // 保存=入库（场景库语义）
+  await page.waitForTimeout(300);
+  await page.click('#btnOpen');          // 开库
+  await page.waitForTimeout(250);
   const [download] = await Promise.all([
     page.waitForEvent('download', { timeout: 8000 }),
-    page.click('#btnSave'),
+    page.click('#libExportCurrent'),     // 下载走库内「导出当前」
   ]);
-  check('保存触发下载(.mechanica.json)', download.suggestedFilename().endsWith('.mechanica.json'),
-    download.suggestedFilename());
+  await page.keyboard.press('Escape');   // 关库
+  await page.waitForTimeout(250);
   const dlPath = await download.path();
   const saved = JSON.parse(readFileSync(dlPath, 'utf8'));
   check('存档含完整实体与版本', saved.version != null && saved.entities.length === 3
@@ -111,9 +115,11 @@ try {
   await page.evaluate(() => window.MECH.loadPreset('empty'));
   await page.waitForTimeout(250);
   const emptied = await page.evaluate(() => window.MECH.state().count);
+  await page.click('#btnOpen');          // 开库 → 导入文件
+  await page.waitForTimeout(250);
   const [chooser] = await Promise.all([
     page.waitForEvent('filechooser', { timeout: 8000 }),
-    page.click('#btnOpen'),
+    page.click('#libImport'),
   ]);
   await chooser.setFiles(dlPath);
   await page.waitForTimeout(400);

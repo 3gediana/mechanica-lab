@@ -49,6 +49,8 @@
   html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); font-family: var(--sans); }
   button { font-family: var(--sans); }
   #stage { position: fixed; inset: 0; }
+  #stage.running { cursor: grab; }
+  #stage.running:active { cursor: grabbing; }
   #stage canvas { display: block; }
 
   /* ============ 顶栏 ============ */
@@ -69,6 +71,23 @@
     font-family: var(--sans); font-size: 12px; padding: 4px 8px; width: 130px; border-radius: 2px;
   }
   #sceneName:hover { border-color: var(--line-strong); }
+  /* 场景库卡片（SCN） */
+  .lib-card { background:rgba(255,255,255,.03); border:1px solid var(--line); border-radius:3px; overflow:hidden; display:flex; flex-direction:column; }
+  .lib-card:hover { border-color:rgba(217,164,65,.45); }
+  .lib-card .thumb { width:100%; aspect-ratio:16/9; object-fit:cover; display:block; background:#0c0d0f; cursor:pointer; }
+  .lib-card .bd { padding:7px 8px 8px; display:flex; flex-direction:column; gap:5px; }
+  .lib-card .nm { font-size:12px; color:var(--text); cursor:text; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .lib-card .nm input { width:100%; background:rgba(0,0,0,.3); border:1px solid rgba(217,164,65,.55); border-radius:2px; color:var(--text); font:inherit; padding:2px 4px; }
+  .lib-card .meta { font-size:10px; color:var(--faint); }
+  .lib-card .chips { display:flex; flex-wrap:wrap; gap:4px; }
+  .chip-tag { font-size:10px; color:var(--accent); background:rgba(217,164,65,.10); border:1px solid rgba(217,164,65,.30); border-radius:2px; padding:1px 5px; cursor:default; }
+  .chip-tag .x { margin-left:4px; cursor:pointer; color:var(--faint); }
+  .chip-tag .x:hover { color:var(--danger); }
+  .chip-add { font-size:10px; color:var(--faint); background:none; border:1px dashed var(--line-strong); border-radius:2px; padding:1px 5px; cursor:pointer; }
+  .chip-add:hover { color:var(--accent); border-color:rgba(217,164,65,.45); }
+  .lib-card .ops { display:flex; gap:4px; margin-top:2px; }
+  .lib-card .ops button { font-size:10px; padding:2px 7px; }
+  .lib-card .ops .danger { color:var(--danger); }
   #sceneName:focus { border-color: rgba(217, 164, 65, 0.55); }
   #sceneName:focus:not(:focus-visible) { outline: none; }
   .tb-group { display: flex; align-items: stretch; border: 1px solid var(--line); border-radius: 2px; }
@@ -411,14 +430,15 @@
 
 <header id="topbar">
   <div class="brand"><h1>MECHANICA</h1><div class="sub">物理教学工作台</div></div>
-  <input id="sceneName" value="未命名场景" spellcheck="false" title="场景名称">
+  <span id="dirtyDot" title="有未保存的改动（Ctrl+S 保存到场景库）" style="display:none;width:7px;height:7px;border-radius:50%;background:var(--accent);flex:0 0 auto;box-shadow:0 0 6px rgba(217,164,65,.8)"></span>
+  <input id="sceneName" maxlength="40" value="未命名场景" spellcheck="false" title="场景名称（点一下=全选改名，Esc 还原）">
   <div class="tb-group">
     <button id="btnNew" title="新建空场景">新建</button>
     <select id="selPreset" title="载入预置场景">
       <option value="">预置场景</option>
     </select>
-    <button id="btnSave" title="下载场景 JSON">保存</button>
-    <button id="btnOpen" title="打开场景 JSON">打开</button>
+    <button id="btnSave" title="保存到场景库（Ctrl+S）">保存</button>
+    <button id="btnOpen" title="场景库：打开/改名/标签/导出（Ctrl+O）">打开</button>
     <button id="btnUndo" title="Ctrl+Z">撤销</button>
     <button id="btnRedo" title="Ctrl+Shift+Z">重做</button>
   </div>
@@ -428,6 +448,7 @@
     <button id="btnModeScale" title="缩放 gizmo：均匀视觉缩放 0.25~4x（只改显示大小，碰撞体/物理参数不变；要改物理尺寸用检查器尺寸参数）">缩放</button>
     <button id="btnSnap" title="网格吸附：平移 0.1m / 旋转 15°">吸附</button>
     <button id="btnOrtho" title="透视/正交相机切换">正交</button>
+    <button id="btnGrid" title="地面网格/坐标轴显隐（截图时用）">网格</button>
     <button id="btnBoxSel" title="框选多选（编辑态，拖出矩形选中实体）">框选</button>
   </div>
   <div class="tb-group">
@@ -449,6 +470,8 @@
     style="margin:8px 10px 4px;width:calc(100% - 20px);background:rgba(255,255,255,.04);border:1px solid var(--line);color:var(--text);font-size:11px;padding:5px 8px;border-radius:2px">
   <div id="catalogList"></div>
   <div class="panel-title">场景对象</div>
+  <div class="k" style="font-size:10px;color:var(--faint);padding:2px 6px">场景对象<span id="olCount"></span></div>
+  <input id="outlineSearch" placeholder="按名字/类型过滤…" spellcheck="false" style="display:none;width:calc(100% - 12px);margin:2px 6px;background:rgba(0,0,0,.25);border:1px solid var(--line);border-radius:2px;color:var(--text);font-size:10px;padding:3px 6px;font-family:inherit">
   <div id="outline"></div>
 </aside>
 
@@ -537,9 +560,12 @@
       </div>
       <div style="margin-top:10px;border-top:1px solid var(--line);padding-top:8px">
         <div class="k" style="font-size:10px;color:var(--faint);margin-bottom:4px">文字要求（混合搭建：按文字补充/调整当前场景）</div>
-        <textarea id="agentTextReq" rows="3" placeholder="例：在现有斜面上放一个质量 2 kg 的小球，光滑无初速，从顶端释放…"
+        <textarea id="agentTextReq" maxlength="4000" rows="3" placeholder="例：在现有斜面上放一个质量 2 kg 的小球，光滑无初速，从顶端释放…（Ctrl+Enter 直接解析；也可点「口述」用语音输入）"
           style="width:100%;box-sizing:border-box;resize:vertical;background:rgba(0,0,0,.25);border:1px solid var(--line);border-radius:2px;color:var(--text);font-size:11px;padding:5px;font-family:inherit"></textarea>
-        <div style="margin-top:5px"><button id="btnParseText">解析文字要求</button></div>
+        <div class="btnrow" style="margin-top:5px">
+          <button id="btnMic" title="语音口述题目（识别结果追加进上方文本框，可再编辑后解析）">口述</button>
+          <button id="btnParseText">解析文字要求</button>
+        </div>
       </div>
     </div>
     <div class="grp" id="parseStatusGrp" style="display:none">
@@ -601,11 +627,11 @@
   </select>
   <div class="sgroup">
     <button id="btnVectors" title="速度向量箭头（叠加层）">矢量</button>
-    <button id="btnForces" title="受力箭头：重力(红)+接触合力(绿)">受力</button>
+    <button id="btnForces" title="受力箭头：重力(红)+接触合力(绿)——「分解」再拆支持力(淡绿N)/摩擦(橙f)/加速度(青)">受力</button>
     <button id="btnDecompose" title="受力分解：支持力(淡绿 N)+摩擦力(橙 f) 分列（斜面场景）">分解</button>
-    <button id="btnTrails" title="轨迹线（叠加层）">轨迹</button>
-    <button id="btnCurves" title="时间曲线：选中体速率/高度 + 系统动能">曲线</button>
-    <button id="btnCons" title="守恒量读数">守恒</button>
+    <button id="btnTrails" title="轨迹线：选中体运动路径（每 2 步采样，最长 1800 点；重置清空）">轨迹</button>
+    <button id="btnCurves" title="时间曲线：选中体速率/高度 + 系统动能（运动/能量两页签）">曲线</button>
+    <button id="btnCons" title="守恒量读数：动量/能量漂移监测（能量条按初始态归一）">守恒</button>
   </div>
   <div class="sgroup">
     <button id="btnRec" title="录制帧序列（回放用）">录制</button>
@@ -615,10 +641,12 @@
   <div class="sgroup">
     <button id="btnSound" title="碰撞与状态音效（程序合成，静音状态刷新后保持）">音效</button>
     <button id="btnShake" title="碰撞镜头微震（trauma² 曲线，重击才抖；关闭状态刷新后保持）">震屏</button>
+    <button id="btnHelpQuick" title="键位速查（? 同）">?</button>
+    <button id="btnSnapshot" title="把当前视口画面保存为 PNG 图片（教学课件/作业用）">截图</button>
   </div>
-  <span class="ro">t=<b id="roT">0.000</b>s</span>
-  <span class="ro">步长 <b>1/120s</b></span>
-  <span class="ro">实体 <b id="roN">0</b></span>
+  <span class="ro" title="已演化的模拟时间（按固定步长 1/120s 推进，与刷新率无关）">t=<b id="roT">0.000</b>s</span>
+  <span class="ro" title="物理引擎固定步长：确定性演化的基础，读数与理论对照都在这个口径上">步长 <b>1/120s</b></span>
+  <span class="ro" title="当前场景实体数（含连接件与传感器）">实体 <b id="roN">0</b></span>
   <div class="spacer"></div>
   <span class="ro" id="roSel">未选中</span>
 </footer>
@@ -679,6 +707,29 @@
 <div id="scaleReadout">网格 1 格 = 1 m</div>
 
 <div id="toast" aria-live="polite" role="status"></div>
+
+<!-- 场景库（SCN）：打开/改名/标签/检索/导出/复制/删除 -->
+<div id="sceneLib" style="display:none;position:fixed;inset:0;z-index:60;background:rgba(6,7,9,.72);backdrop-filter:blur(2px)">
+  <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(880px,92vw);max-height:84vh;display:flex;flex-direction:column;background:#141519;border:1px solid #33363c;border-radius:4px;box-shadow:0 18px 60px rgba(0,0,0,.55)">
+    <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid #26282d">
+      <strong style="font-size:13px;letter-spacing:.06em">场景库</strong>
+      <input id="libSearch" placeholder="搜名称或标签…（Enter 打开第一个结果）" spellcheck="false"
+        style="flex:1;background:rgba(0,0,0,.25);border:1px solid #26282d;border-radius:2px;color:#e8e6e1;font-size:11px;padding:5px 8px;font-family:inherit">
+      <select id="libSort" title="排序" style="background:rgba(0,0,0,.25);border:1px solid #26282d;border-radius:2px;color:#e8e6e1;font-size:11px;padding:4px">
+        <option value="recent">最近更新</option>
+        <option value="name">名称</option>
+        <option value="entities">实体数</option>
+      </select>
+      <button id="libImport" title="从 JSON 文件导入场景">导入文件</button>
+      <button id="libExportCurrent" title="把当前场景下载为 JSON 文件">导出当前</button>
+      <button id="libClose" title="关闭（Esc）">关闭</button>
+    </div>
+    <div id="libGrid" style="overflow:auto;padding:12px;display:grid;grid-template-columns:repeat(auto-fill,minmax(196px,1fr));gap:10px;align-content:start"></div>
+    <div id="libEmpty" style="display:none;padding:36px 0;text-align:center;color:#82878f;font-size:12px">
+      库里还没有场景——布好场景后点「保存」入库（自动生成缩略图与标签）
+    </div>
+  </div>
+</div>
 <div id="errbar" role="alert"></div>
 
 <div id="helpOverlay" title="按 Esc 关闭">
@@ -696,7 +747,10 @@
       <tr><td class="k"><span>F</span></td><td>聚焦选中对象</td></tr>
       <tr><td class="k"><span>Ctrl+Z / Ctrl+Shift+Z</span></td><td>撤销 / 重做</td></tr>
       <tr><td class="k"><span>Ctrl+D</span></td><td>复制选中对象</td></tr>
-      <tr><td class="k"><span>Ctrl+S</span></td><td>保存场景 JSON</td></tr>
+      <tr><td class="k"><span>Ctrl+S</span></td><td>保存到场景库（自动缩略图/标签）</td></tr>
+      <tr><td class="k"><span>Ctrl+O</span></td><td>场景库：打开 / 改名 / 标签 / 导出</td></tr>
+      <tr><td class="k"><span>Home</span></td><td>全景取景（全部实体入画）</td></tr>
+      <tr><td class="k"><span>双击实体</span></td><td>相机聚焦该对象</td></tr>
       <tr><td class="k"><span>Delete</span></td><td>删除选中对象</td></tr>
       <tr><td class="k"><span>方向键</span></td><td>微调选中对象位置（Shift 大步）</td></tr>
       <tr><td class="k"><span>Ctrl+Enter</span></td><td>Agent 文字框：解析输入的要求</td></tr>

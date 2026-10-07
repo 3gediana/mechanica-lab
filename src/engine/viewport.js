@@ -75,6 +75,7 @@ export class Viewport {
     if (id && sel.has(id)) { this.clearHover(); return; }   // 已选中体不重复画 hover 态
     if (this._hoverId === id) return;
     this._hoverId = id;
+    this.renderer.domElement.style.cursor = id ? 'pointer' : '';   // 可抓取暗示：悬停实体=手型
     if (!this._hoverHelper) {
       this._hoverHelper = new THREE.BoxHelper(this.scene, 0x9aa0a6);
       this._hoverHelper.material.transparent = true;
@@ -106,6 +107,12 @@ export class Viewport {
 
   // ============ 选中对象定位：相机 target/距离平滑移向实体（第六章「选中对象定位」） ============
   // 场景全景取景（UI-49）：建场/载入后把相机平滑移到全部实体的包围盒
+  setGridVisible(on) {
+    if (this._grid) this._grid.visible = on;
+    if (this._axes) this._axes.forEach((a) => { a.visible = on; });
+    this.markDirty();
+  }
+
   focusScene() {
     const box = new THREE.Box3();
     let any = false;
@@ -859,6 +866,7 @@ export class Viewport {
     const zAxis = new THREE.Line(new THREE.BufferGeometry().setFromPoints(
       [new THREE.Vector3(0, 0.002, -10), new THREE.Vector3(0, 0.002, 10)]), axisMat(0x42688a));
     scene.add(xAxis, zAxis);
+    this._axes = [xAxis, zAxis];   // 网格显隐开关一并管坐标轴
 
     // gizmo（r186：TransformControls 非 Object3D，挂 getHelper()）
     const gizmo = new TransformControls(camera, renderer.domElement);
@@ -887,6 +895,14 @@ export class Viewport {
     this.gizmo = gizmo;
     scene.add(gizmo.getHelper());
 
+    // 双击实体=相机聚焦（比「选中再按 F」少一步；空处双击=全景取景）
+    renderer.domElement.addEventListener('dblclick', (e) => {
+      const id = this.pick(e.clientX, e.clientY);   // pick 返回实体 id 或 null
+      if (id && this.cb.onSelect) this.cb.onSelect(id, false);
+      const bind = id && this._bindLookup ? this._bindLookup(id) : null;
+      if (bind && bind.mesh) this.focusOn(bind.mesh);
+      else if (!id) this.focusScene();   // 空处双击=全景取景
+    });
     renderer.domElement.addEventListener('pointerdown', (e) => {
       this._downPos = [e.clientX, e.clientY];
       if (this.boxSelectMode) {

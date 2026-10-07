@@ -44,12 +44,22 @@ function fail(msg) {
   if (retry) retry.style.display = 'inline-block';
 }
 let toastTimer = 0;
+let toastLastMsg = '', toastLastAt = 0;
 function toast(msg) {
   const t = $('toast');
+  const now = performance.now();
+  // 同文案 1.2s 内重复触发（连点/连删）只续期不重弹，避免闪跳
+  if (msg === toastLastMsg && now - toastLastAt < 1200) {
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('on'), 1800);
+    toastLastAt = now;
+    return;
+  }
+  toastLastMsg = msg; toastLastAt = now;
   t.textContent = msg;
   t.classList.add('on');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('on'), 1800);
+  toastTimer = setTimeout(() => { t.classList.remove('on'); toastLastMsg = ''; }, 1800);
 }
 
 // ============ 全局状态 ============
@@ -209,6 +219,7 @@ const AUTOSAVE_KEY = 'mechanica.autosave.v1';
 
     const saved = loadAutosave();
     doc = saved || getPreset('incline');
+    if (saved) queueMicrotask(() => toast(`已恢复上次会话：「${doc.name}」（${doc.entities.length} 实体）——重新开始请点「新建」`));
     rebuildAll();
     bindUI();
     bindRunGrab();
@@ -239,8 +250,13 @@ function loadAutosave() {
     return null;
   }
 }
+let _autosaveTimer = null;
 function autosave() {
-  try { localStorage.setItem(AUTOSAVE_KEY, serializeDoc(doc)); } catch { /* 隐私模式等，静默 */ }
+  // 尾沿防抖：连续小步（拖 gizmo/方向键连调）合并成 300ms 一次落盘，大场景不再每步写盘
+  clearTimeout(_autosaveTimer);
+  _autosaveTimer = setTimeout(() => {
+    try { localStorage.setItem(AUTOSAVE_KEY, serializeDoc(doc)); } catch { /* 隐私模式等，静默 */ }
+  }, 300);
 }
 
 // ============ 文档变更主通道 ============
@@ -248,9 +264,11 @@ let historyBatchDepth = 0;   // Agent 建场批次：中间 commit 跳过入栈�
 let rebuildSuspend = 0;      // Agent 建场批内挂起全量重建：N 实体 N 次 Rapier 世界重建 → 批末一次（PER-5）
 
 function commitChange(label) {
-  if (historyBatchDepth > 0) { autosave(); return; }
+  markDirty();
+  if (historyBatchDepth > 0) { autosave(); saveSceneSnap(); return; }
   history.commit(() => serializeDoc(doc), label);
   autosave();
+  saveSceneSnap();
   refreshHistoryButtons();
 }
 function beginHistoryBatch() { historyBatchDepth++; }
@@ -332,9 +350,13 @@ function syncSelectionUI() {
 }
 
 function updateOutlineSelection() {
+  let mainRow = null;
   for (const row of $('outline').querySelectorAll('.ol-row')) {
     row.classList.toggle('sel', selectedIds.includes(row.dataset.id));
+    if (row.dataset.id === selectedId) mainRow = row;
   }
+  // 视口点选/Agent 建场选中后，大纲滚到该行（长场景不找人）
+  if (mainRow) mainRow.scrollIntoView({ block: 'nearest' });
   // 成组入口随多选出现/消失（不重建表，避免打断行内改名）
   const box = $('outline');
   let btn = box.querySelector('.ol-group-btn');
@@ -593,6 +615,8 @@ function recentComponents() {
   catch { return []; }
 }
 let catalogFilter = '';
+let textReqHistory = [];     // Agent 文字框提交历史（↑ 取回）
+let textReqHistPos = null;
 function opUpdateEntity(id, patch, label, { rebuild = true, rerender = true } = {}) {
   const e = getEntity(doc, id);
   if (!e) return false;
@@ -707,6 +731,7 @@ function play() {
   if (mode === 'edit') perfMon.reset();   // 运行态重开预算采样窗（启动尖峰不污染）
   mode = 'run'; paused = false;
   viewport.setGizmoEnabled(false);
+  $('stage').classList.add('running');   // 运行态抓手光标：可抓动态体的暗示
   sound.ui('play');
   updateSimbarStatic();
 }
@@ -726,6 +751,7 @@ function stepOnce() {
 function resetSim(silent = false) {
   mode = 'edit'; paused = false;
   viewport.setGizmoEnabled(true);
+  $('stage').classList.remove('running');
   rebuildAll();                    // 全量重建 = 回到文档初始态
   sound.ui('reset');
   updateSimbarStatic();
@@ -766,7 +792,14 @@ function refreshHistoryButtons() {
   $('btnRedo').disabled = !history.canRedo();
   $('btnUndo').title = history.canUndo() ? '撤销: ' + history.label().undo : '撤销';
   $('btnRedo').title = history.canRedo() ? '重做: ' + history.label().redo : '重做';
+  // 撤销/重做回到「与最近一次保存完全一致」的状态 → 脏点熄灭（诚实反映保存态）
+  if (lastSavedJson != null) {
+    const same = serializeDoc(doc) === lastSavedJson;
+    if (same && dirtySinceSave) { dirtySinceSave = false; $('dirtyDot').style.display = 'none'; document.title = `MECHANICA · ${doc.name || '未命名场景'}`; }
+    else if (!same && !dirtySinceSave) { dirtySinceSave = true; $('dirtyDot').style.display = 'inline-block'; document.title = `● ${doc.name || '未命名场景'} · MECHANICA`; }
+  }
 }
+let lastSavedJson = null;   // 最近一次入库的正文快照（undo 后对比恢复脏态）
 function undo() {
   const prev = history.undo(() => serializeDoc(doc));
   if (!prev) return;
@@ -780,14 +813,314 @@ function redo() {
   doc = next; autosave(); rebuildAll(); refreshHistoryButtons();
   toast('已重做: ' + (history.label().undo || ''));
 }
-function saveFile() {
-  const blob = new Blob([serializeDoc(doc)], { type: 'application/json' });
+// ============ 场景库（SCN）：localStorage 多场景 + 改名/标签/检索/缩略图 ============
+const SCENES_KEY = 'mechanica.scenes.v1';
+const SCENES_CAP = 40;   // 缩略图 jpeg≈10KB/张，40 场景远在 5MB 配额内
+
+function loadScenes() {
+  try { return JSON.parse(localStorage.getItem(SCENES_KEY) || '[]'); } catch { return []; }
+}
+function persistScenes(list) {
+  try { localStorage.setItem(SCENES_KEY, JSON.stringify(list)); } catch { toast('场景库写入失败（存储空间不足？）'); }
+}
+
+// 当前视口截图 → 160×90 jpeg 缩略图（编辑态才有意义；渲染后调用）
+function snapshotThumb() {
+  try {
+    const src = viewport.renderer.domElement;
+    const cv = document.createElement('canvas');
+    cv.width = 160; cv.height = 90;
+    const g = cv.getContext('2d');
+    const k = Math.max(cv.width / src.width, cv.height / src.height);
+    const w = src.width * k, h = src.height * k;
+    g.drawImage(src, (cv.width - w) / 2, (cv.height - h) / 2, w, h);   // cover 裁剪
+    return cv.toDataURL('image/jpeg', 0.72);
+  } catch { return null; }
+}
+
+// Agent 自动标签（用户点名「Agent 给它生成标签」）：从解析计划确定性派生——题型词+实体
+// 中文标签+环境/假设关键词。不走 API，零成本可复算；入库/建场时落到 doc.tags。
+const TAG_KIND_MAP = { astro: '天体', rotation: '转台', atwood: '阿特伍德', spring: '弹簧', hinge: '复摆' };
+const TAG_ENV_WORDS = [['光滑', '光滑'], ['摩擦', '摩擦'], ['弹性碰撞', '弹性碰撞'], ['非弹性', '非弹性碰撞'], ['完全非弹性', '完全非弹性碰撞'], ['恢复系数', '恢复系数'], ['空气阻力', '空气阻力'], ['子弹', '子弹'], ['板块', '板块'], ['传送带', '传送带'], ['椭圆', '椭圆轨道']];
+function deriveTagsFromPlan(plan) {
+  const tags = [];
+  const push = (t) => { if (t && !tags.includes(t) && tags.length < 6) tags.push(t); };
+  if (plan.kind && TAG_KIND_MAP[plan.kind]) push(TAG_KIND_MAP[plan.kind]);
+  const qt = String(plan.questionType || '');
+  for (const w of ['斜面', '抛体', '平抛', '斜抛', '碰撞', '对撞', '动量', '反弹', '自由落体', '上传', '反冲', '滚动', '单摆', '转台', '引力', '轨道', '弹簧', '传送带', '追及']) {
+    if (qt.includes(w)) push(w);
+  }
+  const typeLabels = { ramp: '斜面', sphere: '球', box: '方块', cylinder: '圆柱', celestial: '天体', conveyor: '传送带', pulley: '滑轮' };
+  const types = [...new Set(plan.entities.map((e) => e.type))];
+  for (const t of types) push(typeLabels[t]);
+  const envAll = [plan.environment || '', ...(plan.assumptions || [])].join(' ');
+  for (const [w, tag] of TAG_ENV_WORDS) if (envAll.includes(w)) push(tag);
+  return tags;
+}
+
+// 保存入库：upsert（按 doc.sceneId 绑定）；未入库过→新条目。返回条目 id。
+function saveToLibrary() {
+  if (mode !== 'edit') resetSim(true);   // 缩略图要编辑态画面：运行态保存先静默重置
+  if (!doc.sceneId) doc.sceneId = 'scn-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const list = loadScenes();
+  const now = Date.now();
+  const entry = {
+    id: doc.sceneId,
+    name: doc.name || '未命名场景',
+    tags: [...(doc.tags || [])],
+    thumb: snapshotThumb(),
+    updatedAt: now,
+    entityCount: doc.entities.length,
+    source: (doc.meta && doc.meta.source) || 'user',
+  };
+  const i = list.findIndex((x) => x.id === entry.id);
+  if (i >= 0) {
+    entry.saveCount = (list[i].saveCount || 0) + 1;
+    list[i] = { ...list[i], ...entry };
+  } else {
+    entry.saveCount = 1;
+    list.unshift(entry);
+  }
+  if (list.length > SCENES_CAP) {
+    const removed = list.splice(SCENES_CAP).map((x) => x.name);
+    toast('场景库超上限，最旧的已让位：' + removed.join('、'));
+  }
+  persistScenes(list);
+  doc.savedAt = now;
+  markSaved();
+  if (entry.name === '未命名场景') setTimeout(() => toast('提示：场景还叫「未命名场景」——顶部点一下名字即可改名'), 1900);
+  autosave();
+  const tagNote = entry.tags.length ? '，标签 ' + entry.tags.map((t) => '#' + t).join('') : '';
+  toast(i >= 0 ? `已更新场景库：「${entry.name}」${tagNote}` : `已存入场景库：「${entry.name}」${tagNote}`);
+  return entry.id;
+}
+
+function exportSceneFile(d = doc) {
+  const blob = new Blob([serializeDoc(d)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = (doc.name || '场景') + '.mechanica.json';
+  a.download = (d.name || '场景') + '.mechanica.json';
   a.click();
   URL.revokeObjectURL(a.href);
-  toast('场景已保存');
+}
+
+// 相对时间（库卡片 meta 行）：刚刚 / N 分钟前 / N 小时前 / 昨天前 / M月D日
+function relTime(ts) {
+  const dt = Date.now() - ts;
+  if (dt < 60e3) return '刚刚';
+  if (dt < 3600e3) return Math.floor(dt / 60e3) + ' 分钟前';
+  if (dt < 86400e3) return Math.floor(dt / 3600e3) + ' 小时前';
+  if (dt < 7 * 86400e3) return Math.floor(dt / 86400e3) + ' 天前';
+  const d = new Date(ts);
+  return `${d.getMonth() + 1}月${d.getDate()}日`;
+}
+
+let libOpen = false, libQuery = '';
+let libSort = (() => { try { return localStorage.getItem('mech.libSort') || 'recent'; } catch { return 'recent'; } })();   // 记住上次排序偏好
+const LIB_SOURCE_LABEL = { user: '', agent: 'Agent', preset: '预置' };
+function renderLibrary() {
+  const grid = $('libGrid');
+  const q = libQuery.trim().toLowerCase();
+  let list = loadScenes();
+  if (q) list = list.filter((x) => x.name.toLowerCase().includes(q) || (x.tags || []).some((t) => t.toLowerCase().includes(q)));
+  if (libSort === 'recent') list.sort((a, b) => b.updatedAt - a.updatedAt);
+  else if (libSort === 'name') list.sort((a, b) => a.name.localeCompare(b.name, 'zh'));
+  else list.sort((a, b) => (b.entityCount || 0) - (a.entityCount || 0));
+  $('libEmpty').style.display = list.length ? 'none' : 'block';
+  grid.innerHTML = '';
+  const curId = doc.sceneId;
+  for (const sc of list) {
+    const card = document.createElement('div');
+    card.className = 'lib-card';
+    if (sc.id === curId) card.style.borderColor = 'rgba(217,164,65,.65)';
+    const src = LIB_SOURCE_LABEL[sc.source] ? ` · ${LIB_SOURCE_LABEL[sc.source]}` : '';
+    card.innerHTML = `
+      ${sc.thumb ? `<img class="thumb" alt="" loading="lazy">` : `<div class="thumb" style="display:flex;align-items:center;justify-content:center;color:var(--faint);font-size:10px">无缩略图</div>`}
+      <div class="bd">
+        <div class="nm" title="双击改名">${sc.id === curId ? '▶ ' : ''}</div>
+        <div class="chips"></div>
+        <div class="meta">${sc.entityCount || 0} 实体 · 存过 ${sc.saveCount || 1} 次 · ${relTime(sc.updatedAt)}${src}</div>
+        <div class="ops">
+          <button class="op-open">打开</button>
+          <button class="op-dup" title="复制为一个新场景">副本</button>
+          <button class="op-export" title="下载 JSON">导出</button>
+          <button class="op-del danger" title="删除（需确认）">删除</button>
+        </div>
+      </div>`;
+    card.ondblclick = (ev) => {
+      if (ev.target.closest('button') || ev.target.closest('input') || ev.target.closest('.chips')) return;
+      openScene();
+    };
+    const nm = card.querySelector('.nm');
+    nm.appendChild(document.createTextNode(sc.name));
+    const img = card.querySelector('img.thumb');
+    if (img) { img.src = sc.thumb; img.title = '点击打开「' + sc.name + '」（双击卡片同）'; }
+    // 标签 chips：x 移除；+加标签（Enter 提交）
+    const chips = card.querySelector('.chips');
+    for (const t of sc.tags || []) {
+      const c = document.createElement('span');
+      c.className = 'chip-tag';
+      c.textContent = '#' + t;
+      const x = document.createElement('span');
+      x.className = 'x';
+      x.textContent = '×';
+      x.title = '移除标签 ' + t;
+      x.onclick = () => { sc.tags = sc.tags.filter((y) => y !== t); persistScenes(loadScenes().map((y) => (y.id === sc.id ? sc : y))); if (sc.id === curId) { doc.tags = [...sc.tags]; } renderLibrary(); };
+      c.appendChild(x);
+      chips.appendChild(c);
+    }
+    const add = document.createElement('button');
+    add.className = 'chip-add';
+    add.textContent = '+标签';
+    add.title = '给这个场景加标签（Enter 提交）';
+    add.onclick = () => {
+      const inp = document.createElement('input');
+      inp.placeholder = '标签名';
+      inp.style.cssText = 'width:64px;background:rgba(0,0,0,.3);border:1px solid rgba(217,164,65,.55);border-radius:2px;color:var(--text);font-size:10px;padding:1px 4px';
+      inp.onkeydown = (ev) => {
+        if (ev.key === 'Enter') {
+          const v = inp.value.trim().slice(0, 12);
+          if (v && !(sc.tags || []).includes(v)) {
+            sc.tags = [...(sc.tags || []), v];
+            persistScenes(loadScenes().map((y) => (y.id === sc.id ? sc : y)));
+            if (sc.id === curId) doc.tags = [...sc.tags];
+          }
+          renderLibrary();
+        } else if (ev.key === 'Escape') renderLibrary();
+      };
+      add.replaceWith(inp);
+      inp.focus();
+    };
+    chips.appendChild(add);
+    // 操作
+    const openScene = () => {
+      const full = loadScenes().find((x) => x.id === sc.id);
+      const all = loadScenes();
+      if (!all.find((x) => x.id === sc.id)) { toast('场景已不在库中'); renderLibrary(); return; }
+      openSceneById(sc.id);
+    };
+    card.querySelector('.op-open').onclick = openScene;
+    if (img) img.onclick = openScene;
+    card.querySelector('.op-dup').onclick = () => {
+      const nid = 'scn-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      const all = loadScenes();
+      const srcCard = all.find((x) => x.id === sc.id);
+      all.unshift({ ...srcCard, id: nid, name: sc.name + ' 副本', updatedAt: Date.now() });
+      persistScenes(all);
+      toast(`已创建副本「${sc.name} 副本」`);
+      renderLibrary();
+    };
+    card.querySelector('.op-export').onclick = async () => {
+      const raw = localStorage.getItem(AUTOSAVE_KEY);
+      // 导出库条目对应的完整文档：库只存元数据，正文以当前打开为准；未打开的用自动存档兜底
+      if (sc.id === doc.sceneId) { exportSceneFile(doc); return; }
+      exportSceneFile({ ...deserializeDoc(raw || '{}'), name: sc.name, sceneId: sc.id });
+    };
+    const del = card.querySelector('.op-del');
+    del.onclick = () => {
+      if (del.dataset.armed) {
+        persistScenes(loadScenes().filter((x) => x.id !== sc.id));
+        if (sc.id === doc.sceneId) doc.sceneId = null;
+        renderLibrary();
+        toast(`已删除「${sc.name}」`);
+      } else {
+        del.dataset.armed = '1';
+        del.textContent = '确认删?';
+        setTimeout(() => { if (del.isConnected) { del.dataset.armed = ''; del.textContent = '删除'; } }, 2600);
+      }
+    };
+    // 双击改名（行内输入）
+    nm.ondblclick = () => {
+      const inp = document.createElement('input');
+      inp.value = sc.name;
+      inp.onkeydown = (ev) => {
+        if (ev.key === 'Enter') {
+          const v = inp.value.trim().slice(0, 40) || sc.name;
+          const all = loadScenes();
+          const target = all.find((x) => x.id === sc.id);
+          if (target) { target.name = v; persistScenes(all); }
+          if (sc.id === curId) { doc.name = v; $('sceneName').value = v; }
+          renderLibrary();
+        } else if (ev.key === 'Escape') renderLibrary();
+      };
+      inp.onblur = () => renderLibrary();
+      nm.textContent = '';
+      nm.appendChild(inp);
+      inp.focus();
+      inp.select();
+    };
+    grid.appendChild(card);
+  }
+}
+function openSceneById(id) {
+  // 库条目只存元数据；正文 = 当前正在编辑的同一场景（sceneId 绑定）→ 已经是它就不动；
+  // 否则从场景库正文库（=各场景的自动存档快照）恢复：场景正文快照随每次 autosave 按 sceneId 存
+  const snaps = loadSceneSnaps();
+  const snap = snaps[id];
+  if (snap) {
+    applyDoc(deserializeDoc(snap), '打开场景');
+    $('sceneName').value = doc.name;
+    markSaved();
+    closeLibrary();
+    toast(`已打开「${doc.name}」（${doc.entities.length} 实体）`);
+  } else if (id === doc.sceneId) {
+    closeLibrary();
+    toast('这就是当前场景');
+  } else {
+    toast('场景正文缺失（旧条目）——保留元数据，可删除');
+  }
+}
+// 场景正文快照：sceneId → serializeDoc（autosave 时同步写，库的打开才有所指）
+const SCENE_SNAPS_KEY = 'mechanica.scene-snaps.v1';
+function loadSceneSnaps() {
+  try { return JSON.parse(localStorage.getItem(SCENE_SNAPS_KEY) || '{}'); } catch { return {}; }
+}
+function saveSceneSnap() {
+  if (!doc.sceneId) return;
+  try {
+    const snaps = loadSceneSnaps();
+    snaps[doc.sceneId] = serializeDoc(doc);
+    // 快照库只保留现有场景条目引用的正文（条目删除后正文一并回收）
+    const ids = new Set(loadScenes().map((x) => x.id));
+    for (const k of Object.keys(snaps)) if (!ids.has(k)) delete snaps[k];
+    localStorage.setItem(SCENE_SNAPS_KEY, JSON.stringify(snaps));
+  } catch { /* 空间不足静默：自动存档仍是主通道 */ }
+}
+
+function openLibrary() {
+  libOpen = true;
+  $('sceneLib').style.display = 'block';
+  $('libSearch').value = libQuery;
+  renderLibrary();
+  $('libSearch').focus();
+}
+function closeLibrary() {
+  libOpen = false;
+  $('sceneLib').style.display = 'none';
+}
+
+// 脏跟踪：任何 commitChange（=文档变了）→ 脏；保存/打开/新建入库动作 → 清
+let dirtySinceSave = false;
+function markDirty() {
+  if (dirtySinceSave) return;
+  dirtySinceSave = true;
+  $('dirtyDot').style.display = 'inline-block';
+  document.title = `● ${doc.name || '未命名场景'} · MECHANICA`;
+}
+function markSaved() {
+  dirtySinceSave = false;
+  lastSavedJson = serializeDoc(doc);
+  $('dirtyDot').style.display = 'none';
+  document.title = `MECHANICA · ${doc.name || '未命名场景'}`;
+}
+
+function saveFile() {
+  saveToLibrary();
+  saveSceneSnap();
+  const bs = $('btnSave');
+  const prev = bs.textContent;
+  bs.textContent = '已存';
+  setTimeout(() => { bs.textContent = prev; }, 900);
 }
 function openFile(file) {
   const r = new FileReader();
@@ -795,7 +1128,9 @@ function openFile(file) {
     try {
       applyDoc(deserializeDoc(String(r.result)), '打开场景');
       $('sceneName').value = doc.name;
-      toast('场景已载入');
+      markSaved();
+      autosave(); saveSceneSnap();
+      toast(`场景已载入：「${doc.name}」（${doc.entities.length} 实体）——「保存」将继续更新它在库里的条目`);
     } catch (e) {
       toast('打开失败: ' + e.message);
     }
@@ -805,7 +1140,7 @@ function openFile(file) {
 
 // ============ UI 绑定 ============
 function bindUI() {
-  $('btnNew').onclick = () => { applyDoc(createEmptyDoc('未命名场景'), '新建'); $('sceneName').value = doc.name; agentPatchRounds = 0; };
+  $('btnNew').onclick = () => { applyDoc(createEmptyDoc('未命名场景'), '新建'); $('sceneName').value = doc.name; agentPatchRounds = 0; markSaved(); };
   // 预置下拉单源化（MDL-41）：选项由 PRESETS 自动生成，消除 index.html 手写双份漂移；
   // 分组只做归类，未列出的预置自动落「更多」组
   const PRESET_GROUPS = [
@@ -836,6 +1171,7 @@ function bindUI() {
       for (const [id, label] of items) {
         const o = document.createElement('option');
         o.value = id; o.textContent = label;
+        o.title = (PRESETS[id] && PRESETS[id].desc) || label;   // 悬停预览这个预置讲什么
         og.appendChild(o);
       }
       frag.appendChild(og);
@@ -844,14 +1180,17 @@ function bindUI() {
     selPreset.appendChild(frag);
   }
   $('selPreset').onchange = (e) => {
-    if (!e.target.value) return;
-    applyDoc(getPreset(e.target.value), '载入预置');
+    const picked = e.target.value;
+    e.target.value = '';   // 立刻回占位：同一条预置可反复重选（否则选同项不再触发 change）
+    if (!picked) return;
+    applyDoc(getPreset(picked), '载入预置');
+    markSaved();
     $('sceneName').value = doc.name;
-    if (e.target.value === 'momentum') { setVectors(true); setCons(true); }   // 教学默认开叠加层
-    if (e.target.value === 'celestial') { setTrails(true); setCons(true); }
-    if (e.target.value === 'spin') { setVectors(true); setTrails(true); setCons(true); }
-    if (e.target.value === 'classic') { setVectors(true); setTrails(true); setCons(true); }
-    if (e.target.value === 'atwood') {
+    if (picked === 'momentum') { setVectors(true); setCons(true); }   // 教学默认开叠加层
+    if (picked === 'celestial') { setTrails(true); setCons(true); }
+    if (picked === 'spin') { setVectors(true); setTrails(true); setCons(true); }
+    if (picked === 'classic') { setVectors(true); setTrails(true); setCons(true); }
+    if (picked === 'atwood') {
       setVectors(true); setCons(true);
       const pl = doc.entities.find((x) => x.type === 'pulley');   // 滑轮在 y=3，载入后聚焦
       if (pl && runtime.binds.has(pl.id)) viewport.focus(runtime.binds.get(pl.id).mesh);
@@ -872,6 +1211,20 @@ function bindUI() {
     const proj = viewport.toggleProjection();
     $('btnOrtho').classList.toggle('hot', proj === 'ortho');
   };
+  // 网格显隐（截图/近景演示时不想要背景格）——偏好记忆
+  {
+    let gridOn = true;
+    try { gridOn = localStorage.getItem('mech.grid') !== '0'; } catch { /* 隐私模式默认开 */ }
+    const btnGrid = $('btnGrid');
+    btnGrid.classList.toggle('hot', gridOn);
+    viewport.setGridVisible(gridOn);
+    btnGrid.onclick = () => {
+      gridOn = !gridOn;
+      viewport.setGridVisible(gridOn);
+      btnGrid.classList.toggle('hot', gridOn);
+      try { localStorage.setItem('mech.grid', gridOn ? '1' : '0'); } catch { /* 静默 */ }
+    };
+  }
   $('btnRec').onclick = () => toggleFrameRec();
   $('btnReplay').onclick = () => startReplay();
   // 回放时间轴：拖动中暂停自动推进、松手继续（拖动即逐帧 scrub）
@@ -920,9 +1273,31 @@ function bindUI() {
   $('btnSound').onclick = () => { sound.unlock(); setSound(sound.muted); };
   setSound(!sound.muted);
   $('btnShake').onclick = () => setShake(!(juice && juice.shakeOn));
+  // 视口截图（PNG）：preserveDrawingBuffer 未开时必须当场渲染一帧再取——渲染即得，不依赖脏区状态
+  $('btnSnapshot').onclick = () => {
+    viewport.render();   // 当场出一帧（preserveDrawingBuffer 未开，取前必须现渲）
+    const url = viewport.renderer.domElement.toDataURL('image/png');
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${doc.name || '场景'}-${new Date().toISOString().slice(5, 16).replace('T', '_')}.png`;
+    a.click();
+    toast('已保存视口截图（下载）');
+  };
 
-  $('sceneName').onchange = (e) => { doc.name = e.target.value || '未命名场景'; e.target.value = doc.name; autosave(); };
+  $('sceneName').onchange = (e) => { doc.name = e.target.value || '未命名场景'; e.target.value = doc.name; autosave(); markDirty(); };
+  // 改名体验（SCN）：聚焦全选（改名高频，双击手选太磨）；Esc 还原未提交改动；空名回落原名
+  $('sceneName').onfocus = (e) => { e.target.dataset.prev = e.target.value; requestAnimationFrame(() => e.target.select()); };
+  $('sceneName').onkeydown = (e) => {
+    if (e.key === 'Escape') { e.target.value = e.target.dataset.prev || doc.name; e.target.blur(); }
+    if (e.key === 'Enter') e.target.blur();   // 回车=提交改名
+  };
+  $('sceneName').onblur = (e) => { if (e.target.value.trim() === '') e.target.value = doc.name; };
+  $('dirtyDot').style.cursor = 'pointer';
+  $('dirtyDot').onclick = () => saveFile();   // 点脏点=顺手保存（所见即所按）
+  $('btnHelpQuick').onclick = () => $('helpOverlay').classList.toggle('on');
 
+  const osb = document.getElementById('outlineSearch');
+  if (osb) osb.oninput = (e) => { outlineQuery = e.target.value; renderOutline(); };
   $('catalogSearch').oninput = (e) => {
     catalogFilter = e.target.value;
     const pos = e.target.selectionStart;
@@ -931,16 +1306,49 @@ function bindUI() {
     inp.value = catalogFilter;
     inp.setSelectionRange(pos, pos);
   };
+  $('catalogSearch').onkeydown = (e) => {
+    if (e.key === 'Enter' && catalogFilter.trim()) {
+      // 放置第一个命中卡片（点目录行同一条链）；Shift+Enter=收藏它
+      const first = $('catalogList').querySelector('.comp-item');
+      if (first) {
+        first.dispatchEvent(new MouseEvent('mouseleave', { bubbles: false }));
+        first.click();
+        e.target.blur();
+      }
+    }
+  };
   $('tabInspector').onclick = () => selectTab('inspector');
   $('tabAgent').onclick = () => selectTab('agent');
   bindAgentPanel();
 
-  // 隐藏文件输入（动态挂载）
-  const fi = document.createElement('input');
-  fi.type = 'file'; fi.accept = '.json,application/json'; fi.style.display = 'none';
-  fi.onchange = () => { if (fi.files[0]) openFile(fi.files[0]); fi.value = ''; };
-  document.body.appendChild(fi);
-  $('btnOpen').onclick = () => fi.click();
+  // 「打开」唯一入口=场景库（文件导入走库内「导入文件」）
+  $('btnOpen').onclick = () => openLibrary();
+  // 场景库弹层内交互（SCN）
+  $('libClose').onclick = closeLibrary;
+  $('sceneLib').addEventListener('mousedown', (ev) => { if (ev.target === $('sceneLib')) closeLibrary(); });
+  $('libSearch').oninput = (e) => { libQuery = e.target.value; renderLibrary(); };
+  $('libSearch').onkeydown = (ev) => {
+    if (ev.key === 'Enter') {
+      const first = $('libGrid').querySelector('.lib-card .op-open');
+      if (first) first.click();
+      else toast('没有匹配的场景');
+    } else if (ev.key === 'Escape') {
+      // 两段式：有词先清词，空词才关库（手滑 Esc 不丢检索语境）
+      if ($('libSearch').value) { $('libSearch').value = ''; libQuery = ''; renderLibrary(); }
+      else closeLibrary();
+    }
+  };
+  $('libSort').title = '排序方式（偏好会记住）';
+  $('libSort').onchange = (e) => { libSort = e.target.value; try { localStorage.setItem('mech.libSort', libSort); } catch { /* 隐私模式 */ } renderLibrary(); };
+  $('libExportCurrent').title = '把当前场景下载为 JSON 文件（与库条目无关，随时可用）';
+  $('libExportCurrent').onclick = () => { exportSceneFile(); toast('已导出当前场景 JSON：' + (doc.name || '未命名场景')); };
+  {
+    const lfi = document.createElement('input');
+    lfi.type = 'file'; lfi.accept = '.json,application/json'; lfi.style.display = 'none';
+    lfi.onchange = () => { if (lfi.files[0]) openFile(lfi.files[0]); lfi.value = ''; };
+    document.body.appendChild(lfi);
+    $('libImport').onclick = () => lfi.click();
+  }
 
   window.addEventListener('keydown', onKey);
   // 滚轮误触防护（FEEL-1）：聚焦 number 输入后滑动滚轮会悄悄改值，教学场景高频误操作
@@ -1020,13 +1428,20 @@ function setGizmoMode(m) {
 
 function onKey(e) {
   const tag = (e.target && e.target.tagName) || '';
-  if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
   if (!appReady) return;
+  // 保存/打开是全局应急键：在输入框里打字时也要能用（改完名直接 Ctrl+S 顺手存）
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key.toLowerCase() === 's' || e.key.toLowerCase() === 'o')) {
+    e.preventDefault();
+    if (e.key.toLowerCase() === 's') saveFile(); else openLibrary();
+    return;
+  }
+  if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
   if (e.ctrlKey || e.metaKey) {
     const k = e.key.toLowerCase();
     if (k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
     else if (k === 'y') { e.preventDefault(); redo(); }
     else if (k === 's') { e.preventDefault(); saveFile(); }
+    else if (k === 'o') { e.preventDefault(); openLibrary(); }
     else if (k === 'd') { e.preventDefault(); if (selectedId) opDuplicate(selectedId); }
     return;
   }
@@ -1036,6 +1451,8 @@ function onKey(e) {
     return;
   }
   if (e.code === 'Escape') {
+    if (libOpen) { closeLibrary(); return; }
+    if (document.activeElement === $('catalogSearch') && catalogFilter) { $('catalogSearch').value = ''; catalogFilter = ''; renderCatalog(); return; }
     if (viewport.gizmo.dragging) { viewport.gizmo.reset(); viewport.markDirty(); return; }   // FZ-57：拖错当场 Esc 弹回，不产生提交
     const help = $('helpOverlay');
     if (help.classList.contains('on')) { help.classList.remove('on'); return; }
@@ -1064,6 +1481,7 @@ function onKey(e) {
   else if (e.code === 'KeyW') setGizmoMode('translate');
   else if (e.code === 'KeyE') setGizmoMode('rotate');
   else if (e.code === 'KeyF') viewport.focusOn(selectedId ? runtime.binds.get(selectedId).mesh : null);
+  else if (e.code === 'Home') { viewport.focusScene(); toast('全景取景'); }
   else if (e.code === 'KeyR') resetSim();
   else if (e.code === 'KeyB') {
     autoBPT = !autoBPT;
@@ -1119,6 +1537,11 @@ function addCatalogRow(box, c, faved = false) {
   const row = document.createElement('div');
   row.className = 'comp-item';
   row.innerHTML = `<div class="thumbbox"><img class="thumb" alt=""><span class="fav" title="收藏/取消收藏"></span><span class="plus">+</span></div><span class="nm"></span>`;
+  {
+    const d = c.defaults && c.defaults.params ? c.defaults.params : {};
+    const parts = Object.entries(d).slice(0, 3).map(([k, v]) => `${k} ${v}`);
+    row.title = `${c.label}——${c.desc || ''}${parts.length ? `（默认：${parts.join(' · ')}）` : ''}`;
+  }
   // 缩略图：按组件真实几何离屏渲染（失败时隐藏 img，卡片退化为纯文字）
   const url = renderThumb(registry.getComponent(c.id), M);
   const img = row.querySelector('.thumb');
@@ -1129,7 +1552,12 @@ function addCatalogRow(box, c, faved = false) {
   fav.onclick = (ev) => { ev.stopPropagation(); toggleFavorite(c.id); };
   row.querySelector('.nm').textContent = c.label;
   // 兼容性提示（Goal 第六章目录条文）：物理行为/放置要求进 tooltip + 两实体类徽标（压缩略图右下角）
-  row.title = c.desc + (c.compat ? '\n【兼容性】' + c.compat : '');
+  {
+    const dp = c.defaults && c.defaults.params ? c.defaults.params : {};
+    const parts = Object.entries(dp).slice(0, 3).map(([k, v]) => `${k}=${v}`);
+    const nl = String.fromCharCode(10);
+    row.title = `${c.desc || c.label}${parts.length ? `${nl}【默认】${parts.join(' · ')}` : ''}` + (c.compat ? `${nl}【兼容性】${c.compat}` : '');
+  }
   if (c.isLink || c.isMeasure || c.isSensor) {
     const badge = document.createElement('span');
     badge.className = 'need2';
@@ -1186,6 +1614,7 @@ function catalogItemMatches(c, q) {
 
 function renderCatalog() {
   const box = $('catalogList');
+  const keepTop = box.scrollTop;   // 重渲（搜索/收藏/最近）不跳顶
   box.innerHTML = '';
   const q = catalogFilter.trim().toLowerCase();
   const favs = favoriteComponents();
@@ -1216,7 +1645,12 @@ function renderCatalog() {
       const none = document.createElement('div');
       none.className = 'ol-empty';
       none.textContent = '无匹配组件';
-      box.appendChild(none);
+      const hint = document.createElement('div');
+      hint.className = 'ol-empty';
+      hint.style.color = 'var(--faint)';
+      hint.textContent = '试试：斜坡 / 球 / 方块 / 弹簧 / 传送带（口语词如「斜面」会自动对上）';
+      box.appendChild(none, hint);
+      box.appendChild(hint);
     }
     return;
   }
@@ -1246,6 +1680,7 @@ function renderCatalog() {
     for (const c of cat.items) addCatalogRow(g, c, favs.includes(c.id));
   }
   renderCatalogEnvMats(box, grid);
+  box.scrollTop = keepTop;
 }
 
 // 环境与材质特殊段（Goal 六目录分类建议项）：非放置组件的场景级卡——
@@ -1318,12 +1753,23 @@ function refreshMaterialSwatches() {
 
 let outlineEditing = false;   // 大纲行改名中：禁止重建（重建会吞掉正在编辑的 input）
 
+let outlineQuery = '';
 function renderOutline() {
   if (outlineEditing) return;
   const box = $('outline');
+  const keepTop = box.scrollTop;
   box.innerHTML = '';
+  // 大纲搜索（场景对象多时找人）：简单子串匹配，命中行保留、其余隐藏
+  const wrap = document.getElementById('outlineWrap');
+  const sbox = document.getElementById('outlineSearch');
+  if (sbox) sbox.style.display = doc.entities.length > 6 ? 'block' : 'none';
+  const oq = outlineQuery.trim().toLowerCase();
+  const olPass = (e) => !oq || (e.name || '').toLowerCase().includes(oq) || e.type.includes(oq);
+  const olTitle = document.getElementById('olCount');
+  if (olTitle) olTitle.textContent = doc.entities.length ? `（${doc.entities.length}）` : '';
   if (!doc.entities.length) {
-    box.innerHTML = '<div class="ol-empty">场景为空</div>';
+    box.innerHTML = '<div class="ol-empty">场景为空——从左侧组件目录添加，或在 Agent 页签解析题目自动建场</div>';
+    box.scrollTop = keepTop;
     return;
   }
   // 对象分组（Goal 第六章）：按实体 group 字段分桶渲染；「成组」入口由 updateOutlineSelection 统一管理
@@ -1335,7 +1781,7 @@ function renderOutline() {
       groups.get(e.group).push(e);
     } else ungrouped.push(e);
   }
-  for (const e of ungrouped) renderOutlineRow(box, e);
+  for (const e of ungrouped) if (olPass(e)) renderOutlineRow(box, e);
   for (const [gname, members] of groups) {
     const head = document.createElement('div');
     head.className = 'ol-group';
@@ -1358,8 +1804,9 @@ function renderOutline() {
       renderInspector();
     };
     box.appendChild(head);
-    for (const e of members) renderOutlineRow(box, e, true);
+    for (const e of members) if (olPass(e)) renderOutlineRow(box, e, true);
   }
+  box.scrollTop = keepTop;
 }
 
 function renderOutlineRow(box, e, inGroup = false) {
@@ -1368,7 +1815,17 @@ function renderOutlineRow(box, e, inGroup = false) {
     row.dataset.id = e.id;
     row.className = 'ol-row' + (selectedIds.includes(e.id) ? ' sel' : '');
     if (inGroup) row.style.borderLeft = '2px solid rgba(217,164,65,.25)';
-    row.innerHTML = `<span class="nm"></span><span class="ty"></span><span class="lock" title="锁定（防误选/防拖动）"></span><span class="del" title="删除" role="button" aria-label="删除该对象">×</span>`;
+    row.innerHTML = `<span class="nm"></span><span class="ty"></span><span class="vis" title="显示/隐藏（仅视觉隐藏，参与物理）"></span><span class="lock" title="锁定（防误选/防拖动）"></span><span class="del" title="删除" role="button" aria-label="删除该对象">×</span>`;
+    const vis = row.querySelector('.vis');
+    vis.textContent = e.visible === false ? '隐' : '显';
+    vis.style.cssText = 'cursor:pointer;font-size:9px;color:' + (e.visible === false ? 'var(--danger)' : 'var(--faint)');
+    vis.onclick = (ev) => {
+      ev.stopPropagation();
+      opUpdateEntity(e.id, { visible: e.visible === false }, (e.visible === false ? '显示 ' : '隐藏 ') + e.name, { rebuild: false });
+      const b = runtime.binds.get(e.id);
+      if (b && b.mesh) b.mesh.visible = e.visible !== false;
+      viewport.markDirty();
+    };
     const nm = row.querySelector('.nm');
     nm.textContent = e.name;
     nm.ondblclick = () => {
@@ -1408,15 +1865,23 @@ function renderOutlineRow(box, e, inGroup = false) {
       || (Array.isArray(x.attach) && x.attach.includes(e.id))).length;
     const nCons = nJ + nL + nT;
     if (nCons > 0) {
+      const relNames = [];
+      for (const x of doc.entities) {
+        if (Array.isArray(x.attach) && x.attach.includes(e.id)) relNames.push(x.name + '→本體');
+        if ((x.joints || []).some((j) => j.target === e.id)) relNames.push(x.name + '→本體(关节)');
+      }
+      if (nJ) relNames.push('自带关节×' + nJ);
+      if (nL) relNames.push('连接两端');
       const cb = document.createElement('span');
       cb.className = 'cons-badge';
-      cb.title = `约束关系 ${nCons} 条（含被连接）`;
+      cb.title = `约束 ${nCons} 条：${relNames.slice(0, 4).join('、') || '详见检查器'}`;
       cb.textContent = '⌁' + nCons;
       cb.style.cssText = 'font-size:9px;color:var(--accent);margin-left:2px';
       row.querySelector('.ty').after(cb);
     }
+    row.title = `类型 ${c.label} · 来源 ${e.source === 'agent' ? 'Agent 建场' : e.source === 'preset' ? '预置' : '手动添加'}`;
     row.onclick = () => selectEntity(e.id);
-    row.querySelector('.del').onclick = (ev) => { ev.stopPropagation(); opRemoveEntity(e.id); };
+    row.querySelector('.del').onclick = (ev) => { ev.stopPropagation(); opRemoveEntity(e.id); };   // opRemoveEntity 内 toast 自带 [撤销]
     // 选中对象定位：⌖ 把相机 target/距离平滑移向该实体（组内成员与链接实体同样可用）
     const focusBtn = document.createElement('span');
     focusBtn.className = 'focus-btn';
@@ -1483,6 +1948,13 @@ function renderInspector() {
   box.innerHTML = '';
   const c = registry.getComponent(e.type);
   const dis = mode === 'run';
+  // 运行态横幅（一次说清，替代散在各输入上的 disabled 猜谜）
+  if (dis) {
+    const banner = document.createElement('div');
+    banner.style.cssText = 'margin:0 0 8px;padding:6px 10px;background:rgba(217,164,65,.10);border:1px solid rgba(217,164,65,.35);border-radius:2px;font-size:11px;color:var(--accent)';
+    banner.textContent = '运行态只读——「重置」回编辑态后可修改参数';
+    box.appendChild(banner);
+  }
 
   // 传感器读数（速度/计时/力）：运行态实时显示
   if ((e.type === 'speedSensor' || e.type === 'timer' || e.type === 'forceSensor') && Array.isArray(e.attach) && e.attach.length === 1) {
@@ -1714,6 +2186,8 @@ function renderInspector() {
   }
   msel.disabled = dis;
   msel.onchange = () => { e.render.material = msel.value; patchRender(e, '换材质'); };
+
+  // 检查器既有「操作」组（尾部 grpA）补聚焦按钮——见本函数尾部 
   grpM.appendChild(mrow);
   box.appendChild(grpM);
 
@@ -1743,8 +2217,12 @@ function renderInspector() {
   const grpA = grp('操作');
   const br = document.createElement('div');
   br.className = 'btnrow';
-  br.innerHTML = `<button data-a="dup">复制</button><button data-a="del" class="danger">删除</button>`;
+  br.innerHTML = `<button data-a="dup">复制</button><button data-a="focus">聚焦</button><button data-a="del" class="danger">删除</button>`;
   br.querySelector('[data-a=dup]').onclick = () => opDuplicate(e.id);
+  br.querySelector('[data-a=focus]').onclick = () => { const b = runtime.binds.get(e.id); if (b && b.mesh) viewport.focusOn(b.mesh); };
+  br.querySelector('[data-a=focus]').title = '相机对准该实体（F 同）';
+  br.querySelector('[data-a=dup]').title = '复制该实体（Ctrl+D 同）';
+  br.querySelector('[data-a=del]').title = '删除该实体（级联删除其连接件；Ctrl+Z 可撤销）';
   br.querySelector('[data-a=del]').onclick = () => opRemoveEntity(e.id);
   grpA.appendChild(br);
   box.appendChild(grpA);
@@ -1766,6 +2244,25 @@ function grp(title) {
   return g;
 }
 
+// 常用参数的教学提示（悬停即知这个参数物理上管什么；schema 有专门 desc 时优先用 schema 的）
+const PARAM_HINTS = {
+  radius: '半径：碰撞体与渲染尺寸同步变化',
+  mass: '质量：影响惯性（F=ma）与碰撞冲量分配',
+  friction: '摩擦因数：0=光滑（冰面），0.5≈木-木，1≈高阻',
+  restitution: '弹性系数：0=完全非弹性（碰后不弹），1=完全弹性（无动能损失）',
+  height: '高度：碰撞体与渲染同步',
+  width: '宽度：碰撞体与渲染同步',
+  length: '长度：碰撞体与渲染同步',
+  sx: '长（x 方向）', sy: '厚（y 方向）', sz: '宽（z 方向）',
+  spokes: '辐条数：>0 时画出辐条，转台转动肉眼可见',
+  speed: '带速：正=沿 +x 输运，负=反向',
+  stiffness: '劲度系数 k（N/m）：越大弹簧越硬，振动越快',
+  restLength: '原长（m）：弹簧不受力时的自然长度',
+  damping: '阻尼：0=理想弹簧不耗能，>0 振幅逐渐衰减',
+  rollResist: '滚动阻力 μr：纯滚动时的速度衰减强度',
+  momentOfInertia: '转动惯量（题给）：角动量 L=Iω 的 I',
+  gravityScale: '重力缩放：0=该物体不受重力（悬浮理想化）',
+};
 function numRow(parent, label, unit, value, step, onCommit, { min, max, schema } = {}) {
   const row = document.createElement('div');
   row.className = 'frow';
@@ -1778,6 +2275,13 @@ function numRow(parent, label, unit, value, step, onCommit, { min, max, schema }
   if (min !== undefined) input.min = min;
   if (max !== undefined) input.max = max;
   input.disabled = mode === 'run';
+  {
+    const hint = (schema && PARAM_HINTS[schema.key]) || '';
+    const range = (min !== undefined || max !== undefined) ? `允许范围 ${min !== undefined ? min : '-∞'} ~ ${max !== undefined ? max : '+∞'}${unit ? ' ' + unit : ''}` : '';
+    const ro = mode === 'run' ? '（运行态只读）' : '';
+    input.title = [hint, range].filter(Boolean).join('。') + ro;
+  }
+  input.onfocus = () => requestAnimationFrame(() => input.select());
   const err = document.createElement('div');
   err.className = 'errmsg';
   parent.appendChild(row);
@@ -1822,10 +2326,15 @@ function triRow(parent, label, unit, values, step, onCommit) {
   row.querySelector('label').textContent = label;
   row.querySelector('.u').textContent = unit;
   const inputs = [...row.querySelectorAll('input')];
+  const AXES = ['X', 'Y', 'Z'];
+  const AX_COLORS = ['#c97a6a', '#8fbf7a', '#6a8fbf'];   // 三轴习惯色（X红/Y绿/Z蓝，低饱和配深底）
   inputs.forEach((inp, i) => {
     inp.value = +Number(values[i]).toFixed(3);
     inp.step = step;
     inp.disabled = mode === 'run';
+    inp.title = `${label}·${AXES[i]} 轴${mode === 'run' ? '（运行态只读，重置后可改）' : ''}`;
+    inp.style.borderBottom = `2px solid ${AX_COLORS[i]}55`;   // 轴色底标：不看标签也知道在改哪根轴
+    inp.onfocus = () => requestAnimationFrame(() => inp.select());   // 双击/Tab 进入即全选，直接输新值
     inp.onchange = () => {
       const vals = inputs.map((x) => Number(x.value));
       if (vals.some((v) => !Number.isFinite(v))) { inputs.forEach((x, j) => { x.value = +Number(values[j]).toFixed(3); }); return; }
@@ -2409,6 +2918,7 @@ function setSound(on) {
   const btn = $('btnSound');
   btn.classList.toggle('hot', sound.muted === false);
   btn.textContent = sound.muted ? '静音' : '音效';
+  btn.title = sound.muted ? '声音已关——点击开启碰撞/状态音效' : '声音开启中——点击静音（状态会记住）';
 }
 // 碰撞 juice（层 3，PL-20..22）：粒子池 + 震屏 + 升级碰撞环；场景就绪后在 init 里构造
 let juice = null;
@@ -2918,11 +3428,28 @@ function bindAgentPanel() {
   };
   $('btnParse').onclick = () => parseQuestion();
   $('btnParseText').onclick = () => { if (tryLocalAgentCommand($('agentTextReq').value)) return; parseTextQuestion(); };
+  bindVoiceInput();
   $('btnRerunVerify').onclick = () => runAgentVerify(false);
   $('agentTextReq').addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) {
       ev.preventDefault();
-      if (!tryLocalAgentCommand($('agentTextReq').value)) parseTextQuestion();
+      const ta = $('agentTextReq');
+      const txt = ta.value.trim();
+      if (txt) {
+        textReqHistory = textReqHistory.filter((x) => x !== txt);
+        textReqHistory.push(txt);
+        if (textReqHistory.length > 20) textReqHistory.shift();
+        textReqHistPos = null;
+      }
+      if (!tryLocalAgentCommand(txt)) parseTextQuestion();
+    } else if (ev.key === 'ArrowUp' && !$('agentTextReq').value && textReqHistory.length) {
+      ev.preventDefault();
+      textReqHistPos = textReqHistPos == null ? textReqHistory.length - 1 : Math.max(0, textReqHistPos - 1);
+      $('agentTextReq').value = textReqHistory[textReqHistPos];
+    } else if (ev.key === 'ArrowDown' && textReqHistPos != null) {
+      ev.preventDefault();
+      textReqHistPos = textReqHistPos + 1 >= textReqHistory.length ? null : textReqHistPos + 1;
+      $('agentTextReq').value = textReqHistPos == null ? '' : textReqHistory[textReqHistPos];
     }
   });
   $('btnFixtureParse').onclick = () => loadFixtureParse();
@@ -3136,6 +3663,7 @@ function adoptServerParse(out) {
     return false;
   }
   agentPlan = n.plan;
+  agentPlan.autoTags = deriveTagsFromPlan(n.plan);   // Agent 自动标签（入库/建场时落 doc.tags）
   agentPlanApplied = false;
   agentCorrections = [];
   agentPatchRounds = 0;   // 全新计划：修订轮数清零
@@ -3302,6 +3830,65 @@ function findLocalEntities(kw) {
   return doc.entities.filter((e) => e.name.includes(kw) || (type && e.type === type));
 }
 
+// 语音口述（用户需求「向 Agent 口述题目」）：Web Speech API（浏览器原生，免 key）。
+// 识别结果追加进文字框，可再编辑后解析；API 不支持→藏按钮，网络不通/拒权→如实
+// toast 并引导键入（境内网络 Google 语音后端可能不可达——降级是常态路径不是异常）。
+const voiceState = { rec: null, on: false };
+function bindVoiceInput() {
+  const btn = $('btnMic');
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { btn.style.display = 'none'; return; }
+  const stop = (note) => {
+    voiceState.on = false;
+    try { voiceState.rec && voiceState.rec.stop(); } catch { /* 已停 */ }
+    btn.textContent = '口述';
+    btn.classList.remove('hot');
+    const bp = $('btnParseText');
+    if (bp) bp.disabled = false;
+    $('agentTextReq').placeholder = '例：在现有斜面上放一个质量 2 kg 的小球，光滑无初速，从顶端释放…（Ctrl+Enter 直接解析；也可点「口述」用语音输入）';
+    if (note) toast(note);
+  };
+  btn.onclick = () => {
+    if (voiceState.on) { stop('口述已结束——检查文本后点「解析文字要求」'); return; }
+    const rec = new SR();
+    voiceState.rec = rec;
+    rec.lang = 'zh-CN';
+    rec.interimResults = false;   // 只收最终结果：textarea 编辑态插 interim 会和用户光标打架
+    rec.continuous = true;        // 连续听写：题目一句话常说断，单次模式会听一半停
+    rec.onresult = (ev) => {
+      let chunk = '';
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        if (ev.results[i].isFinal) chunk += ev.results[i][0].transcript;
+      }
+      if (!chunk) return;
+      const ta = $('agentTextReq');
+      ta.value = (ta.value ? ta.value.replace(/\s+$/, '') + '，' : '') + chunk.trim();
+    };
+    rec.onerror = (ev) => {
+      const msg = {
+        'not-allowed': '麦克风权限被拒绝（浏览器地址栏可重授权）',
+        'service-not-allowed': '语音识别服务不可用（改用键入或拍照）',
+        network: '语音识别服务网络不可达（境内网络常见）——改用键入或拍照',
+        'no-speech': '没听到内容——点住「口述」后正常语速念题',
+      }[ev.error] || '语音识别出错（' + ev.error + '）——改用键入或拍照';
+      stop(msg);
+    };
+    rec.onend = () => { if (voiceState.on) stop('口述已结束——检查文本后点「解析文字要求」'); };
+    if (parseBusy) { toast('正在解析中——等这一步完成再口述'); return; }
+    try {
+      rec.start();
+      voiceState.on = true;
+      btn.textContent = '● 口述中…（再点结束）';
+      btn.classList.add('hot');
+      $('btnParseText').disabled = true;   // 边听边解析会打架：听写完再解析
+      $('agentTextReq').placeholder = '正在聆听…请念题目（识别结果会追加进来）';
+      toast('正在聆听——请念题目，说完再点一次「口述中」结束');
+    } catch (e) {
+      stop('语音识别启动失败——改用键入或拍照');
+    }
+  };
+}
+
 // 文字要求通道（混合搭建）：文字 → 真实模型解析 → 与图片通道同一条评审/预览/建场链路
 async function parseTextQuestion() {
   if (parseBusy) return;
@@ -3309,6 +3896,7 @@ async function parseTextQuestion() {
   if (!text) { setParseStatus('请先输入题目或搭建要求的文字', true); return; }
   setAgentStage('parsing', '正在解析文字要求…');
   setParseStatus('正在解析文字要求（step-5-preview）…', false, true);
+  const t0 = performance.now();
   try {
     let out = await (await fetchParse('/api/parse-text', { text })).json();
     if (!out.ok && isRetryableParseError(out.error)) {
@@ -3318,7 +3906,7 @@ async function parseTextQuestion() {
     if (!out.ok) { setAgentStage('error', '解析失败'); setParseStatus('解析失败：' + out.error + '（可重试）', true); return; }
     if (adoptServerParse(out)) {
       $('parseSrcBadge').textContent = 'step-5-preview·文字';
-      setParseStatus('文字要求解析完成（真实模型）。请检查/修正/勾选变更后再创建实体');
+      setParseStatus(`文字要求解析完成（真实模型，耗时 ${((performance.now() - t0) / 1000).toFixed(1)}s）。请检查/修正/勾选变更后再创建实体`);
     }
   } catch (e) {
     setAgentStage('error', '解析失败');   // AG-93：同上
@@ -3338,6 +3926,8 @@ async function loadFixtureData(name) {
   try {
     const resp = await fetch(`./tools/fixtures/parse-${name}.json`);
     const raw = await resp.json();
+    const sel = document.getElementById('fixtureSel');
+    if (sel && [...sel.options].some((o) => o.value === name)) sel.value = name;   // 下拉回显当前 fixture
     return adoptParse(raw, `已载入本地示例解析数据「${raw.questionType || name}」（fixture，非真实模型输出）`);
   } catch (e) {
     setParseStatus('示例数据读取失败', true);
@@ -3350,6 +3940,7 @@ function adoptParse(raw, statusLine) {
   const n = normalizeParse(raw);
   if (!n.ok) { setParseStatus('解析结果无效：' + n.errors.join('; '), true); return null; }
   agentPlan = n.plan;
+  agentPlan.autoTags = deriveTagsFromPlan(n.plan);   // Agent 自动标签
   agentPlanApplied = false;
   agentCorrections = [];
   agentPatchRounds = 0;   // 全新计划：修订轮数清零
@@ -3453,6 +4044,20 @@ function buildChangePreview() {
     row.append(cb, txt);
     list.appendChild(row);
   });
+  // 全选/全不选工具行（条目多时逐个点很磨；默认全选语义不变）
+  if (agentChanges.length >= 3) {
+    const bar = document.createElement('div');
+    bar.style.cssText = 'display:flex;gap:6px;margin-bottom:4px';
+    const mkToggle = (txt, on) => {
+      const b = document.createElement('button');
+      b.textContent = txt;
+      b.style.cssText = 'font-size:10px;padding:1px 8px';
+      b.onclick = () => { for (const c of agentChanges) c.skipped = !on; buildChangePreview(); };
+      return b;
+    };
+    bar.append(mkToggle('全选（全部应用）', true), mkToggle('全不选（都不应用）', false));
+    list.appendChild(bar);
+  }
   box.style.display = agentChanges.length ? 'block' : 'none';
 }
 
@@ -3473,7 +4078,11 @@ function renderParseResult(warnings = []) {
   m1.append(typeCell, confCell);
   meta.appendChild(m1);
   typeCell.querySelector('.v').textContent = plan.questionType;
-  confCell.querySelector('.v').textContent = (plan.confidence * 100).toFixed(0) + '%';
+  const confV = confCell.querySelector('.v');
+  confV.textContent = (plan.confidence * 100).toFixed(0) + '%';
+  confV.title = '模型自报置信度：<70% 红=务必逐项核对，70~85% 琥珀=建议核对，≥85% 正常';
+  // 置信度色阶：<70% 红（逐项核对）、70~85% 琥珀、≥85% 正常
+  confV.style.color = plan.confidence < 0.7 ? 'var(--danger)' : (plan.confidence < 0.85 ? 'var(--accent)' : 'var(--text)');
   if (plan.goal) {
     const g = document.createElement('div');
     g.className = 'k';
@@ -3922,7 +4531,14 @@ function agentPostPass(M, created, rejected, mixed, nReused, nCreated, matches) 
     if (id) { created.push(id); agentOps.push({ op: '连接 ' + at.type, target: ea.name + ' 与 ' + eb.name, ok: true }); }
     else agentOps.push({ op: '连接 ' + at.type, target: ea.name + ' 与 ' + eb.name, ok: false });
   }
-  toast(`已按解析创建 ${created.length} 个实体${agentPlan.fixture ? '（示例数据）' : ''}`);
+  // Agent 自动标签落场（SCN）：空场景/未命名场景首建时，题型派生标签进 doc（保存入库可检索）
+  if ((doc.tags || []).length === 0 && (agentPlan.autoTags || []).length) {
+    doc.tags = [...agentPlan.autoTags];
+    toast(`已按解析创建 ${created.length} 个实体 · 自动标签 ${doc.tags.map((t) => '#' + t).join('')}`);
+  } else {
+    toast(`已按解析创建 ${created.length} 个实体${agentPlan.fixture ? '（示例数据）' : ''}`);
+  }
+  markDirty();
   agentPlanApplied = true;
   setAgentStage('built', `已建场 ${created.length} 实体，可运行并生成解释`);
   // 建场成功即开放"运行并生成解释"（解释体在运行后填充）。
@@ -4029,6 +4645,7 @@ async function maybeAgentPatch() {
     const n = normalizeParse(out.parse);
     if (!n.ok) { fail('修订计划无效：' + n.errors.join('; ')); return; }
     agentPlan = n.plan;
+    agentPlan.autoTags = deriveTagsFromPlan(n.plan);
     agentPlanApplied = false;
     agentPatchRounds = rnd;
     renderParseResult([`第 ${rnd} 轮模型修订（自查未过自动触发）`]);
@@ -4382,9 +4999,10 @@ function exportSeriesCSV() {
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `mechanica-${(lastSeries.label || doc.name || 'data').replace(/[\\/:*?"<>|]/g, '')}-`
+  a.download = `mechanica-${(doc.name ? doc.name.replace(/[\/:*?"<>|]/g, '') + '-' : '')}${(lastSeries.label || 'data').replace(/[\/:*?"<>|]/g, '')}-`
     + `${new Date(lastSeries.at).toISOString().slice(0, 19).replace(/[T:]/g, '')}.csv`;
   a.click();
+  toast(`已导出 ${a.download}`);
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   toast(`已导出 ${lastSeries.points.length} 行采样（${lastSeries.entityName}·60Hz）`);
 }
@@ -4670,6 +5288,7 @@ window.MECH = {
   removeEntity: (id) => opRemoveEntity(id),
   duplicate: (id) => opDuplicate(id),
   play, pause: pauseToggle, step: stepOnce, resetSim,
+  saveFile, openLibrary, closeLibrary, exportSceneFile,
   undo, redo,
   loadPreset: (id) => {
     applyDoc(getPreset(id), '载入预置');

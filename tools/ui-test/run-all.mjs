@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const P_ALL = [...Array.from({ length: 33 }, (_, i) => `p${i}`), 'p33-play', 'p35-placement', 'p36-agent-cmds', 'p37-agent-verify', 'p38-spawnlife', 'p39-agent-patch', 'p40-data-export', 'p41-model-coverage', 'p42-swatch-previews', 'p43-conveyor'];   // +p36 Agent指令 +p37 建场自查 +p39 语义自修正 +p40 数据导出（p34-perf headed 单独跑不入聚合）
+const P_ALL = [...Array.from({ length: 33 }, (_, i) => `p${i}`), 'p33-play', 'p35-placement', 'p36-agent-cmds', 'p37-agent-verify', 'p38-spawnlife', 'p39-agent-patch', 'p40-data-export', 'p41-model-coverage', 'p42-swatch-previews', 'p43-conveyor', 'p44-inputs-scenes'];   // +p36 Agent指令 +p37 建场自查 +p39 语义自修正 +p40 数据导出（p34-perf headed 单独跑不入聚合）
 const W_NOAPI = ['w1-manual', 'w5-journey', 'w6-depth'];
 const W_API = ['w2-agent', 'w4-mixed', 'w7-presets-explain'];
 
