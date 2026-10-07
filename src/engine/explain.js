@@ -14,6 +14,9 @@ export function explainRun(plan, doc, series, reports = [], astro = null, rotati
   const dynBodies = doc.entities.filter((e) => e.physics && e.physics.body === 'dynamic');
   if (hasHinge && series.length > 10 && series[0].rotz !== undefined) return explainHinge(plan, doc, series);
   if (hasSpring && series.length > 10) return explainSpring(plan, doc, series);
+  // 传送带（RUN-2）：必须先于抛体分派——带上单球+地面恰好满足抛体的「离地单球」条件，
+  // 会被拿去算「射程」（球明明贴带走）
+  if (doc.entities.some((e) => e.type === 'conveyor') && series.length > 10) return explainConveyor(plan, doc, series);
   // 抛体：单球带初速 + 地面（无斜面/弹簧/引力）且无其它动态体（AB-11：子弹打木块等
   // 「球+块」场景曾误入抛体分支拿 15m/s 算「射程」——条件收窄到真单球场景）
   const projBalls = doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
@@ -28,6 +31,16 @@ export function explainRun(plan, doc, series, reports = [], astro = null, rotati
     const airborne = series.length > 0 && series[0].pos[1] > gTop + (b0.params.radius || 0.15) + 0.06;
     const vy0 = b0.physics.linvel ? b0.physics.linvel[1] : 0;
     if (airborne || vy0 > 0.5) return explainProjectile(plan, doc, series);
+  }
+  // 自由落体（波2 补课）：动态球全部无初速且从高处出发 + 地面——落到地面之前不与任何
+  // 分支相认（对撞类球带初速、悬浮理想化），此前落到通用分支空转
+  if (!hasRamp && !hasSpring && !hasGrav && hasGround && spheres.length >= 1
+    && dynBodies.length === spheres.length
+    && spheres.every((b) => b.physics.linvel.every((v) => Math.abs(v) < 1e-9))
+    && spheres.every((b) => b.transform.pos[1] > (b.params.radius || 0.15) + 0.1)
+    && series.length > 10
+    && series.some((p) => p.vel[1] < -0.3)) {
+    return explainFreefall(plan, doc, series, spheres);
   }
   // 伽利略平抛同落（AB-8）：两动态球同高、都无竖直初速、恰一带水平初速、双球空中起始
   // + 地面——此前被误派二维斜碰分支输出「斜碰验证」（错误教学内容）。
@@ -497,6 +510,127 @@ function explainIncline(plan, doc, series) {
     },
     checks,
     summary,
+  };
+}
+
+// ---------- 传送带：轻放物体先滑动（a=μg）后共速（t₁ = v带/μg） ----------
+function explainConveyor(plan, doc, series) {
+  const belt = doc.entities.find((e) => e.type === 'conveyor');
+  const obj = doc.entities.find((e) => e.physics && e.physics.body === 'dynamic');
+  const g = Math.abs(plan.gravity || doc.gravity || 9.81);
+  const vB = belt.params.speed || 0;
+  const mu = belt.physics.friction ?? 0.2;
+  const a = mu * g;
+  const t1Theo = Math.abs(vB) / a;                 // 滑动时长（从静止轻放）
+  const d1Theo = vB * vB / (2 * a);                // 滑动期对地位移
+  const obs = (plan.observations && plan.observations[0]) || '共速与滑动时长';
+  if (!series.length || !vB) {
+    return { supported: false, reason: '传送带静止或无轨迹数据', summary: telemetrySummary(series) };
+  }
+  const sgn = Math.sign(vB);
+  // 实测：第一个 |vx| ≥ 0.95|v带| 的采样 = 滑动结束（共速起点）
+  let crossIdx = -1;
+  for (let i = 0; i < series.length; i++) {
+    if (series[i].vel[0] * sgn >= Math.abs(vB) * 0.95) { crossIdx = i; break; }
+  }
+  const t1Meas = crossIdx > 0 ? series[crossIdx].t : (Math.abs(series[0].vel[0]) >= Math.abs(vB) * 0.95 ? 0 : null);
+  // 共速段平均速度（共速起点后仍在带上的采样窗）
+  const beltHalf = (belt.params.sx || 2.4) / 2 + 0.1;
+  const coSamples = [];
+  for (let i = Math.max(crossIdx, 1); i < series.length; i++) {
+    const p = series[i].pos;
+    if (Math.abs(p[0] - belt.transform.pos[0]) > beltHalf) break;   // 已离开带
+    coSamples.push(series[i].vel[0]);
+  }
+  const vCo = coSamples.length ? coSamples.reduce((s, v) => s + v, 0) / coSamples.length : NaN;
+  const coErr = Number.isFinite(vCo) ? Math.abs(vCo - vB) / Math.abs(vB) * 100 : NaN;
+  const t1Err = t1Meas != null && t1Theo > 1e-6 ? Math.abs(t1Meas - t1Theo) / t1Theo * 100 : null;
+  const pass = Number.isFinite(coErr) && coErr < 6 && (t1Err == null || t1Err < 35);
+  const checks = [
+    { text: `带速 ${vB} m/s、带面 μ=${mu}（题给/组件缺省）`, ok: Math.abs(vB) > 0 },
+    { text: `滑动加速度 a = μg = ${a.toFixed(3)} m/s²`, ok: a > 0 },
+    { text: '物体达到带速（共速）', ok: Number.isFinite(coErr) && coErr < 6 },
+  ];
+  const summary = [
+    `物体轻放到带速 ${vB} m/s 的传送带上，带面动摩擦 μ=${mu} 给出滑动加速度 a = μg = ${a.toFixed(3)} m/s²。`,
+    t1Meas != null
+      ? `理论滑动时长 t₁ = v带/(μg) = ${t1Theo.toFixed(3)} s（滑动位移 v带²/2μg = ${d1Theo.toFixed(3)} m），实测 ${t1Meas.toFixed(3)} s${t1Err != null ? `（偏差 ${t1Err.toFixed(1)}%）` : ''}；`
+      : '整个采样窗内未观察到共速 crossing（带太短或时间窗太短）；',
+    Number.isFinite(coErr)
+      ? `共速段实测平均速度 ${vCo.toFixed(3)} m/s，与带速偏差 ${coErr.toFixed(2)}%。`
+      : '共速段无有效采样。',
+    pass ? '「先滑动后共速」的传送带模型得到验证。' : '偏差偏大：检查带面 μ、带速方向与物体初速。',
+  ].join('');
+  return {
+    supported: true,
+    kind: 'conveyor',
+    simT: series[series.length - 1].t,
+    observation: obs,
+    theoretical: { value: t1Theo, unit: 's', formula: 't₁ = v带/(μg)', slideDistance: d1Theo },
+    measured: { value: t1Meas, unit: 's', coSpeed: Number.isFinite(vCo) ? +vCo.toFixed(3) : null },
+    errorPct: t1Err != null ? +t1Err.toFixed(2) : coErr,
+    pass,
+    checks,
+    summary,
+  };
+}
+
+// ---------- 自由落体：t = √(2h/g)，v = √(2gh)；多球不同质量同时落地（伽利略） ----------
+function explainFreefall(plan, doc, series, balls) {
+  const g = Math.abs(plan.gravity || doc.gravity || 9.81);
+  const gE = doc.entities.find((e) => e.type === 'ground');
+  const gTop = gE && gE.transform ? gE.transform.pos[1] + (gE.params.sy || 0.2) / 2 : 0;
+  const obs = (plan.observations && plan.observations[0]) || '落地时间与落地速度';
+  const rows = balls.map((ball) => {
+    const r = ball.params.radius || 0.15;
+    const landY = gTop + r;
+    const h0 = series[0].pos[1];
+    const drop = h0 - landY;
+    if (drop <= 0.02) return { name: ball.name, ok: false, note: '起始已贴地' };
+    const tTheo = Math.sqrt(2 * drop / g);
+    const vTheo = Math.sqrt(2 * g * drop);
+    let tMeas = null, vMeas = null;
+    for (const p of series) {
+      if (p.pos[1] <= landY + 0.02) { tMeas = p.t; vMeas = p.speed; break; }
+    }
+    const tErr = tMeas != null ? Math.abs(tMeas - tTheo) / tTheo * 100 : null;
+    return {
+      name: ball.name || ball.type, mass: ball.physics.mass, drop: +drop.toFixed(3),
+      tTheo: +tTheo.toFixed(3), tMeas: tMeas != null ? +tMeas.toFixed(3) : null,
+      vTheo: +vTheo.toFixed(3), vMeas: vMeas != null ? +vMeas.toFixed(3) : null,
+      tErr: tErr != null ? +tErr.toFixed(2) : null,
+      ok: tErr != null && tErr < 5,
+    };
+  });
+  const pass = rows.length > 0 && rows.every((x) => x.ok);
+  const errs = rows.filter((x) => x.tErr != null);
+  const worstErr = errs.length ? Math.max(...errs.map((x) => x.tErr)) : null;
+  const checks = [
+    { text: `重力 ${g} m/s²（题给/场景）`, ok: g > 0 },
+    { text: '由静止释放（全部球初速为 0）', ok: true },
+    ...rows.filter((x) => x.tMeas != null).map((x) => ({ text: `${x.name} 落地（t=${x.tMeas}s）`, ok: x.ok })),
+  ];
+  const multi = rows.length >= 2 && rows.every((x) => x.tMeas != null)
+    && Math.abs(rows[0].tMeas - rows[1].tMeas) < 0.05;
+  const summary = [
+    `${rows.length} 个球从高处由静止释放（${g} m/s²）：下落 h 取 series[0] 实际出生高度，`,
+    rows.map((x) => `${x.name || '球'} h=${x.drop != null ? x.drop : '?'}m 理论 t=√(2h/g)=${x.tTheo != null ? x.tTheo : '?'}s${x.tMeas != null ? ` 实测 ${x.tMeas}s${x.tErr != null ? `（偏差 ${x.tErr}%）` : ''}` : ' 未观测到落地'}`).join('；'),
+    '。',
+    multi ? '两球质量不同却同时落地——伽利略：自由落体与质量无关，得到验证。' : '',
+    pass ? '自由落体规律得到验证。' : '偏差偏大：检查起始高度口径（理论以实测出生点为基准）与落地判定。',
+  ].filter(Boolean).join('');
+  return {
+    supported: true,
+    kind: 'freefall',
+    simT: series[series.length - 1].t,
+    observation: obs,
+    theoretical: { value: rows[0] ? rows[0].tTheo : null, unit: 's', formula: 't = √(2h/g)' },
+    measured: { value: rows[0] ? rows[0].tMeas : null, unit: 's' },
+    errorPct: worstErr,
+    pass,
+    checks,
+    summary,
+    rows,
   };
 }
 

@@ -4,13 +4,16 @@
 const TYPE_MAP = {
   ramp: 'ramp', sphere: 'sphere', box: 'box', cylinder: 'cylinder', ground: 'ground',
   celestial: 'celestial', planet: 'celestial', star: 'celestial', pulley: 'pulley', 滑轮: 'pulley',
+  conveyor: 'conveyor', belt: 'conveyor',
   斜面: 'ramp', 球: 'sphere', 方块: 'box', 圆柱: 'cylinder', 地面: 'ground',
   天体: 'celestial', 行星: 'celestial', 恒星: 'celestial', 卫星: 'celestial',
+  传送带: 'conveyor', 输送带: 'conveyor',
   // 中文别名兜底（AG-12）：模型偶发无视英文枚举直接输出中文类型，能消化的都收下
   楔子: 'ramp', 楔块: 'ramp', 斜坡: 'ramp',
   小球: 'sphere', 质点: 'sphere', 钢球: 'sphere',
   滑块: 'box', 物块: 'box', 木块: 'box', 木板: 'box', 细杆: 'box', 摆杆: 'box',
   圆盘: 'cylinder', 转盘: 'cylinder',
+  传送带: 'conveyor', 输送带: 'conveyor', 传输带: 'conveyor',
 };
 
 // kind 中文/近义归一（AG-99）：模型偶发输出中文 kind，布局分派全靠英文枚举，不归一直接走通用路径丢关节
@@ -25,6 +28,7 @@ const KIND_MAP = {
 const RANGES = {
   angleDeg: [1, 80], length: [0.1, 12], height: [0.02, 6], width: [0.05, 6],
   radius: [0.01, 2], mass: [0.01, 10000], friction: [0, 2], restitution: [0, 1],
+  speed: [-8, 8],   // 传送带带速（负值反向输运）
   momentOfInertia: [0.001, 1e6], momentInertia: [0.001, 1e6],   // 转台类：模型两种拼写都收
 };
 
@@ -462,15 +466,31 @@ export function planToOverrides(plan) {
       };
       if (e.given.fixed) o.physics.body = 'fixed';
       // 无斜面（对撞类）布局：沿 x 排开，悬浮于地面上方（gravityScale=0 + 无摩擦）——
-      // "光滑水平面"理想化：不落地不接触，水平动量不被地面摩擦污染，动量守恒才可对照
-      if (!rampGeom) {
+      // "光滑水平面"理想化：不落地不接触，水平动量不被地面摩擦污染，动量守恒才可对照。
+      // 传送带场景例外：物体必须落在带顶（接触才有摩擦驱动），正常重力。
+      const r = e.given.radius ?? 0.15;
+      const hasConveyor = plan.entities.some((x) => x.type === 'conveyor');
+      if (!rampGeom && hasConveyor) {
+        const beltE = plan.entities.find((x) => x.type === 'conveyor');
+        const beltTop = +(beltE.given.height ?? 0.16);
+        const beltX = (beltE.given.position ?? [0, 0, 0])[0];
+        const beltLen = beltE.given.length ?? 2.4;
+        o.physics.friction = e.given.friction ?? 0.3;   // 物-带 μ 由带侧 params.friction 驱动；此处常规取值
+        o.transform = {
+          pos: e.given.position ?? [+(beltX - beltLen / 2 + 0.35).toFixed(3), +(beltTop + r + 0.01).toFixed(3), 0],
+          rot: [0, 0, 0],
+        };
+      } else if (!rampGeom) {
         const order = plan.entities.filter((x) => x.type === 'sphere').indexOf(e);
         const n = plan.entities.filter((x) => x.type === 'sphere').length;
-        const r = e.given.radius ?? 0.15;
         // given.position 自由落位（二维斜碰 z 错开需要）；缺省一维沿 x 排开
         o.transform = { pos: e.given.position ?? [(order - (n - 1) / 2) * 1.6, r + 0.005, 0], rot: [0, 0, 0] };
         o.physics.friction = 0;
-        o.physics.gravityScale = 0;
+        // 自由落体例外（波2 补课）：无初速且题给高位置（y > r+0.1）=「从高处由静止释放」语义，
+        // 必须保留重力——悬浮理想化只属于带初速的对撞场景（freefall fixture 此前一直悬浮，
+        // p41 靠 vacuous verify 绿，教学上是坏的）
+        const dropFromHigh = !e.given.velocity && e.given.position != null && e.given.position[1] > r + 0.1;
+        if (!dropFromHigh) o.physics.gravityScale = 0;
       } else {
         // UX-R：坡面球多车道并排（球 vs 球、球 vs 圆柱赛跑）；off=r+0.01 与 ballOnRamp 同点
         const spot = slopeSpot(o.params.radius, o.params.radius + 0.01);
@@ -505,6 +525,17 @@ export function planToOverrides(plan) {
       o.params = { radius: e.given.radius ?? 0.3 };
       o.physics = { body: 'fixed' };
       o.transform = { pos: e.given.position ?? [0, 3.0, 0], rot: [0, 0, 0] };
+    } else if (e.type === 'conveyor') {
+      // 传送带（RUN-2）：带长/带厚/带宽/带速；friction 语义=带面动摩擦因数 μ（驱动模型用）
+      const bsy = e.given.height ?? 0.16;
+      o.params = {
+        sx: e.given.length ?? 2.4,
+        sy: bsy,
+        sz: e.given.width ?? 0.6,
+        speed: e.given.speed ?? 0.8,
+      };
+      o.physics = { body: 'fixed', friction: e.given.friction ?? 0.2, restitution: 0 };
+      o.transform = { pos: e.given.position ?? [0, +(bsy / 2).toFixed(3), 0], rot: [0, 0, 0] };
     } else if (e.type === 'celestial') {
       o.params = { radius: e.given.radius ?? 0.5 };
       o.physics = {
@@ -537,13 +568,16 @@ export function planToOverrides(plan) {
   }
   // 对撞类（无斜面且 ≥2 球）：自动补光滑地面承接（对撞题的隐含装置，假设记录在 plan.assumptions）。
   // UX-R：模型已给 ground 则不重复补（freefall fixture 实测双地面）。
+  // 传送带场景同样补（物体滑出带端后要有承接；摩擦 0——离开带后保持共速滑行，不污染测量）。
+  const hasConveyorEnt = plan.entities.some((e) => e.type === 'conveyor');
   if (!ramp && !plan.entities.some((e) => e.type === 'ground')
-    && plan.entities.filter((e) => e.type === 'sphere').length >= 2) {
+    && (hasConveyorEnt || plan.entities.filter((e) => e.type === 'sphere').length >= 2)) {
+    // 传送带场景地面收紧到 8×4（默认取景不被空地拉远；带长 2.4 出带后仍有余量滑行）
     out.push({
       type: 'ground', name: '光滑地面', source: 'agent',
-      params: { sx: 12, sy: 0.1, sz: 6 },
+      params: hasConveyorEnt ? { sx: 8, sy: 0.1, sz: 4 } : { sx: 12, sy: 0.1, sz: 6 },
       transform: { pos: [0, -0.05, 0], rot: [0, 0, 0] },
-      physics: { body: 'fixed', friction: pairFriction != null ? pairFriction : 0, restitution: 0.05 },
+      physics: { body: 'fixed', friction: !hasConveyorEnt && pairFriction != null ? pairFriction : 0, restitution: 0.05 },
     });
   }
   // 天体圆轨道确定性推断：应用引力教学约定轨道在 xz 平面（守恒量跟踪 Lz、周期检测用 xz 方位角）。

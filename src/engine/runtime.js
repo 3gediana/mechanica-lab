@@ -570,6 +570,7 @@ export class Runtime {
       b.body.setLinvel({ x: v.x * k, y: v.y * k, z: v.z * k }, true);
       this._rollLast = { mu, m, gy, gs, r, I, alpha, dv, sp, ts: this.world.timestep, steps: this._stepN || 0, simT: this.simT };
     }
+    this._driveConveyors();
     // 接触合力 = m·(a − g·gravityScale)（速度差分反推；阻尼小量忽略，教学近似）
     const gy = this._bindDocs ? this._bindDocs.gravity : -9.81;
     for (const [id, b] of this.binds) {
@@ -702,6 +703,44 @@ export class Runtime {
 
   _idOfCollider(handle) {
     return this._colOwner.get(handle) ?? null;
+  }
+
+  // ============ 传送带驱动（RUN-2）：带对物的切向作用 = 动摩擦 a=μg 朝带速 ============
+  // 「轻放上去先滑动后共速」的教科书模型：步内速度增量 dv = sign(带速-vx)·min(|差|, μg·dt)。
+  // 带面 Rapier 摩擦已归零（registry Min 合成规则），切向物理完全在此接管——共速后不再受力
+  // （静态陈列随带走），只认顶面接触（法向竖直分量占优；侧碰不驱动）。带停纹停。
+  _driveConveyors() {
+    const gy = this._bindDocs ? this._bindDocs.gravity : -9.81;
+    for (const [, belt] of this.binds) {
+      const be = belt.entity;
+      if (be.type !== 'conveyor' || !belt.collider) continue;
+      const vB = be.params.speed || 0;
+      const scroll = belt.mesh && belt.mesh.userData && belt.mesh.userData.beltScroll;
+      if (scroll && vB) scroll.tex.offset.x -= vB * FIXED_H * scroll.unitPerMeter;
+      if (!vB) continue;
+      const mu = be.physics.friction ?? 0.2;
+      if (mu <= 0) continue;
+      this.world.contactPairsWith(belt.collider, (other) => {
+        const oid = other && other.handle != null ? this._idOfCollider(other.handle) : null;
+        if (!oid) return;
+        const ob = this.binds.get(oid);
+        if (!ob || !ob.body || ob.entity.physics.body !== 'dynamic') return;
+        let up = false;
+        this.world.contactPair(belt.collider, other, (mf) => {
+          if (mf.numContacts() <= 0 || up) return;
+          const n = mf.normal();
+          up = Math.abs(n.y) > 0.5;   // 顶面接触（法向竖直占优；法向符号随流翻转不定，取绝对值）
+        });
+        if (!up) return;
+        const v = ob.body.linvel();
+        const rel = vB - v.x;
+        if (Math.abs(rel) < 1e-6) return;
+        const gs = ob.entity.physics.gravityScale != null ? ob.entity.physics.gravityScale : 1;
+        const dvMax = mu * Math.abs(gy) * gs * FIXED_H;   // a = μ·N/m = μg·gs
+        const dv = Math.sign(rel) * Math.min(Math.abs(rel), dvMax);
+        ob.body.setLinvel({ x: v.x + dv, y: v.y, z: v.z }, true);
+      });
+    }
   }
 
   // ============ 传感器读数（速度/计时/力）：读数存 runtime 不进文档 ============

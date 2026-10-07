@@ -104,6 +104,38 @@ function wedgePoints(L, H, W) {
 const SPOKE_MAT = new THREE.MeshStandardMaterial({ color: 0x8a6a48, roughness: 0.6, metalness: 0.1 });
 const FLAG_MAT = new THREE.MeshStandardMaterial({ color: 0xc96a5a, roughness: 0.5 });
 const BULB_MAT = new THREE.MeshStandardMaterial({ color: 0xffe0b0, emissive: 0xffc880, emissiveIntensity: 0.9, roughness: 0.4 });
+
+// ---------- 传送带：带面人字纹（RUN-2 运动方向可见性） ----------
+// 基底 128×64 暗胶面 + 琥珀人字纹（指向 +x 输运方向，应用主题强调色——远距离也可读）；
+// RepeatWrapping 沿 x 平铺，runtime 每步按带速滚动 offset（带停纹停，速度方向一眼可读）。
+// 克隆共享底图，offset 独立。
+let _beltTexBase = null;
+function beltTexture() {
+  if (!_beltTexBase) {
+    const c = document.createElement('canvas');
+    c.width = 128; c.height = 64;
+    const g = c.getContext('2d');
+    g.fillStyle = '#1c1d20';
+    g.fillRect(0, 0, 128, 64);
+    g.strokeStyle = '#c99b4a';
+    g.lineWidth = 7;
+    g.lineCap = 'round';
+    for (const cx of [24, 88]) {   // 人字纹：两道折线指向 +x（输运方向）
+      g.beginPath();
+      g.moveTo(cx - 10, 12); g.lineTo(cx + 8, 32); g.lineTo(cx - 10, 52);
+      g.stroke();
+    }
+    _beltTexBase = new THREE.CanvasTexture(c);
+    _beltTexBase.wrapS = _beltTexBase.wrapT = THREE.RepeatWrapping;
+    _beltTexBase.colorSpace = THREE.SRGBColorSpace;
+  }
+  const tex = _beltTexBase.clone();
+  tex.needsUpdate = true;
+  return tex;
+}
+
+// 传送带侧导轨共享材质（机器感：暗钢栏架勾出带的体量轮廓）
+const BELT_RAIL_MAT = new THREE.MeshStandardMaterial({ color: 0x55595f, roughness: 0.45, metalness: 0.7 });
 // MAT-90：灯泡按亮度三档预建共享 clone（暗 <2 / 中 2~8 / 亮 >8，emissive 0.35/0.9/1.6），
 // lightGroup 构造时按 params.intensity 选挂 —— 仍为模块级共享，不回到每实例一份
 const BULB_MAT_DIM = BULB_MAT.clone();
@@ -220,6 +252,50 @@ export const COMPONENTS = {
     buildCollider: (RAPIER, p) => RAPIER.ColliderDesc.cuboid(p.sx / 2, p.sy / 2, p.sz / 2),
     spawnY: (p) => p.sy / 2,
     inertiaY: (p, m) => m * (p.sx * p.sx + p.sz * p.sz) / 12,
+  },
+
+  conveyor: {
+    id: 'conveyor', label: '传送带', category: '表面与结构',
+    desc: '水平传送带（固定）：带面以给定速度持续输运其上的物体——「轻放上去先滑动后共速」的经典模型',
+    compat: '固定带体；带面切向物理由带速驱动模型接管（a=μg 滑动→共速，教科书口径），带面人字纹随带速滚动',
+    // params.speed 带速 m/s（+x 方向为正，负值反向输运）；params.friction 在此语义=带面动摩擦因数 μ
+    defaults: { params: { sx: 2.4, sy: 0.16, sz: 0.6, speed: 0.8 }, physics: { ...defaultPhysics('fixed', 0), friction: 0.2, restitution: 0 }, render: { material: 'rubber' } },
+    schema: [
+      { key: 'sx', label: '带长', unit: 'm', min: 0.5, max: 20, step: 0.1 },
+      { key: 'sy', label: '带厚', unit: 'm', min: 0.05, max: 2, step: 0.01 },
+      { key: 'sz', label: '带宽', unit: 'm', min: 0.1, max: 6, step: 0.05 },
+      { key: 'speed', label: '带速', unit: 'm/s', min: -8, max: 8, step: 0.1 },
+    ],
+    buildGeometry: (p) => new THREE.BoxGeometry(p.sx, p.sy, p.sz),
+    // 带面切向摩擦必须归零（Min 合成规则：min(带 0, 物 μ) = 0）——带对物的切向作用完全交给
+    // runtime 的带速驱动模型（a=μg），否则 Rapier 静摩擦会把共速物体按「带其实没动」拖停
+    buildCollider: (RAPIER, p) => RAPIER.ColliderDesc.cuboid(p.sx / 2, p.sy / 2, p.sz / 2)
+      .setFriction(0)
+      .setFrictionCombineRule(RAPIER.CoefficientCombineRule.Min),
+    spawnY: (p) => p.sy / 2,
+    // 带体基座 + 顶面人字纹带（随带速滚动的运动方向可见性）+ 两侧钢导轨（机器轮廓）；
+    // beltScroll 由 runtime 每步消费
+    makeMesh: (p, material) => {
+      const base = new THREE.Mesh(new THREE.BoxGeometry(p.sx, p.sy - 0.012, p.sz), material);
+      const tex = beltTexture();
+      const repX = Math.max(2, Math.round(p.sx / 0.3));   // 人字纹每 30cm 一组
+      tex.repeat.set(repX, 1);
+      const top = new THREE.Mesh(
+        new THREE.PlaneGeometry(p.sx, p.sz),
+        new THREE.MeshStandardMaterial({ map: tex, roughness: 0.92, metalness: 0 })
+      );
+      top.rotation.x = -Math.PI / 2;
+      top.position.y = p.sy / 2 - 0.006;
+      const railH = Math.min(0.06, p.sy * 0.5);
+      const railGeo = new THREE.BoxGeometry(p.sx + 0.04, railH, 0.035);
+      const railN = new THREE.Mesh(railGeo, BELT_RAIL_MAT); railN.position.set(0, p.sy / 2, p.sz / 2 + 0.0175);
+      const railS = new THREE.Mesh(railGeo, BELT_RAIL_MAT); railS.position.set(0, p.sy / 2, -p.sz / 2 - 0.0175);
+      const g = new THREE.Group();
+      g.add(base, top, railN, railS);
+      g.userData.beltScroll = { tex, unitPerMeter: repX / p.sx };   // offset 增量 = v·dt·unitPerMeter
+      return g;
+    },
+    computed: (p) => [{ key: 'dir', label: '输运方向', value: p.speed > 0 ? '+x' : (p.speed < 0 ? '-x' : '停止'), unit: '' }],
   },
 
   hinge: {

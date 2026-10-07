@@ -2836,6 +2836,11 @@ let agentCorrections = [];
 let agentChanges = [];   // 逐条接受/拒绝：待执行变更清单 [{type,idx,label,detail,skipped}]
 
 const PEDIT = {
+  conveyor: [
+    ['length', '带长', 'm', 2.4, [0.5, 20]],
+    ['speed', '带速', 'm/s', 0.8, [-8, 8]],
+    ['friction', '带面μ', '', 0.2, [0, 2]],
+  ],
   ramp: [
     ['angleDeg', '倾角', '°', 30, [1, 80]],
     ['length', '坡长', 'm', 2.0, [0.1, 12]],

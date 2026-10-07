@@ -233,3 +233,45 @@ test('竖直弹簧振子：峰检测沿主振动轴（y）而非 x（AB-5）', (
   assert.equal(r.kind, 'spring');
   assert.ok(r.measured.period && Math.abs(r.measured.period - T) / T < 0.05, `T=${r.measured.period} 期望≈${T.toFixed(3)}`);
 });
+
+// ---------- 波2：传送带 + 自由落体分支 ----------
+test('传送带：轻放先滑动后共速，t₁=v带/(μg) 自洽', () => {
+  const vB = 0.8, mu = 0.2, g = 10, a = mu * g, t1 = vB / a;
+  const doc = mk({ gravity: -g, entities: [
+    { id: 'belt', type: 'conveyor', physics: { body: 'fixed', friction: mu }, transform: { pos: [0, 0.08, 0] }, params: { sx: 2.4, sy: 0.16, sz: 0.6, speed: vB } },
+    { id: 'b', type: 'sphere', physics: { body: 'dynamic', mass: 0.5, linvel: [0, 0, 0], friction: 0.3, restitution: 0 }, transform: { pos: [-0.85, 0.27, 0] }, params: { radius: 0.1 } },
+    { id: 'g', type: 'ground', physics: { body: 'fixed', friction: 0 }, transform: { pos: [0, -0.05, 0] }, params: { sy: 0.1 } },
+  ] });
+  // 闭式合成：滑动段 vx=at（t<t₁），共速段 vx=vB；x 位移解析积分
+  const series = [];
+  for (let t = 0; t <= 3; t += 1 / 60) {
+    const vx = t < t1 ? a * t : vB;
+    const x = t < t1 ? 0.5 * a * t * t - 0.85 : -0.85 + 0.5 * a * t1 * t1 + vB * (t - t1);
+    series.push({ t, pos: [x, 0.27, 0], speed: vx, vel: [vx, 0, 0] });
+  }
+  const r = explainRun({ observations: ['共速时间'] }, doc, series);
+  assert.equal(r.kind, 'conveyor');
+  assert.equal(r.pass, true, JSON.stringify({ t1: r.measured, err: r.errorPct }));
+  assert.ok(Math.abs(r.theoretical.value - t1) < 1e-9, `理论 t₁=${r.theoretical.value} 期望 ${t1.toFixed(3)}`);
+});
+
+test('自由落体：t=√(2h/g)，双球不同质量同时落地（伽利略）', () => {
+  const g = 10, h0 = 2.0, r0 = 0.15, landY = 0 + r0;   // ground top=0
+  const tFall = Math.sqrt(2 * (h0 - landY) / g);
+  const doc = mk({ gravity: -g, entities: [
+    { id: 'g', type: 'ground', physics: { body: 'fixed', friction: 0 }, transform: { pos: [0, -0.05, 0] }, params: { sy: 0.1 } },
+    { id: 'a', type: 'sphere', physics: { body: 'dynamic', mass: 5, linvel: [0, 0, 0], friction: 0, restitution: 0.1 }, transform: { pos: [-0.6, h0, 0] }, params: { radius: r0 } },
+    { id: 'b', type: 'sphere', physics: { body: 'dynamic', mass: 1, linvel: [0, 0, 0], friction: 0, restitution: 0.1 }, transform: { pos: [0.6, h0, 0] }, params: { radius: r0 } },
+  ] });
+  // 单球轨迹即可触发分支（spheres 从 doc 取，series 记录 a 球的落体）
+  const seriesA = [];
+  for (let t = 0; t <= tFall + 0.15; t += 1 / 60) {
+    const y = Math.max(h0 - 0.5 * g * t * t, landY);
+    const vy = y <= landY ? 0 : -g * t;
+    seriesA.push({ t, pos: [-0.6, y, 0], speed: Math.abs(vy), vel: [0, vy, 0] });
+  }
+  const r = explainRun({ observations: ['落地时间'] }, doc, seriesA);
+  assert.equal(r.kind, 'freefall');
+  assert.equal(r.pass, true, JSON.stringify(r.rows));
+  assert.ok(Math.abs(r.rows[0].tTheo - tFall) < 1e-3, `t 理论=${r.rows[0].tTheo} 期望 ${tFall.toFixed(3)}`);   // rows 输出口径 toFixed(3)
+});

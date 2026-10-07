@@ -1,0 +1,44 @@
+{
+  "_fixture": true,
+  "_note": "本地示例解析数据（传送带输运），用于无 API Key 时验证带驱动链路；不是真实模型输出",
+  "questionType": "传送带输运（轻放物体）",
+  "kind": "",
+  "goal": "观察物体轻放上传送带后先滑动后共速的过程，验证 t₁ = v带/(μg)",
+  "gravity": 10,
+  "entities": [
+    {
+      "type": "conveyor",
+      "name": "传送带",
+      "given": {
+        "length": 2.4,
+        "height": 0.16,
+        "width": 0.6,
+        "speed": 0.8,
+        "friction": 0.2
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "sphere",
+      "name": "物块（轻放）",
+      "given": {
+        "mass": 0.5,
+        "radius": 0.1
+      },
+      "confidence": 0.94
+    }
+  ],
+  "observations": [
+    "共速时间",
+    "滑动位移"
+  ],
+  "unknowns": [
+    "空气阻力（按不计处理）"
+  ],
+  "assumptions": [
+    "物体轻放到带左端（初速为 0）",
+    "带面动摩擦因数 μ=0.2 恒定",
+    "带足够长，物体先滑动后共速随带运动"
+  ],
+  "confidence": 0.9
+}

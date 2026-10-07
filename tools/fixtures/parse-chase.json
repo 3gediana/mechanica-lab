@@ -1,0 +1,44 @@
+{
+  "_fixture": true,
+  "_note": "本地示例解析数据（追及相遇），用于无 API Key 时验证追及碰撞链路；不是真实模型输出",
+  "questionType": "追及相遇（匀速追匀速）",
+  "kind": "",
+  "goal": "观察后球追上前球的相遇时间与位置，验证相对速度守恒下的追及关系",
+  "gravity": 10,
+  "entities": [
+    {
+      "type": "sphere",
+      "name": "后球（快 2 m/s）",
+      "given": {
+        "mass": 1,
+        "restitution": 0.3,
+        "velocity": [2, 0, 0],
+        "position": [-1.0, 0.155, 0]
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "sphere",
+      "name": "前球（慢 1 m/s）",
+      "given": {
+        "mass": 1,
+        "restitution": 0.3,
+        "velocity": [1, 0, 0],
+        "position": [0, 0.155, 0]
+      },
+      "confidence": 0.95
+    }
+  ],
+  "observations": [
+    "相遇时间",
+    "相遇位置",
+    "碰后速度"
+  ],
+  "unknowns": [],
+  "assumptions": [
+    "光滑水平面理想化（悬浮无摩擦）",
+    "两球匀速运动，相对速度 1 m/s，初始间距 1 m → 约 1 s 后追上",
+    "恢复系数 e=0.3（非完全弹性）"
+  ],
+  "confidence": 0.92
+}

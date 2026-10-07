@@ -1,0 +1,32 @@
+{
+  "_fixture": true,
+  "_note": "本地示例解析数据（平抛运动），用于无 API Key 时验证抛体水平初速链路；不是真实模型输出",
+  "questionType": "平抛运动",
+  "kind": "",
+  "goal": "求落地时间、水平射程，验证平抛=水平匀速+竖直自由落体",
+  "gravity": 10,
+  "entities": [
+    {
+      "type": "sphere",
+      "name": "平抛小球",
+      "given": {
+        "mass": 1,
+        "velocity": [5, 0, 0],
+        "position": [0, 1.6, 0]
+      },
+      "confidence": 0.95
+    }
+  ],
+  "observations": [
+    "落地时间",
+    "水平射程"
+  ],
+  "unknowns": [
+    "空气阻力（按不计处理）"
+  ],
+  "assumptions": [
+    "理想抛体：水平 5 m/s 匀速 + 竖直自由落体",
+    "从高 1.6 m 处水平抛出"
+  ],
+  "confidence": 0.92
+}

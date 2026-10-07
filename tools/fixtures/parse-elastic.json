@@ -1,0 +1,43 @@
+{
+  "_fixture": true,
+  "_note": "本地示例解析数据（完全弹性碰撞），用于无 API Key 时验证 e=1 速度交换链路；不是真实模型输出",
+  "questionType": "完全弹性碰撞（等质量速度交换）",
+  "kind": "",
+  "goal": "验证等质量完全弹性碰撞（e=1）两球交换速度：动量与动能同时守恒",
+  "gravity": 10,
+  "entities": [
+    {
+      "type": "sphere",
+      "name": "入射球 A（2 m/s）",
+      "given": {
+        "mass": 1,
+        "restitution": 1,
+        "velocity": [2, 0, 0],
+        "position": [-1.6, 0.155, 0]
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "sphere",
+      "name": "静止球 B",
+      "given": {
+        "mass": 1,
+        "restitution": 1,
+        "position": [0.6, 0.155, 0]
+      },
+      "confidence": 0.95
+    }
+  ],
+  "observations": [
+    "碰后两球速度",
+    "动量守恒",
+    "动能守恒"
+  ],
+  "unknowns": [],
+  "assumptions": [
+    "光滑水平面理想化（悬浮无摩擦）",
+    "恢复系数 e=1（完全弹性）",
+    "等质量对心正碰：碰后 A 停、B 以 2 m/s 前进（速度交换）"
+  ],
+  "confidence": 0.92
+}

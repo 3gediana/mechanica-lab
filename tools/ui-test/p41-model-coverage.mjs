@@ -16,7 +16,7 @@ const browser = await chromium.launch({ headless: true });
 
 // 每模型一条期望：verify error 必须为 0；has=必须存在的实体类型；springN 等结构断言可选
 const EXPECT = [
-  ['freefall', { has: ['ground', 'sphere'], n: 3 }],
+  ['freefall', { has: ['ground', 'sphere'], n: 3, gs: 1 }],
   ['friction-race', { has: ['ground', 'box'], boxN: 2 }],
   ['inertia', { has: ['ground', 'sphere'] }],
   ['vertical-throw', { has: ['ground', 'sphere'] }],
@@ -30,6 +30,12 @@ const EXPECT = [
   ['coupled', { has: ['ground', 'sphere'], springN: 1 }],
   ['damped', { has: ['sphere'], springN: 1 }],
   ['launcher', { has: ['ground', 'box', 'sphere'], springN: 1 }],
+  // 波2（传送带+课程补齐）
+  ['conveyor', { has: ['conveyor', 'sphere', 'ground'] }],
+  ['horizontal-throw', { has: ['sphere', 'ground'] }],
+  ['oblique45', { has: ['sphere', 'ground'] }],
+  ['elastic', { has: ['sphere'], sphereN: 2 }],
+  ['chase', { has: ['sphere'], sphereN: 2 }],
 ];
 
 async function withPage(fn) {
@@ -82,6 +88,7 @@ for (const [name, exp] of EXPECT) {
         celN: d.entities.filter((e) => e.type === 'celestial').length,
         cylPos: (d.entities.find((e) => e.type === 'cylinder') || {}).transform?.pos,
         rampW: (d.entities.find((e) => e.type === 'ramp') || {}).params?.width,
+        gs0: (d.entities.find((e) => e.type === 'sphere') || {}).physics?.gravityScale,
       };
     });
     check(`${name} 自查零 error`, out.summary.error === 0, JSON.stringify({ s: out.summary, errs: out.errs }));
@@ -96,6 +103,7 @@ for (const [name, exp] of EXPECT) {
       // 圆柱应贴坡（y 高于地面且在坡高处，而非默认平地 [0, h/2, 0.8]）
       check(`${name} 圆柱在坡面上`, out.cylPos[1] > 0.3, `pos=${JSON.stringify(out.cylPos)}`);
     }
+    if (exp.gs === 1) check(`${name} 球体重力生效（gravityScale=1，自由落体语义）`, out.gs0 === 1, 'gs0=' + out.gs0);
     if (name === 'ramp-race' && out.rampW != null) {
       check(`${name} 斜面自动加宽（2 车道）`, out.rampW >= 1.4, `width=${out.rampW}`);
     }

@@ -1,0 +1,32 @@
+{
+  "_fixture": true,
+  "_note": "本地示例解析数据（斜抛 45°），用于无 API Key 时验证斜抛最远射程链路；不是真实模型输出",
+  "questionType": "斜抛运动（45° 最远射程）",
+  "kind": "",
+  "goal": "求射程与最大高度，验证 45° 抛射角射程最大 R = v²sin2θ/g",
+  "gravity": 10,
+  "entities": [
+    {
+      "type": "sphere",
+      "name": "斜抛小球",
+      "given": {
+        "mass": 1,
+        "velocity": [3.536, 3.536, 0],
+        "position": [0, 0.15, 0]
+      },
+      "confidence": 0.95
+    }
+  ],
+  "observations": [
+    "射程",
+    "最大高度"
+  ],
+  "unknowns": [
+    "空气阻力（按不计处理）"
+  ],
+  "assumptions": [
+    "理想抛体：v=5 m/s、θ=45°（sin2θ=1 射程最大）",
+    "从地面高度抛出"
+  ],
+  "confidence": 0.92
+}

@@ -273,3 +273,42 @@ test('planToOverrides: 显式 ground 实体带 physics（AG-V3 修订计划补�
   assert.equal(g.physics.friction, 0.2);
   assert.equal(g.params.sx, 12);
 });
+
+// ---------- 波2：传送带布局 + 自由落体重力例外 ----------
+test('传送带 fixture：布局含带+球贴带顶+自动补地面，带速透传', () => {
+  const n = normalizeParse(FX('conveyor'));
+  assert.ok(n.ok, n.errors && n.errors.join('; '));
+  const out = planToOverrides(n.plan);
+  const belt = out.find((o) => o.type === 'conveyor');
+  const ball = out.find((o) => o.type === 'sphere');
+  assert.ok(belt && ball && out.some((o) => o.type === 'ground'), 'types=' + out.map((o) => o.type).join(','));
+  assert.equal(belt.params.speed, 0.8);
+  assert.equal(belt.physics.body, 'fixed');
+  assert.equal(belt.physics.friction, 0.2);   // μ 驱动语义
+  // 球落带顶：y = 带高0.16 + r0.1 + 0.01 = 0.27；x = 带左端 +0.35
+  assert.ok(Math.abs(ball.transform.pos[1] - 0.27) < 1e-6, 'y=' + ball.transform.pos[1]);
+  assert.ok(Math.abs(ball.transform.pos[0] - (-0.85)) < 1e-6, 'x=' + ball.transform.pos[0]);
+  assert.equal(ball.physics.gravityScale == null || ball.physics.gravityScale === 1, true, '带场景球正常重力');
+});
+
+test('自由落体例外：无初速+高位放置保留重力（对撞悬浮语义不受污染）', () => {
+  const mkPlan = (pos, vel) => ({
+    kind: '', gravity: 10, attaches: [],
+    entities: [
+      { type: 'ground', name: '地', given: { length: 8, width: 4 } },
+      { type: 'sphere', name: '球', given: { mass: 2, ...(pos ? { position: pos } : {}), ...(vel ? { velocity: vel } : {}) } },
+    ],
+  });
+  // 高位无初速 → 自由落体（gravityScale 保持 1/缺省）
+  const n1 = normalizeParse(mkPlan([-0.6, 2.0, 0], null));
+  const o1 = planToOverrides(n1.plan).find((o) => o.type === 'sphere');
+  assert.notEqual(o1.physics.gravityScale, 0, '自由落体不得悬浮');
+  // 带初速对撞 → 悬浮理想化保持
+  const n2 = normalizeParse(mkPlan([-1.6, 0.155, 0], [2, 0, 0]));
+  const o2 = planToOverrides(n2.plan).find((o) => o.type === 'sphere');
+  assert.equal(o2.physics.gravityScale, 0, '对撞球应悬浮（动量纯净）');
+  // 低位无初速（贴地）→ 悬浮（缺省对撞排布语义不变）
+  const n3 = normalizeParse(mkPlan(null, null));
+  const o3 = planToOverrides(n3.plan).find((o) => o.type === 'sphere');
+  assert.equal(o3.physics.gravityScale, 0, '缺省贴地球仍走对撞悬浮');
+});

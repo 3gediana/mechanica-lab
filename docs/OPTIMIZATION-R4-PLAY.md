@@ -320,3 +320,18 @@
 **材质选择器真材质预览**（viewport.renderMaterialSwatches + workbench 色块替换）：离屏微型渲染器（96px，微型摄影棚 env=渐变天光+双柔光箱+地平灯带 equirect→PMREM，主光/冷轮廓光）把 12 个材质各渲一枚材质球 dataURL，目录色块就地替换（深底 #0c0d0f）；生成期/失败期保持色块降级，目录重渲直读缓存。主场景光照不动。目检：黄铜金/铬钢镜面/橡胶哑光/大理石洞石纹全部成立（marble 贴图本就是米黄洞石调，与场景一致）。
 
 **回归**：units 102/102；p35 重写 14/14（骑面放置贴坡解析间隙 gap 0.172 vs 0.168、叠球心距 0.304≈2r、拖拽钳制停在坡趾切点 x=0.92 提交不弹回、trusted 通路不拦）；新增 p42-swatch-previews 5/5（12 色块全 dataURL、重渲直读缓存）；run-all 全量见当轮记录。
+
+## 传送带引擎能力 + 模型库波2（RUN-2 + 课程补齐 + freefall 悬浮修复）
+
+**传送带（此前台账记名的「引擎暂不支持」缺口，高中最经典模型之一）**：
+- 组件 `conveyor`（表面与结构）：带长/带厚/带宽/带速（负值反向输运），friction 语义=带面动摩擦因数 μ。视觉=暗胶基座+琥珀人字纹顶带（应用主题强调色，远距离可读输运方向）+两侧钢导轨（机器轮廓）；人字纹随带速逐帧滚动（带停纹停），runtime 消费 mesh.userData.beltScroll。
+- 物理口径（教科书式）：带对物的切向作用=动摩擦 a=μg 朝带速，「轻放上去先滑动后共速」；带面 Rapier 摩擦强制归零（ColliderDesc.setFriction(0)+Min 合成规则——否则 Rapier 静摩擦按「带其实没动」把共速物体拖停，带驱动模型名存实亡），切向物理完全由 runtime `_driveConveyors` 接管（contactPairsWith 找带面接触+法向竖直占优判定，步内 dv=min(|带速-vx|, μg·dt)）。
+- explain 分支：t₁=v带/(μg) 理论滑动时长+滑动位移 vs 实测 crossing 时刻+共速段平均速度（±6%/±35% 判定）；派发必须先于抛体——带上单球+地面恰好满足抛体「离地单球」条件，会被拿去算射程。
+- parse-schema：conveyor 实体布局（球自动落带顶左端，正常重力——对撞悬浮分支例外）+自动补 8×4 光滑地面（出带承接+取景不拉远）+TYPE_MAP/别名（传送带/输送带/传输带）+RANGES speed [-8,8]。
+- workbench PEDIT 评审表补 conveyor（带长/带速/带面μ）——**此前 `PEDIT[e.type]` undefined 会让 fixture 载入即抛 TypeError 且被 catch 吞成「示例数据读取失败」**（p41 conveyor 用例 30s 超时现形）。PARSE_PROMPT 文档化 conveyor+带速方向语义（serve.py 已重启生效）。
+
+**连带修（freefall 悬浮 bug）**：无斜面球体一律走「对撞悬浮理想化」（gravityScale=0+无摩擦）——freefall fixture 的球从 y=2.0 松手后一直悬浮！p41 靠 vacuous verify 绿（无 freefall 分支=通用遥测 0 error）。修：无初速+题给高位置（y>r+0.1）=「由静止释放」语义，保留重力；带初速/贴地缺省仍悬浮。补 explainFreefall 分支（t=√(2h/g)+落地速度，多球质量不同同时落地=伽利略叙事），配单测钉死。
+
+**模型库波2（24→29）**：高中+4：平抛运动（水平 5m/s 抛出）/斜抛 45°（v²sin2θ/g 最远射程）/完全弹性碰撞（e=1 等质量速度交换）/传送带输运；初中+1：追及相遇（2m/s 追 1m/s，约 1s 相遇）。p41 EXPECT 同步扩表（+gs 断言能力：freefall gravityScale=1 回归守卫）。
+
+**回归**：units 106/106（explain +2 传送带/freefall、parse +2 布局/重力例外）；p41 53/53；p43-conveyor 6/6（建场零 error/球 4s 共速偏差 1.06%/反向带速 0.18%/人字纹滚动/目录通路）；全量见当轮记录。
