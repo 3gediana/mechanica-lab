@@ -304,3 +304,19 @@
 **连带修**：auto-ground 查重（模型给了地面还自动补=双地面）/springLayout 劫持收窄（kind=spring 或 ≤1 实体才接管，多体 attach 走正常管线——否则模型给的墙/第二球全被丢弃）。
 
 **红队轮**（_audit/redteam.mjs，20 道真实 curriculum 题真打 step-5-preview）：上游降级期致首轮中断（H6 复摆 10.5s 过、X3 混合搭建「删除+重建」过）；韧性化（每题 3 次重试/增量落盘）后重跑，结果见 _audit/redteam-results.json。
+
+## 自由摆放碰撞体积 + 材质真预览（用户截图反馈：球能穿模进斜坡/材质选择全是纯色图案）
+
+**复现先行（headless Playwright 三场景）**：①光标瞄准坡面中部，ghost 落到坡后方 (-1.5,0.17,-1.5) 半空（ghost 只投影 y=0 地平面，骑不上坡面）②拖拽全程网格自由穿透，全靠提交时弹回③把球拖向坡面释放必弹回原位（「不能加深穿透」）——鼠标路径根本无法把球放上斜坡。
+
+**修复一 ghost 骑面「指哪放哪」**（viewport._updateGhostFollow/_surfaceRide）：光标射线直击实体表面 → ghost 骑到命中面（球体沿命中面法线外推 halfH+4mm，其余竖直托起）；空地才落回地面档（grid 吸附只在地面档生效）。瞄坡面=贴坡面，瞄球顶=叠球（贴面合法物理位）。
+
+**修复二 拖拽实时碰撞**（viewport 拖拽生命周期 + workbench onGizmoLive）：dragging-changed 建档（起点位姿+出发深度），objectChange 每步钳制——整步被挡先试滑动分解（保高度平移/单轴，贴墙滑而非冻死），rotate 嵌入=抬升解算到新姿态贴面高度，全挡回滚。运行/暂停态摆姿势保持 PL-14 语义不介入。
+
+**修复三 判定口径升级 双口径**（viewport._embedStats）：26 向射线探针统一产出 count（嵌入方向数，placementLiftFor/方向键推入沿用）+ depth（最深嵌入深度，拖拽实时钳制与 gizmo 提交弹回改用「不比出发更深+10mm 接触皮」相对判定）——方向数口径在贴坡场景同增同减导致 `candN>=curN` 恒真、贴坡球完全拖不动；深度差才是稳定相对量。抬升阶梯 0.35→1.2m（高坡/墙顶也能解算落顶）。
+
+**连带修（潜伏 bug 被骑面路径炸出）**：`meshPenetrates` 泄漏 `raycaster.far`（探针把 far 设成包围盒对角×4 后不还原，污染后续所有射线——骑面路径第二次 follow 同一条射线打不到 5m 外坡面 → 落回地平档）。旧代码只算地平面所以从未暴露。修：_embedStats finally 还原 far + follow 处防御性置 ∞。
+
+**材质选择器真材质预览**（viewport.renderMaterialSwatches + workbench 色块替换）：离屏微型渲染器（96px，微型摄影棚 env=渐变天光+双柔光箱+地平灯带 equirect→PMREM，主光/冷轮廓光）把 12 个材质各渲一枚材质球 dataURL，目录色块就地替换（深底 #0c0d0f）；生成期/失败期保持色块降级，目录重渲直读缓存。主场景光照不动。目检：黄铜金/铬钢镜面/橡胶哑光/大理石洞石纹全部成立（marble 贴图本就是米黄洞石调，与场景一致）。
+
+**回归**：units 102/102；p35 重写 14/14（骑面放置贴坡解析间隙 gap 0.172 vs 0.168、叠球心距 0.304≈2r、拖拽钳制停在坡趾切点 x=0.92 提交不弹回、trusted 通路不拦）；新增 p42-swatch-previews 5/5（12 色块全 dataURL、重渲直读缓存）；run-all 全量见当轮记录。

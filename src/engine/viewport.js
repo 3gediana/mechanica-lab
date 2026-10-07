@@ -276,6 +276,7 @@ export class Viewport {
       -((clientY - r.top) / r.height) * 2 + 1
     );
     this.raycaster.setFromCamera(ndc, this.camera);
+    this.raycaster.far = Infinity;   // 防御：共享 raycaster 的 far 可能被探针改小（根治外再加一道）
     const denom = this.raycaster.ray.direction.y;
     const t = denom !== 0 ? -this.raycaster.ray.origin.y / denom : -1;
     if (t <= 0) return;
@@ -290,11 +291,21 @@ export class Viewport {
       }
       this._ghostSnapHit = true;
     } else {
-      let gx = pt.x, gz = pt.z;
-      if (this._ghostSnapMode === 'grid') { gx = Math.round(gx * 2) / 2; gz = Math.round(gz * 2) / 2; }   // 0.5m 网格吸附
-      this._ghost.position.set(gx, this._ghost.position.y, gz);
-      if (this._snapMarker) this._snapMarker.visible = false;
-      this._ghostSnapHit = false;
+      // 自由摆放「指哪放哪」（用户反馈：球要能直接放上斜面）：光标射线直击实体表面
+      // → ghost 骑到命中面上（球体沿命中面法线外推，其余竖直托起）；斜视角瞄到空地
+      // 才落回 y=0 地面档。骑面位不参与网格吸附——吸附语义只属于地面档。
+      const ride = this._surfaceRide(halfH);
+      if (ride) {
+        this._ghost.position.copy(ride);
+        if (this._snapMarker) this._snapMarker.visible = false;
+        this._ghostSnapHit = false;
+      } else {
+        let gx = pt.x, gz = pt.z;
+        if (this._ghostSnapMode === 'grid') { gx = Math.round(gx * 2) / 2; gz = Math.round(gz * 2) / 2; }   // 0.5m 网格吸附
+        this._ghost.position.set(gx, this._ghostSpawnY ?? this._ghost.position.y, gz);
+        if (this._snapMarker) this._snapMarker.visible = false;
+        this._ghostSnapHit = false;
+      }
     }
     // 放置防穿模：当前位置的碰撞箱穿透探针（节流：位移 >2cm 或旋转变化才重查）→ ghost 红色警示
     const gp = this._ghost.position.toArray();
@@ -319,6 +330,83 @@ export class Viewport {
       pos: this._ghost ? this._ghost.position.toArray().map((v) => +v.toFixed(3)) : null,
     };
   }
+  // 可停靠实体根集合（有 entityId 且非仅视觉的实体；传感器等无碰撞体不可骑不可挡）
+  _collidableRoots() {
+    const roots = [];
+    for (const o of this.scene.children) {
+      if (!o.userData || !o.userData.entityId || !o.visible) continue;
+      const ob = this._bindLookup ? this._bindLookup(o.userData.entityId) : null;
+      if (ob && ob.entity && ob.entity.physics && ob.entity.physics.body === 'none') continue;
+      roots.push(o);
+    }
+    return roots;
+  }
+  // 光标射线 → 最近实体表面停靠点（ghost 骑面）：球体沿命中面法线外推 halfH+4mm
+  // （坡面上=沿坡法线贴住，而非悬在顶点上方）；其余形体不会转体，竖直托起防沉。
+  _surfaceRide(halfH) {
+    const hits = this.raycaster.intersectObjects(this._collidableRoots(), true)
+      .filter((h) => h.object.isMesh);
+    if (!hits.length) return null;
+    const h = hits[0];
+    const p = new THREE.Vector3();
+    if (this._ghost && this._ghost.geometry && this._ghost.geometry.type === 'SphereGeometry') {
+      const n = h.face
+        ? h.face.normal.clone().transformDirection(h.object.matrixWorld).normalize()
+        : new THREE.Vector3(0, 1, 0);
+      p.copy(h.point).addScaledVector(n, halfH + 0.004);
+    } else {
+      p.set(h.point.x, h.point.y + halfH + 0.004, h.point.z);
+    }
+    return p;
+  }
+
+  // ============ 材质选择器真材质预览（用户反馈「材质选择全是纯色图案」） ============
+  // 离屏微型渲染器把每个材质渲成 96px 材质球：微型摄影棚 env（渐变天光+两块柔光箱+暗地面，
+  // equirect→PMREM 供金属反射）+ 主光/冷轮廓光。主场景光照不受影响；失败向上抛由调用方降级色块。
+  async renderMaterialSwatches(mats) {
+    const keys = Object.keys(mats).filter((k) => mats[k] && mats[k].isMaterial);
+    if (!keys.length) return {};
+    const R = 96;
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+    renderer.setSize(R, R);
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    const scene = new THREE.Scene();
+    const cam = new THREE.PerspectiveCamera(30, 1, 0.1, 20);
+    cam.position.set(0, 0.6, 3.9);
+    cam.lookAt(0, 0, 0);
+    const ec = document.createElement('canvas');
+    ec.width = 512; ec.height = 256;
+    const g = ec.getContext('2d');
+    const sky = g.createLinearGradient(0, 0, 0, 256);
+    sky.addColorStop(0, '#3a3d44'); sky.addColorStop(0.52, '#23252a'); sky.addColorStop(0.62, '#0e0f12'); sky.addColorStop(1, '#0a0a0c');
+    g.fillStyle = sky; g.fillRect(0, 0, 512, 256);
+    g.fillStyle = '#d8dce2'; g.fillRect(40, 52, 120, 46);    // 主柔光箱
+    g.fillStyle = '#aeb6c2'; g.fillRect(300, 40, 130, 40);   // 副柔光箱
+    g.fillStyle = '#6a707a'; g.fillRect(180, 96, 200, 14);   // 地平灯带
+    const etex = new THREE.CanvasTexture(ec);
+    etex.mapping = THREE.EquirectangularReflectionMapping;
+    etex.colorSpace = THREE.SRGBColorSpace;
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const env = pmrem.fromEquirectangular(etex).texture;
+    scene.environment = env;
+    const key = new THREE.DirectionalLight(0xfff1dd, 2.4); key.position.set(2.2, 2.8, 1.6); scene.add(key);
+    const rim = new THREE.DirectionalLight(0x9db4ff, 1.1); rim.position.set(-2.6, 1.2, -2.2); scene.add(rim);
+    const sphere = new THREE.Mesh(new THREE.SphereGeometry(1, 48, 32));
+    scene.add(sphere);
+    const out = {};
+    try {
+      for (const k of keys) {
+        sphere.material = mats[k];
+        renderer.render(scene, cam);
+        out[k] = renderer.domElement.toDataURL('image/png');
+      }
+    } finally {
+      pmrem.dispose(); etex.dispose(); env.dispose();
+      sphere.geometry.dispose();
+      renderer.dispose();
+    }
+    return out;
+  }
   showGhost(component) {
     this.hideGhost();
     if (!this._ghostFactory) return;
@@ -326,7 +414,8 @@ export class Viewport {
     if (!geo) return;
     const mat = new THREE.MeshStandardMaterial({ color: 0xd9a441, transparent: true, opacity: 0.35, roughness: 0.6 });
     this._ghost = new THREE.Mesh(geo, mat);
-    this._ghost.position.set(0, component.spawnY ? component.spawnY(component.defaults.params) + 0.02 : 0.5, 0);
+    this._ghostSpawnY = component.spawnY ? component.spawnY(component.defaults.params) + 0.02 : 0.5;   // 地面档停靠高度
+    this._ghost.position.set(0, this._ghostSpawnY, 0);
     this._ghost.rotation.y = this._ghostRotY || 0;
     this._ghostComponent = component;
     this.scene.add(this._ghost);
@@ -775,8 +864,24 @@ export class Viewport {
     const gizmo = new TransformControls(camera, renderer.domElement);
     gizmo.setMode('translate');
     gizmo.setSize(0.85);
-    gizmo.addEventListener('dragging-changed', (ev) => { controls.enabled = !ev.value; this.markDirty(); });
-    gizmo.addEventListener('objectChange', () => this.markDirty());
+    gizmo.addEventListener('dragging-changed', (ev) => {
+      controls.enabled = !ev.value; this.markDirty();
+      // 拖拽会话边界（自由摆放实时碰撞）：起点位姿快照 + 通知 workbench 起止
+      if (ev.value) {
+        this._dragPose = this.gizmo.object
+          ? { pos: this.gizmo.object.position.clone(), rot: this.gizmo.object.rotation.clone() }
+          : null;
+        if (this.cb.onGizmoDragStart) this.cb.onGizmoDragStart();
+      } else {
+        this._dragPose = null;
+        if (this.cb.onGizmoDragEnd) this.cb.onGizmoDragEnd();
+      }
+    });
+    gizmo.addEventListener('objectChange', () => {
+      this.markDirty();
+      // 拖拽中实时碰撞（自由摆放=全程有碰撞体积，不等提交才弹回）
+      if (this._dragPose && this.cb.onGizmoLive) this.cb.onGizmoLive(this.gizmoMode);
+    });
     gizmo.addEventListener('mouseUp', () => this.cb.onGizmoCommit && this.cb.onGizmoCommit());
     gizmo.enabled = false;
     this.gizmo = gizmo;
@@ -896,15 +1001,14 @@ export class Viewport {
   setBindLookup(fn) { this._bindLookup = fn; }
 
   // ============ 放置/挪动防穿模探测（用户需求「根据碰撞箱阻挡」） ============
-  // 26 向射线从假想体质心出射：他体表面比自己表面更近的方向数 ≥5 = 该姿态嵌入。
-  // 相对口径天然放行「贴面停放」（他面 ≈ 自己面，不更近）、拦住「半嵌/深嵌」；
-  // 材质临时双面化——否则体内出射穿背面前逃逸，深嵌探测不到。
+  // 26 向射线从假想体质心出射（双面化临时材质），_embedStats 统一产出双口径：
+  //   count=嵌入方向数（他面比自己面更近的方向；贴面相切 1e-4 容差不算）
+  //   depth=最深嵌入深度 m（同方向自面-他面距离差最大值；体内包覆按 1.0 计）
+  // count 口径供「嵌入/不嵌」判定（placementLiftFor/挪动弹回），depth 口径供拖拽实时
+  // 碰撞的「不比出发更深」相对判定——坡面贴停的口径噪声下，方向数会同增同减导致
+  // 「candN >= curN」恒真、贴坡球完全拖不动；深度差才是稳定的相对量。
   _penDirs = null;
-  meshPenetrates(mesh, excludeId = null, isDynamic = false) {
-    mesh.updateMatrixWorld(true);
-    const box = new THREE.Box3().setFromObject(mesh);
-    const center = box.getCenter(new THREE.Vector3());
-    const far = box.getSize(new THREE.Vector3()).length() * 4 + 2;
+  _probeOthers(mesh, excludeId, isDynamic) {
     const others = [];
     for (const o of this.scene.children) {
       if (!o.userData || !o.userData.entityId || o === mesh || !o.visible) continue;
@@ -915,7 +1019,14 @@ export class Viewport {
       if (!isDynamic && !otherDynamic) continue;
       others.push(o);
     }
-    if (!others.length) return false;
+    return others;
+  }
+  _embedStats(mesh, others) {
+    mesh.updateMatrixWorld(true);
+    if (!others.length) return { count: 0, depth: 0 };
+    const box = new THREE.Box3().setFromObject(mesh);
+    const center = box.getCenter(new THREE.Vector3());
+    const far = box.getSize(new THREE.Vector3()).length() * 4 + 2;
     if (!this._penDirs) {
       this._penDirs = [];
       for (const x of [-1, 0, 1]) for (const y of [-1, 0, 1]) for (const z of [-1, 0, 1]) {
@@ -927,8 +1038,9 @@ export class Viewport {
     for (const o of [mesh, ...others]) {
       o.traverse((t) => { if (t.isMesh && t.material) { t.material.side = THREE.DoubleSide; mats.add(t.material); } });
     }
+    const far0 = this.raycaster.far;   // 共享 raycaster：far 必须还原，否则泄漏污染后续所有射线
     try {
-      let embedded = 0, enclosed = 0;
+      let embedded = 0, enclosed = 0, depth = 0;
       for (const d of this._penDirs) {
         this.raycaster.set(center, d);
         this.raycaster.far = far;
@@ -937,13 +1049,25 @@ export class Viewport {
         if (!oHit) continue;
         enclosed++;
         // 他面比自己面更近 = 该方向被埋（贴面相切 o≈s 不算，1e-4 容差）
-        if (!sHit || oHit.distance < sHit.distance - 1e-4) embedded++;
+        if (!sHit || oHit.distance < sHit.distance - 1e-4) {
+          embedded++;
+          const pen = sHit ? sHit.distance - oHit.distance : far;
+          if (pen > depth) depth = pen;
+        }
       }
-      // 返回嵌入方向数（0=不嵌）；体内包覆（≥22 向有他面=封闭体内）按全嵌 26 计
-      return enclosed >= 22 ? this._penDirs.length : embedded;
+      // 体内包覆（≥22 向有他面=封闭体内）按全嵌 26 向 / 1m 深计
+      if (enclosed >= 22) return { count: this._penDirs.length, depth: 1.0 };
+      return { count: embedded, depth };
     } finally {
+      this.raycaster.far = far0;
       for (const m of mats) m.side = THREE.FrontSide;
     }
+  }
+  meshPenetrates(mesh, excludeId = null, isDynamic = false) {
+    return this._embedStats(mesh, this._probeOthers(mesh, excludeId, isDynamic)).count;
+  }
+  meshPenetrationDepth(mesh, excludeId = null, isDynamic = false) {
+    return this._embedStats(mesh, this._probeOthers(mesh, excludeId, isDynamic)).depth;
   }
 
   // 运行态抓取拾取（层 2）：射线找最近可见实体网格，命中返回 {id, point:[x,y,z]}

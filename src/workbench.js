@@ -62,6 +62,8 @@ let timeScale = 1;
 let appReady = false;
 const history = new History();
 let RAPIER, M, runtime, viewport;
+let gizmoDragCtx = null;        // 拖拽实时碰撞会话（onGizmoDragStart 建档 / End 清档）
+let swatchPreviews = null;      // 材质选择器预览 { key: dataURL }，异步生成完成前色块降级
 
 const AUTOSAVE_KEY = 'mechanica.autosave.v1';
 
@@ -113,13 +115,14 @@ const AUTOSAVE_KEY = 'mechanica.autosave.v1';
         // 平移释放时按当前吸附档位归位（endpoint/surface/center；grid 档由 gizmo 拖动内建吸附）
         const bind = runtime.binds.get(e.id);
         if (viewport.gizmoMode === 'translate' && bind) applySnapToMesh(bind.mesh);
-        // 放置防穿模的挪动延伸（用户需求）：拖进现有物体内=弹回不提交。缩放模式跳过
+        // 放置防穿模的挪动延伸（用户需求）：释放位比出发位更深嵌入=弹回不提交（深度口径，
+        // 与拖拽实时钳制同规则——方向数口径在贴坡等贴面场景会误杀合法贴停）。缩放模式跳过
         // （视觉缩放不改碰撞体/位姿，无穿模含义；弹回须还原 pos+rot+scale 全套，scale 残留
-        // 不清会滚雪球成 ±1e7——w1 A4 实测）。挪动=只拦「加深穿透」（同上）。
+        // 不清会滚雪球成 ±1e7——w1 A4 实测）。
         if (bind && viewport.gizmoMode !== 'scale') {
-          const curN = entityPoseBlocked(e.id, e.transform.pos);
-          const candN = entityPoseBlocked(e.id, bind.mesh.position.toArray());
-          if (candN > 0 && candN >= curN) {
+          const curD = entityPoseDepth(e.id, e.transform.pos);
+          const candD = entityPoseDepth(e.id, bind.mesh.position.toArray());
+          if (candD > Math.max(curD + 0.004, 0.01)) {
             bind.mesh.position.fromArray(e.transform.pos);
             bind.mesh.rotation.set(...e.transform.rot);
             if (e.transform.scale) bind.mesh.scale.fromArray(e.transform.scale);
@@ -133,11 +136,67 @@ const AUTOSAVE_KEY = 'mechanica.autosave.v1';
         commitChange('移动 ' + e.name);
         renderInspector();
       },
+      // 自由摆放实时碰撞（用户需求「自由摆放时就该有碰撞体积」）：拖拽全程钳制，
+      // 不等提交才弹回——拖进坡体=贴着坡面滑/停住，旋转嵌入=抬升解算到贴面高度。
+      onGizmoDragStart: () => {
+        gizmoDragCtx = null;
+        if (mode !== 'edit') return;   // 运行/暂停态摆姿势保持 PL-14 语义（提交时只拦加深）
+        const e = getEntity(doc, selectedId);
+        if (!e) return;
+        const bind = runtime.binds.get(e.id);
+        if (!bind || !bind.mesh) return;
+        const mesh = bind.mesh;
+        gizmoDragCtx = {
+          id: e.id, mesh, mode: viewport.gizmoMode,
+          lastGoodPos: mesh.position.clone(),
+          lastGoodRot: mesh.rotation.clone(),
+          // 出发即嵌入体（如预设贴坡球）：不比出发更深即可（逃逸自由）；干净出发：≤10mm 接触皮
+          startDepth: entityPoseDepth(e.id, mesh.position.toArray()),
+        };
+      },
+      onGizmoLive: (gmode) => {
+        const ctx = gizmoDragCtx;
+        if (!ctx || ctx.mode !== gmode) return;
+        const mesh = ctx.mesh;
+        const okDepth = Math.max(ctx.startDepth + 0.004, 0.01);
+        if (gmode === 'translate') {
+          const p = mesh.position;
+          if (entityPoseDepth(ctx.id, p.toArray()) <= okDepth) { ctx.lastGoodPos.copy(p); return; }
+          // 整步被挡→滑动分解：先保高度平移、再单轴，能滑就滑（贴墙滑动而非冻死）
+          const lg = ctx.lastGoodPos;
+          for (const [x, y, z] of [[p.x, p.y, lg.z], [p.x, lg.y, p.z], [lg.x, p.y, p.z], [p.x, lg.y, lg.z], [lg.x, p.y, lg.z], [lg.x, lg.y, p.z]]) {
+            if (entityPoseDepth(ctx.id, [x, y, z]) <= okDepth) { p.set(x, y, z); ctx.lastGoodPos.set(x, y, z); return; }
+          }
+          p.copy(lg);
+        } else if (gmode === 'rotate') {
+          if (entityPoseDepth(ctx.id, mesh.position.toArray()) <= okDepth) {
+            ctx.lastGoodPos.copy(mesh.position); ctx.lastGoodRot.copy(mesh.rotation); return;
+          }
+          // 旋转嵌入（如地上盒子绕 Z 转出棱角入地）：抬升到新姿态的贴面高度；抬无可抬回滚
+          for (const lift of [0.02, 0.05, 0.1, 0.2, 0.35, 0.5, 0.7]) {
+            const y = mesh.position.y + lift;
+            if (entityPoseDepth(ctx.id, [mesh.position.x, y, mesh.position.z]) <= okDepth) {
+              mesh.position.y = y;
+              ctx.lastGoodPos.copy(mesh.position); ctx.lastGoodRot.copy(mesh.rotation);
+              return;
+            }
+          }
+          mesh.position.copy(ctx.lastGoodPos);
+          mesh.rotation.copy(ctx.lastGoodRot);
+        }
+      },
+      onGizmoDragEnd: () => { gizmoDragCtx = null; },
     });
     await viewport.init();
 
     setLoad('正在加载材质库');
     M = await createMaterials();
+    // 材质选择器真材质预览（用户反馈「全是纯色图案」）：离屏渲 12 枚材质球，完成后就地
+    // 替换目录色块；生成期/失败期保持色块降级，不阻塞主流程
+    viewport.renderMaterialSwatches(M).then((map) => {
+      swatchPreviews = map;
+      refreshMaterialSwatches();
+    }).catch((e) => console.warn('[workbench] 材质预览生成失败，保持色块:', e && e.message));
 
     setLoad('正在构建场景');
     runtime = new Runtime(RAPIER, M, viewport.scene);
@@ -310,7 +369,7 @@ function placementLiftFor(typeId, params, pos, rotY, excludeId = null, isDynamic
   probe.rotation.y = rotY;
   const hit = () => viewport.meshPenetrates(probe, excludeId, isDynamic);
   if (!hit()) return 0;
-  for (const lift of [0.02, 0.05, 0.1, 0.2, 0.35]) {
+  for (const lift of [0.02, 0.05, 0.1, 0.2, 0.35, 0.5, 0.7, 0.9, 1.2]) {   // 高阶梯到 1.2m（高坡/墙顶也能解算落顶）
     probe.position.y = pos[1] + lift;
     if (!hit()) return lift;
   }
@@ -330,6 +389,21 @@ function entityPoseBlocked(id, pos, isDynamicOverride = null) {
   try { count = viewport.meshPenetrates(bind.mesh, id, isDynamic); }
   finally { bind.mesh.position.copy(savedP); bind.mesh.updateMatrixWorld(true); }
   return count;   // 嵌入方向数（0=不嵌）
+}
+
+// 深度口径（拖拽实时碰撞用）：返回当前姿态（位置换成 pos，旋转保持 mesh 现状）对
+// 他体的最深嵌入深度 m（0=不嵌）。方向数在贴坡等贴面场景噪声大，深度差才是稳定的
+// 「不比出发更深」相对量——见 viewport._embedStats 双口径注释。
+function entityPoseDepth(id, pos) {
+  const bind = runtime.binds.get(id);
+  if (!bind || !bind.mesh) return 0;
+  const isDynamic = bind.entity.physics.body === 'dynamic';
+  const savedP = bind.mesh.position.clone();
+  bind.mesh.position.set(pos[0], pos[1], pos[2]);
+  let depth;
+  try { depth = viewport.meshPenetrationDepth(bind.mesh, id, isDynamic); }
+  finally { bind.mesh.position.copy(savedP); bind.mesh.updateMatrixWorld(true); }
+  return depth;
 }
 
 // 目录默认槽位的「最近空位」搜索：原位→抬升阶梯→周边 1.2m 环。全占= null（拒绝）。
@@ -1212,7 +1286,12 @@ function renderCatalogEnvMats(box, grid) {
     card.className = 'comp-item';
     card.innerHTML = `<div class="thumbbox"><span class="mswatch"></span></div><span class="nm"></span>`;
     const sw = card.querySelector('.mswatch');
-    sw.style.cssText = 'display:block;height:54px;width:54px;border-radius:3px;border:1px solid var(--line);background:' + (M && M[mo.key] && M[mo.key].color ? '#' + M[mo.key].color.getHexString() : 'rgba(255,255,255,.06)');
+    sw.dataset.mat = mo.key;
+    // 真材质球预览优先（renderMaterialSwatches 异步产物），色块仅作生成期/失败期降级
+    const pv = swatchPreviews && swatchPreviews[mo.key];
+    sw.style.cssText = 'display:block;height:54px;width:54px;border-radius:3px;border:1px solid var(--line);background:' + (pv
+      ? '#0c0d0f url(' + pv + ') center/cover no-repeat'
+      : (M && M[mo.key] && M[mo.key].color ? '#' + M[mo.key].color.getHexString() : 'rgba(255,255,255,.06)'));
     card.querySelector('.nm').textContent = mo.label;
     card.title = `把选中实体的材质换成${mo.label}（未选中实体时无效）`;
     card.onclick = () => {
@@ -1225,6 +1304,15 @@ function renderCatalogEnvMats(box, grid) {
       toast(`${e.name} → ${mo.label}`);
     };
     mg.appendChild(card);
+  }
+}
+
+// 材质预览异步完成后就地补挂到已渲染的色块上（目录随后重渲时走 renderCatalogEnvMats 同步读缓存）
+function refreshMaterialSwatches() {
+  if (!swatchPreviews) return;
+  for (const el of document.querySelectorAll('.mswatch[data-mat]')) {
+    const url = swatchPreviews[el.dataset.mat];
+    if (url) el.style.background = '#0c0d0f url(' + url + ') center/cover no-repeat';
   }
 }
 
@@ -4692,7 +4780,9 @@ window.MECH = {
   scaleState: () => ({ step: gridStep, ...viewport.gridInfo(),
     text: document.getElementById('scaleReadout') ? document.getElementById('scaleReadout').textContent : '' }),
   ghostState: () => viewport.ghostState(),
+  materialSwatchState: () => ({ ready: !!swatchPreviews, n: swatchPreviews ? Object.keys(swatchPreviews).length : 0 }),
   poseBlocked: (id, pos) => entityPoseBlocked(id || selectedId, pos),   // 挪动防穿模探针
+  poseDepth: (id, pos) => entityPoseDepth(id || selectedId, pos),       // 深度口径探针（测试/调试）
   // AG-V 建场自查通道（p37 断言用）
   agentVerifyState: () => agentVerifyState,
   runAgentVerify: () => runAgentVerify(false),
