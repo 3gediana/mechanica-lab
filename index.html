@@ -111,6 +111,8 @@
     flex: 0 0 auto; box-shadow: 0 0 8px rgba(217, 164, 65, 0.8); cursor: pointer; }
   .dirty-dot.on { display: inline-block; animation: dirtyIn .16s ease; }   /* UI-504 出现渐入不硬切 */
   @keyframes dirtyIn { from { opacity: 0; transform: scale(.4); } }
+  #vignette { position: fixed; inset: 0; z-index: 3; pointer-events: none; opacity: 0;   /* FX-531 子弹时间伪景深（opacity 由 JS 按 _bptEase 驱动） */
+    background: radial-gradient(ellipse at center, transparent 52%, rgba(0, 0, 0, 0.55) 100%); }
   #sceneName {
     background: transparent; border: 1px solid transparent; color: var(--text);
     font-family: var(--sans); font-size: 12px; padding: 4px 8px; width: 136px; border-radius: var(--r-ctl);
@@ -870,6 +872,7 @@
 </symbol>
 </svg>
 <div id="stage"></div>
+<div id="vignette" aria-hidden="true"></div>
 <div id="rubber" style="display:none;position:fixed;border:1px solid var(--accent);background:rgba(217,164,65,.10);z-index:12;pointer-events:none"></div>
 
 <header id="topbar">

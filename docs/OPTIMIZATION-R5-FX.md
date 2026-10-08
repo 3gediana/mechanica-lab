@@ -25,7 +25,7 @@
 
 | # | 位置 | 内容 | P | 量 | 开销 | 状态 |
 |---|---|---|---|---|---|---|
-| FX-515 | viewport updateTrails+runtime trails | 轨迹线速度渐变着色:点按采样 speed 映射色(慢蓝 0x5b8dd9→快琥珀→极快红);geometry color attribute+vertexColors;trails 点改四元组 | P1 | M | 中 | ⬜ |
+| FX-515 ✅B4b | viewport updateTrails+runtime trails | 轨迹线速度渐变着色:点按采样 speed 映射色(慢蓝 0x5b8dd9→快琥珀→极快红);geometry color attribute+vertexColors;trails 点改四元组 | P1 | M | 中 | ⬜ |
 | FX-516 | viewport updateTrails | 轨迹尾端渐隐:最老 30% 点叠一条 opacity 0.25 分段线(无 shader) | P3 | S | 轻 | ⬜ |
 | FX-517 | viewport updateVelocityArrows | 速度箭头平滑:方向/长度指数平滑 lerp 0.35,消抖动毛刺 | P1 | S | 轻 | ⬜ |
 | FX-518 | viewport+workbench | 受力箭头数值标签(开关):N/f/g DOM 浮签钉箭头顶点(screenPosOf 已有),默认关,标签池复用 | P1 | M | 中 | ⬜ |
@@ -46,8 +46,8 @@
 | FX-528 | juice applyShake | 震频分级:小撞 60Hz 高频小幅/中 40/大撞 22Hz 低频大幅(查表) | P2 | S | 轻 | ✅B4a |
 | FX-529 | viewport tickFocus/tickPose | 聚焦飞行缓动分级:固定 lerp → 时间参数化 cubic-in-out(0.6s 标准/1.2s 叙事) | P1 | M | 中 | ⬜ |
 | FX-530 | presets+flyToPose | 预置开场镜头叙事:opening 字段{wide,hero} 两段飞行 0.9s→0.7s,reduced-motion/用户接管跳终态 | P2 | M | 中 | ⬜ |
-| FX-531 | workbench+viewport fog | 子弹时间伪景深:0.25x/0.1x 时 fog near 16→9+全屏 vignette DOM 层 opacity 0→0.3(0.4s) | P1 | S | 轻 | ⬜ |
-| FX-532 | maybeBulletTime 旁 | 强撞 hitstop 微顿:strength>0.7 → timeScale 0.35 持续 60ms(独立 0.8s 冷却) | P1 | S | 轻 | ⬜ |
+| FX-531 ✅B4b | workbench+viewport fog | 子弹时间伪景深:0.25x/0.1x 时 fog near 16→9+全屏 vignette DOM 层 opacity 0→0.3(0.4s) | P1 | S | 轻 | ⬜ |
+| FX-532 ✅B4b | maybeBulletTime 旁 | 强撞 hitstop 微顿:strength>0.7 → timeScale 0.35 持续 60ms(独立 0.8s 冷却) | P1 | S | 轻 | ⬜ |
 | FX-533 | viewport 追焦 | 选中体运动追焦:controls.target lerp 0.02/帧 微跟随(可关,拖相机即断) | P2 | M | 中 | ⬜ |
 | FX-534 | viewport tickZoom | 缩放终点缓出:固定 0.2 → 自适应(0.12+0.25·min(1,dist/goal)) | P2 | S | 轻 | ⬜ |
 | FX-535 | juice+render | 撞击 FOV 微冲:strength>0.5 → fov 42→42.6 单帧脉冲 120ms 回 | P2 | S | 轻 | ⬜ |
@@ -121,7 +121,7 @@
 
 | # | 位置 | 内容 | P | 量 | 开销 | 状态 |
 |---|---|---|---|---|---|---|
-| FX-581 | maybeBulletTime/setSpeed | 子弹时间进出缓动:timeScale 每帧向目标 lerp 0.12(约 0.4s) | P1 | M | 中 | ⬜ |
+| FX-581 ✅B4b | maybeBulletTime/setSpeed | 子弹时间进出缓动:timeScale 每帧向目标 lerp 0.12(约 0.4s) | P1 | M | 中 | ⬜ |
 | FX-582 | 单步按钮 | 单步步进视觉确认:视口四边 1px 琥珀描边闪 120ms | P2 | S | 轻 | ⬜ |
 | FX-583 | reset 无录制路径 | 重置回卷感(表现层):快照当前位姿,rebuild 后 0.25s lerp 回初始(仅视觉) | P1 | M | 中 | ⬜ |
 | FX-584 | 运行态 HUD | 运行专注模式:运行 3s 后次要 HUD 再降 30%,编辑/暂停恢复 | P3 | S | 轻 | ⬜ |

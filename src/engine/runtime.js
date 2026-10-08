@@ -630,8 +630,17 @@ export class Runtime {
         if (!arr) { arr = []; this.trails.set(id, arr); }
         if (arr.length >= 1800) arr.shift();
         const g = b.body ? null : this._gravMap.get(id);
-        const p = b.body ? b.body.translation() : { x: g.pos[0], y: g.pos[1], z: g.pos[2] };
-        arr.push([p.x, p.y, p.z]);
+        // 四元组 [x,y,z,speed]（FX-515：轨迹速度渐变着色的数据源）
+        let p, sp;
+        if (b.body) {
+          p = b.body.translation();
+          const v = b.body.linvel();
+          sp = Math.hypot(v.x, v.y, v.z);
+        } else {
+          p = { x: g.pos[0], y: g.pos[1], z: g.pos[2] };
+          sp = g.vel ? Math.hypot(g.vel[0], g.vel[1], g.vel[2]) : 0;
+        }
+        arr.push([p.x, p.y, p.z, sp]);
       }
     }
     if (this.recording) {

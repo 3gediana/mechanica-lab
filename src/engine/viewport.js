@@ -113,6 +113,16 @@ export class Viewport {
     this.markDirty();
   }
 
+  // FX-531：子弹时间伪景深——雾近距 16→9 随缓动收紧（数据线 fog:false 不受影响）
+  setBptDepth(ease) {
+    if (!this.scene.fog) return;
+    const near = 16 - 7 * ease;
+    if (Math.abs(this.scene.fog.near - near) > 0.05) {
+      this.scene.fog.near = near;
+      this.markDirty();
+    }
+  }
+
   focusScene() {
     const box = new THREE.Box3();
     let any = false;
@@ -654,17 +664,24 @@ export class Viewport {
   // 增量写点（PER-2）：未到 1800 封顶时只 append 新点；封顶后数组每步 shift 滑动，退回全量重写。
   updateTrails(trails) {
     if (!this.trailsVisible) return;
-    const PALETTE = [0xd9a441, 0x7ba7d9, 0x93c47d, 0xc27ba0, 0xd98a6f];
-    // 颜色按 id 哈希稳定（UI-26）：rebuild 后同一实体不再因遍历序变色
+    // FX-515 速度渐变：慢=蓝(0x5b8dd9) → 中=琥珀(0xd9a441) → 快=红(0xc96a5a)，8 m/s 满标
+    const _cA = new THREE.Color(0x5b8dd9), _cB = new THREE.Color(0xd9a441), _cC = new THREE.Color(0xc96a5a);
+    const speedColor = (sp, out) => {
+      const t = Math.min(sp / 8, 1);
+      if (t < 0.5) out.lerpColors(_cA, _cB, t * 2);
+      else out.lerpColors(_cB, _cC, (t - 0.5) * 2);
+      return out;
+    };
+    const _tmpC = new THREE.Color();
     let i = 0;
     for (const [trailId, pts] of trails) {
-      const color = PALETTE[Math.abs([...trailId].reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 7)) % PALETTE.length];
       let line = this._trailLines[i];
       if (!line) {
         const geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(1800 * 3), 3));
+        geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(1800 * 3), 3));
         geo.setDrawRange(0, 0);
-        const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.75, fog: false });   // 数据线不吃雾（天体远轨仍清晰）
+        const mat = new THREE.LineBasicMaterial({ color: 0xffffff, vertexColors: true, transparent: true, opacity: 0.85, fog: false });   // 顶点色渐变（数据线不吃雾）
         line = new THREE.Line(geo, mat);
         line.frustumCulled = false;
         line.visible = false;
@@ -673,17 +690,29 @@ export class Viewport {
         this._trailLines.push(line);
       }
       const attr = line.geometry.attributes.position;
+      const cattr = line.geometry.attributes.color;
+      if (!cattr) {   // 旧实例兼容：顶点色属性惰性补挂
+        line.geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(1800 * 3), 3));
+        line.material.vertexColors = true;
+        line.material.color.setHex(0xffffff);
+        line.material.needsUpdate = true;
+      }
+      const cmap = line.geometry.attributes.color;
       const n = Math.min(pts.length, 1800);
       const w = line.userData.written;
-      if (pts.length >= 1800 || w > n) {
-        for (let k = 0; k < n; k++) attr.setXYZ(k, pts[k][0], pts[k][1], pts[k][2]);
-      } else {
-        for (let k = w; k < n; k++) attr.setXYZ(k, pts[k][0], pts[k][1], pts[k][2]);
+      const full = pts.length >= 1800 || w > n;
+      const k0 = full ? 0 : w;
+      for (let k = k0; k < n; k++) {
+        const pt = pts[k];
+        attr.setXYZ(k, pt[0], pt[1], pt[2]);
+        speedColor(pt[3] || 0, _tmpC);
+        cmap.setXYZ(k, _tmpC.r, _tmpC.g, _tmpC.b);
       }
-      if (line.material.color.getHex() !== color) line.material.color.setHex(color);
+      if (line.material.vertexColors !== true) { line.material.vertexColors = true; line.material.color.setHex(0xffffff); line.material.needsUpdate = true; }   // FX-515 升级旧线
       line.userData.written = n;
-      if (w !== n || pts.length >= 1800) {
+      if (w !== n || full) {
         attr.needsUpdate = true;
+        cmap.needsUpdate = true;
         this.markDirty();
       }
       line.geometry.setDrawRange(0, n);

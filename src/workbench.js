@@ -760,8 +760,11 @@ function maxStepsPerFrame(ts = timeScale) { return ts > 2 ? 16 : 8; }
 // 2.5s 冷却防连环触发；不碰用户档位（临时覆盖，state().timeScale 报生效值）。
 let autoBPT = false;
 let _bptUntil = 0, _bptLast = 0;
+let _bptEase = 0;                 // FX-581：子弹时间进出缓动 0→1（每帧向目标 lerp 0.12≈0.4s）
+let _hitUntil = 0, _hitLast = 0;  // FX-532：强撞 hitstop 微顿（0.35x×60ms，独立 0.8s 冷却）
 function effectiveTimeScale() {
-  return (autoBPT && mode === 'run' && !paused && performance.now() < _bptUntil) ? 0.25 : timeScale;
+  const hit = performance.now() < _hitUntil ? 0.35 : 1;
+  return (timeScale + (0.25 - timeScale) * _bptEase) * hit;   // 子弹时间目标 0.25x（缓动过渡）
 }
 function maybeBulletTime(strength) {
   if (!autoBPT || mode !== 'run' || paused) return;
@@ -769,10 +772,18 @@ function maybeBulletTime(strength) {
   if (now < _bptLast + 2500 || now < _bptUntil) return;   // 冷却中/已在慢放
   if (strength < 0.45 || effectiveTimeScale() !== timeScale || timeScale !== 1) return;
   _bptLast = now;
-  _bptUntil = now + 1200;
+  _bptUntil = now + 1600;   // 1.2s 全速慢放 + ~0.4s 缓动入出补偿（FX-581）：保证谷底 0.25x 真正停稳
   const chip = $('modeChip');
   chip.textContent += ' · 子弹时间';
   chip.classList.add('grab');       // 同款琥珀高亮（复用 grab 反白样式）
+}
+// FX-532：强撞微顿——0.7 以上强击瞬间 60ms 0.35x（打击感），与子弹时间互相独立
+function maybeHitstop(strength) {
+  if (juice && juice.state().reducedMotion) return;   // FX-590 同口径：减动效不顿帧
+  const now = performance.now();
+  if (strength < 0.7 || now < _hitLast + 800 || mode !== 'run' || paused) return;
+  _hitLast = now;
+  _hitUntil = now + 60;
 }
 
 // ============ 模拟控制 ============
@@ -3354,6 +3365,19 @@ function tick() {
     }
     viewport.markDirty();
   } else if (mode === 'run' && !paused) {
+    // FX-581/531：子弹时间缓动 + 伪景深（雾近距收紧 + vignette 随缓动进出）
+    {
+      const bptTarget = (autoBPT && mode === 'run' && !paused && performance.now() < _bptUntil) ? 1 : 0;
+      _bptEase += (bptTarget - _bptEase) * Math.min(1, rawDtRaw * 6);   // 时间驱动（帧率无关）：~0.5s 收敛，弱机低 fps 也来得及停稳 0.25x
+      if (bptTarget === 0 && _bptEase < 0.01) _bptEase = 0;
+      else if (bptTarget === 1 && _bptEase > 0.99) _bptEase = 1;
+      viewport.setBptDepth(_bptEase);
+      const vg = document.getElementById('vignette');
+      if (vg) {
+        const o = Math.round(_bptEase * 300) / 1000;
+        if (vg.__o !== o) { vg.__o = o; vg.style.opacity = o; }
+      }
+    }
     const tsEff = effectiveTimeScale();
     runtime.advance(rawDt * tsEff, maxStepsPerFrame(tsEff));
     viewport.markDirty();
@@ -3553,6 +3577,7 @@ function tick() {
           if (strength > 0.08) juice.spawnRing(s.pos, strength, normal);
         }
         maybeBulletTime(strength);
+        maybeHitstop(strength);
       }
       runtime.impactSounds.length = 0;
     }
@@ -5712,7 +5737,7 @@ window.MECH = {
     commitChange('记录 Agent 解析元数据');
     return cloneDoc(doc.meta);
   },
-  state: () => ({ mode, paused, simT: runtime.simT, timeScale: effectiveTimeScale(), timeScaleBase: timeScale, autoBPT, count: doc.entities.length, fixedH: FIXED_H }),
+  state: () => ({ mode, paused, simT: runtime.simT, timeScale: effectiveTimeScale(), timeScaleBase: timeScale, autoBPT, bptEase: +_bptEase.toFixed(2), bptMsLeft: Math.max(0, _bptUntil - performance.now()) | 0, hitMsLeft: Math.max(0, _hitUntil - performance.now()) | 0, count: doc.entities.length, fixedH: FIXED_H }),
   telemetry: (id) => runtime.telemetry(id || selectedId),
   accel: (id) => runtime.accels.get(id || selectedId) || null,
   collisions: () => [...runtime.collisions],
