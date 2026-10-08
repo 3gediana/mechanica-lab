@@ -41,32 +41,59 @@ function setSt(el, prop, v) {
 }
 
 function setLoad(msg) { veilStatus.textContent = msg; }
+// UI-503：场景名输入框多处赋值统一走这里，同步 title——长名截断时悬停可读全名
+function setSceneNameInput(v) {
+  const el = $('sceneName');
+  el.value = v;
+  el.title = v;
+}
+// UI-584：errbar 右端固定 × 钮，出错后可关不再只能刷新；UI-585：可见时 body.erropen 让 toast 下移避让
+function showErr(msg) {
+  $('errMsg').textContent = msg;
+  errbar.style.display = 'flex';
+  document.body.classList.add('erropen');
+}
+function hideErr() {
+  errbar.style.display = 'none';
+  document.body.classList.remove('erropen');
+}
+$('errClose').onclick = hideErr;
 function fail(msg) {
   veilStatus.textContent = '加载失败：' + msg;
   veilStatus.classList.add('err');
-  errbar.textContent = msg;
-  errbar.style.display = 'block';
+  showErr(msg);
   veil.classList.remove('gone');
   const retry = document.getElementById('btnVeilRetry');   // UI-13
   if (retry) retry.style.display = 'inline-block';
 }
 let toastTimer = 0;
 let toastLastMsg = '', toastLastAt = 0;
-function toast(msg) {
+// UI-581 长文案（「打开失败: …」「已导出 …csv」）1800ms 读不完 → 时长随字数，上限 4s
+const toastMs = (msg) => 1800 + Math.min(2200, msg.length * 45);
+function toast(msg, type) {
   const t = $('toast');
   const now = performance.now();
   // 同文案 1.2s 内重复触发（连点/连删）只续期不重弹，避免闪跳
   if (msg === toastLastMsg && now - toastLastAt < 1200) {
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.classList.remove('on'), 1800);
+    toastTimer = setTimeout(() => t.classList.remove('on'), toastMs(msg));
     toastLastAt = now;
     return;
   }
   toastLastMsg = msg; toastLastAt = now;
   t.textContent = msg;
-  t.classList.add('on');
+  // UI-582 类型语义：ok/warn/err 左缘色条（缺省中性）；UI-583 已在显示时重放上浮入场，避免文字原地瞬换
+  t.classList.toggle('ok', type === 'ok');
+  t.classList.toggle('warn', type === 'warn');
+  t.classList.toggle('err', type === 'err');
+  if (t.classList.contains('on')) {
+    t.classList.remove('on');
+    requestAnimationFrame(() => requestAnimationFrame(() => t.classList.add('on')));
+  } else {
+    t.classList.add('on');
+  }
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.classList.remove('on'); toastLastMsg = ''; }, 1800);
+  toastTimer = setTimeout(() => { t.classList.remove('on'); toastLastMsg = ''; }, toastMs(msg));
 }
 
 // ============ 全局状态 ============
@@ -775,7 +802,8 @@ function updateSimbarStatic() {
   setBtnText('btnPlay', mode === 'run' && paused ? '继续' : '运行');
   $('btnPlay').classList.toggle('hot', mode === 'run' && paused);
   $('btnPause').disabled = mode !== 'run';
-  setBtnText('btnPause', paused ? '继续' : '暂停');
+  $('btnPause').title = mode !== 'run' ? '运行后可用' : (paused ? '恢复自动推进' : '暂停模拟（空格同）');   // UI-570
+  setBtnText('btnPause', paused ? '恢复' : '暂停');   // UI-565：与 btnPlay 的「继续」区分，避免同屏双「继续」
   $('btnPause').classList.toggle('hot', mode === 'run' && paused);
   $('btnStep').disabled = false;
   $('btnReset').disabled = false;
@@ -797,8 +825,8 @@ function updateSimbarStatic() {
 function refreshHistoryButtons() {
   $('btnUndo').disabled = !history.canUndo();
   $('btnRedo').disabled = !history.canRedo();
-  $('btnUndo').title = history.canUndo() ? '撤销: ' + history.label().undo : '撤销';
-  $('btnRedo').title = history.canRedo() ? '重做: ' + history.label().redo : '重做';
+  $('btnUndo').title = history.canUndo() ? '撤销: ' + history.label().undo : '没有可撤销的操作';   // UI-511
+  $('btnRedo').title = history.canRedo() ? '重做: ' + history.label().redo : '没有可重做的操作';
   // 撤销/重做回到「与最近一次保存完全一致」的状态 → 脏点熄灭（诚实反映保存态）
   if (lastSavedJson != null) {
     const same = serializeDoc(doc) === lastSavedJson;
@@ -924,9 +952,11 @@ function relTime(ts) {
 }
 
 let libOpen = false, libQuery = '';
+let libEditing = false;   // UI-606：行内改名/加标签输入进行中，跳过全量重建（否则输入被排序切换/自动刷新打断）
 let libSort = (() => { try { return localStorage.getItem('mech.libSort') || 'recent'; } catch { return 'recent'; } })();   // 记住上次排序偏好
 const LIB_SOURCE_LABEL = { user: '', agent: 'Agent', preset: '预置' };
 function renderLibrary() {
+  if (libEditing) return;
   const grid = $('libGrid');
   const q = libQuery.trim().toLowerCase();
   let list = loadScenes();
@@ -934,7 +964,14 @@ function renderLibrary() {
   if (libSort === 'recent') list.sort((a, b) => b.updatedAt - a.updatedAt);
   else if (libSort === 'name') list.sort((a, b) => a.name.localeCompare(b.name, 'zh'));
   else list.sort((a, b) => (b.entityCount || 0) - (a.entityCount || 0));
-  $('libEmpty').style.display = list.length ? 'none' : 'block';
+  const emptyEl = $('libEmpty');
+  if (!list.length) {
+    emptyEl.style.display = 'block';
+    // UI-594：搜索无匹配不再误报「库里还没有场景」
+    emptyEl.textContent = q ? `没有匹配「${libQuery.trim()}」的场景` : '库里还没有场景——布好场景后点「保存」入库（自动生成缩略图与标签）';
+  } else {
+    emptyEl.style.display = 'none';
+  }
   grid.innerHTML = '';
   const curId = doc.sceneId;
   for (const sc of list) {
@@ -984,6 +1021,7 @@ function renderLibrary() {
     add.onclick = () => {
       const inp = document.createElement('input');
       inp.placeholder = '标签名';
+      libEditing = true;   // UI-606：加标签中冻结库重渲
       inp.style.cssText = 'width:64px;background:rgba(0,0,0,.3);border:1px solid rgba(217,164,65,.55);border-radius:2px;color:var(--text);font-size:10px;padding:1px 4px';
       inp.onkeydown = (ev) => {
         if (ev.key === 'Enter') {
@@ -993,8 +1031,9 @@ function renderLibrary() {
             persistScenes(loadScenes().map((y) => (y.id === sc.id ? sc : y)));
             if (sc.id === curId) doc.tags = [...sc.tags];
           }
+          libEditing = false;
           renderLibrary();
-        } else if (ev.key === 'Escape') renderLibrary();
+        } else if (ev.key === 'Escape') { libEditing = false; renderLibrary(); }
       };
       add.replaceWith(inp);
       inp.focus();
@@ -1041,17 +1080,19 @@ function renderLibrary() {
     nm.ondblclick = () => {
       const inp = document.createElement('input');
       inp.value = sc.name;
+      libEditing = true;   // UI-606：改名中冻结库重渲
       inp.onkeydown = (ev) => {
         if (ev.key === 'Enter') {
           const v = inp.value.trim().slice(0, 40) || sc.name;
           const all = loadScenes();
           const target = all.find((x) => x.id === sc.id);
           if (target) { target.name = v; persistScenes(all); }
-          if (sc.id === curId) { doc.name = v; $('sceneName').value = v; }
+          if (sc.id === curId) { doc.name = v; setSceneNameInput(v); }
+          libEditing = false;
           renderLibrary();
-        } else if (ev.key === 'Escape') renderLibrary();
+        } else if (ev.key === 'Escape') { libEditing = false; renderLibrary(); }
       };
-      inp.onblur = () => renderLibrary();
+      inp.onblur = () => { libEditing = false; renderLibrary(); };
       nm.textContent = '';
       nm.appendChild(inp);
       inp.focus();
@@ -1067,7 +1108,7 @@ function openSceneById(id) {
   const snap = snaps[id];
   if (snap) {
     applyDoc(deserializeDoc(snap), '打开场景');
-    $('sceneName').value = doc.name;
+    setSceneNameInput(doc.name);
     markSaved();
     closeLibrary();
     toast(`已打开「${doc.name}」（${doc.entities.length} 实体）`);
@@ -1143,7 +1184,7 @@ function openFile(file) {
   r.onload = () => {
     try {
       applyDoc(deserializeDoc(String(r.result)), '打开场景');
-      $('sceneName').value = doc.name;
+      setSceneNameInput(doc.name);
       markSaved();
       autosave(); saveSceneSnap();
       toast(`场景已载入：「${doc.name}」（${doc.entities.length} 实体）——「保存」将继续更新它在库里的条目`);
@@ -1156,7 +1197,7 @@ function openFile(file) {
 
 // ============ UI 绑定 ============
 function bindUI() {
-  $('btnNew').onclick = () => { applyDoc(createEmptyDoc('未命名场景'), '新建'); $('sceneName').value = doc.name; agentPatchRounds = 0; markSaved(); };
+  $('btnNew').onclick = () => { applyDoc(createEmptyDoc('未命名场景'), '新建'); setSceneNameInput(doc.name); agentPatchRounds = 0; markSaved(); };
   // 预置下拉单源化（MDL-41）：选项由 PRESETS 自动生成，消除 index.html 手写双份漂移；
   // 分组只做归类，未列出的预置自动落「更多」组
   const PRESET_GROUPS = [
@@ -1201,7 +1242,7 @@ function bindUI() {
     if (!picked) return;
     applyDoc(getPreset(picked), '载入预置');
     markSaved();
-    $('sceneName').value = doc.name;
+    setSceneNameInput(doc.name);
     if (picked === 'momentum') { setVectors(true); setCons(true); }   // 教学默认开叠加层
     if (picked === 'celestial') { setTrails(true); setCons(true); }
     if (picked === 'spin') { setVectors(true); setTrails(true); setCons(true); }
@@ -1238,6 +1279,7 @@ function bindUI() {
       gridOn = !gridOn;
       viewport.setGridVisible(gridOn);
       btnGrid.classList.toggle('hot', gridOn);
+      updateScaleReadout();   // UI-604：网格关了读数别再写「1 格 = N m」失真信息
       try { localStorage.setItem('mech.grid', gridOn ? '1' : '0'); } catch { /* 静默 */ }
     };
   }
@@ -1300,7 +1342,7 @@ function bindUI() {
     toast('已保存视口截图（下载）');
   };
 
-  $('sceneName').onchange = (e) => { doc.name = e.target.value || '未命名场景'; e.target.value = doc.name; autosave(); markDirty(); };
+  $('sceneName').onchange = (e) => { doc.name = e.target.value || '未命名场景'; e.target.value = doc.name; e.target.title = doc.name; autosave(); markDirty(); };   // UI-503 title 同步
   // 改名体验（SCN）：聚焦全选（改名高频，双击手选太磨）；Esc 还原未提交改动；空名回落原名
   $('sceneName').onfocus = (e) => { e.target.dataset.prev = e.target.value; requestAnimationFrame(() => e.target.select()); };
   $('sceneName').onkeydown = (e) => {
@@ -1467,6 +1509,7 @@ function onKey(e) {
     return;
   }
   if (e.code === 'Escape') {
+    if (document.body.classList.contains('erropen')) { hideErr(); return; }   // UI-615：错误条进 Esc 关闭链（最先；判定走类，inline display 初始是空串不可靠）
     if (libOpen) { closeLibrary(); return; }
     if (document.activeElement === $('catalogSearch') && catalogFilter) { $('catalogSearch').value = ''; catalogFilter = ''; renderCatalog(); return; }
     if (viewport.gizmo.dragging) { viewport.gizmo.reset(); viewport.markDirty(); return; }   // FZ-57：拖错当场 Esc 弹回，不产生提交
@@ -2298,19 +2341,27 @@ function numRow(parent, label, unit, value, step, onCommit, { min, max, schema }
     const ro = mode === 'run' ? '（运行态只读）' : '';
     input.title = [hint, range].filter(Boolean).join('。') + ro;
   }
-  input.onfocus = () => requestAnimationFrame(() => input.select());
+  input.onfocus = () => { if (input.classList.contains('bad')) clearErr(); requestAnimationFrame(() => input.select()); };   // UI-532：报错态先还原值再全选
   const err = document.createElement('div');
   err.className = 'errmsg';
   parent.appendChild(row);
   parent.appendChild(err);
+  // UI-532：校验失败不再 1.6s 静默还原（文案读不完、不知被还原）——保持报错，到下次聚焦时值回填可见
+  const clearErr = () => {
+    input.classList.remove('bad');
+    err.style.display = 'none';
+    input.value = +Number(value).toFixed(3);
+  };
+  const showNumErr = (msg) => {
+    input.classList.add('bad');
+    err.textContent = msg;
+    err.style.display = 'block';
+  };
   const commit = () => {
     if (schema) {
       const r = registry.validate(schema, input.value);
       if (!r.ok) {
-        input.classList.add('bad');
-        err.textContent = r.msg;
-        err.style.display = 'block';
-        setTimeout(() => { input.classList.remove('bad'); err.style.display = 'none'; input.value = +Number(value).toFixed(3); }, 1600);
+        showNumErr(r.msg);
         return;
       }
       onCommit(r.value);
@@ -2321,10 +2372,7 @@ function numRow(parent, label, unit, value, step, onCommit, { min, max, schema }
       // min/max 必须进 JS 校验：HTML 属性拦不住 fill/粘贴/科学计数（曾实测 mass=99999999、-5、
       // 溢出清空成 0 质量直入文档——0 质量动态体在物理上灾难性）。
       if (!Number.isFinite(v) || v < lo || v > hi) {
-        input.classList.add('bad');
-        err.textContent = min !== undefined && max !== undefined ? `允许范围 ${min} ~ ${max}` : '数值无效';
-        err.style.display = 'block';
-        setTimeout(() => { input.classList.remove('bad'); err.style.display = 'none'; input.value = +Number(value).toFixed(3); }, 1600);
+        showNumErr(min !== undefined && max !== undefined ? `允许范围 ${min} ~ ${max}` : '数值无效');
         return;
       }
       onCommit(v);
@@ -2767,7 +2815,14 @@ function drawCurves() {
   const W = cv.width, H = cv.height;
   ctx.clearRect(0, 0, W, H);
   const n = curveData.t.length;
-  if (n < 2) return;
+  if (n < 2) {
+    // UI-577：空画布给说明，不再一块纯黑
+    ctx.fillStyle = 'rgba(160, 168, 180, 0.7)';
+    ctx.font = '10px ui-monospace, SFMono-Regular, Menlo, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('运行后记录曲线', W / 2, H / 2 + 4);
+    return;
+  }
   let vmax = 1e-9;
   for (const v of curveData.ke) if (Math.abs(v) > vmax) vmax = Math.abs(v);
   if (curveMode === 'energy') {
@@ -2852,6 +2907,8 @@ let gridStep = 1;
 function updateScaleReadout() {
   const el = $('scaleReadout');
   if (!el) return;
+  // UI-604：网格隐藏时读数改说真话（网格/轴都被 setGridVisible 关掉）
+  if (viewport._grid && !viewport._grid.visible) { setTxt(el, '网格已隐藏'); return; }
   const cam = viewport.camera;
   const viewW = cam.isOrthographicCamera
     ? (cam.right - cam.left) / (cam.zoom || 1)
@@ -2863,7 +2920,7 @@ function updateScaleReadout() {
   else if (cells0 < 8 && idx > 0) gridStep = GRID_STEPS[idx - 1];
   viewport.setGridScale(gridStep);
   const cells = viewW / gridStep;
-  el.textContent = `网格 1 格 = ${gridStep} m　|　视野宽约 ${viewW.toFixed(1)} m ≈ ${cells.toFixed(1)} 格`;
+  el.textContent = `网格 1 格 = ${gridStep} m · 视野宽约 ${viewW.toFixed(1)} m ≈ ${cells.toFixed(1)} 格`;   // UI-605：全角分隔换 ·，mono 等宽对齐
 }
 
 // ============ 录制 / 回放 ============
@@ -2894,6 +2951,7 @@ function toggleFrameRec() {
 
 function startReplay() {
   if (replaying) return;
+  if (runtime.recFrames) { toast('正在录制——先点「停止录制」再回放', 'warn'); return; }   // UI-607：录制中回放会互踩
   if (runtime.frames.length < 2) { toast('请先录制'); return; }
   replaying = true;
   replayIdx = 0;
@@ -3514,7 +3572,7 @@ function setAgentStage(stage, text) {
   const el = $('taskStage'), tx = $('taskText');
   if (!el) return;
   el.innerHTML = (STAGES[stage] || stage) + (stage === 'parsing' || stage === 'explaining' || stage === 'patching' ? '<span class="spinner"></span>' : '');
-  el.className = 'badge' + (stage === 'explained' ? ' given' : (stage === 'built' ? ' given' : (stage === 'error' ? '' : (stage === 'parsing' ? ' given' : ''))));
+  el.className = 'badge' + (stage === 'explained' ? ' given' : (stage === 'built' ? ' given' : (stage === 'error' ? ' bad' : (stage === 'parsing' ? ' given' : ''))));   // UI-546：出错红显
   if (text) tx.textContent = text;
   const opsEl = $('taskOps');
   if (opsEl) {
@@ -3673,7 +3731,7 @@ function bindCropEvents() {
 function setParseStatus(msg, isErr = false, busy = false) {
   $('parseStatusGrp').style.display = 'block';
   const el = $('parseStatus');
-  el.textContent = msg;
+  el.textContent = (isErr ? chrBad() + ' ' : '') + msg;   // UI-561：错误加 ✗ 字形，不只靠颜色
   el.style.color = isErr ? 'var(--danger)' : 'var(--dim)';
   parseBusy = busy;   // 解析互斥（AG-72）：图片/文字/fixture 三通道任一进行中，其余禁点（防双计费）
   $('btnParse').disabled = busy;
@@ -3872,6 +3930,8 @@ function bindVoiceInput() {
     try { voiceState.rec && voiceState.rec.stop(); } catch { /* 已停 */ }
     btn.classList.remove('hot');
     btn.classList.remove('listening');
+    btn.setAttribute('aria-pressed', 'false');   // UI-560
+    btn.title = '点击开始聆听（Web Speech），说完再点一次结束';
     setBtnText('btnMic', '口述');
     const bp = $('btnParseText');
     if (bp) bp.disabled = false;
@@ -3909,6 +3969,8 @@ function bindVoiceInput() {
       rec.start();
       voiceState.on = true;
       setBtnText('btnMic', '口述中…（再点结束）');
+      btn.setAttribute('aria-pressed', 'true');   // UI-560：聆听态语义（文案受测试保护不能改，状态走 ARIA+title）
+      btn.title = '聆听中——点击结束聆听';
       btn.classList.add('hot');
       btn.classList.add('listening');
       $('btnParseText').disabled = true;   // 边听边解析会打架：听写完再解析
@@ -4274,10 +4336,13 @@ async function applyAgentPlan(opts = {}) {
   if (!agentPlan) { toast('没有可用的解析结果'); return; }
   if (mode !== 'edit') { toast('运行态不可建场，请先重置'); return; }
   applyAgentBusy = true;
+  const ap = $('btnApplyParse');   // UI-544：vivid 分批建场期间禁手+进度文案（双击此前只靠 toast 事后拦）
+  if (ap) { ap.disabled = true; setBtnText('btnApplyParse', '建场中…'); }
   try {
     await applyAgentPlanGuarded(opts);
   } finally {
     applyAgentBusy = false;
+    if (ap) { ap.disabled = false; setBtnText('btnApplyParse', '创建场景实体'); }
   }
 }
 
@@ -4629,10 +4694,13 @@ async function runAgentVerify(auto = true) {
   if (verifyBusy) return;
   if (!agentVerifyCtx) { if (!auto) toast('没有可自查的建场记录'); return; }
   verifyBusy = true;
+  const rb = $('btnRerunVerify');   // UI-549：自查秒级可完成但可连点 → busy 态禁手
+  if (rb) { rb.disabled = true; setBtnText('btnRerunVerify', '自查中…'); }
   try {
     await runAgentVerifyInner();
   } finally {
     verifyBusy = false;
+    if (rb) { rb.disabled = false; setBtnText('btnRerunVerify', '重跑自查'); }
     // 修订触发放在 verify 闭周期外：patch 内部会重放完整建场+verify，
     // 若在 verifyBusy=true 时递归会被自锁挡掉（首版设计踩过）。
     scheduleAgentPatch();
@@ -4879,7 +4947,12 @@ function renderAgentVerify() {
   if (!grp || !agentVerifyState) return;
   const { findings, summary } = agentVerifyState;
   grp.style.display = 'block';
-  badge.textContent = `${summary.ok}✓ ${summary.warn}⚠ ${summary.error}✗`;
+  // UI-547：三计数分色可扫读（绿=过/琥珀=警/红=错），不再一串同色
+  badge.innerHTML = '';
+  const cOk = document.createElement('span'); cOk.className = 'c-ok'; cOk.textContent = `${summary.ok}✓`;
+  const cWa = document.createElement('span'); cWa.className = 'c-warn'; cWa.textContent = ` ${summary.warn}⚠`;
+  const cEr = document.createElement('span'); cEr.className = 'c-err'; cEr.textContent = ` ${summary.error}✗`;
+  badge.appendChild(cOk); badge.appendChild(cWa); badge.appendChild(cEr);
   badge.className = 'badge ' + (summary.error ? 'given' : summary.warn ? 'given' : '');
   body.innerHTML = '';
   const notable = findings.filter((f) => f.sev !== 'ok');
@@ -5033,9 +5106,8 @@ function exportSeriesCSV() {
   a.download = `mechanica-${(doc.name ? doc.name.replace(/[\/:*?"<>|]/g, '') + '-' : '')}${(lastSeries.label || 'data').replace(/[\/:*?"<>|]/g, '')}-`
     + `${new Date(lastSeries.at).toISOString().slice(0, 19).replace(/[T:]/g, '')}.csv`;
   a.click();
-  toast(`已导出 ${a.download}`);
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-  toast(`已导出 ${lastSeries.points.length} 行采样（${lastSeries.entityName}·60Hz）`);
+  toast(`已导出 ${lastSeries.points.length} 行采样 → ${a.download}`, 'ok');   // UI-608：两条同帧顶掉合并为一条
 }
 
 function renderAstroExplain(r, box) {

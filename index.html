@@ -45,6 +45,7 @@
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   :focus-visible { outline: 1px solid rgba(231, 189, 104, 0.85); outline-offset: 2px; }   /* UI-2 键盘可达 */
+  .tbtn.hot:focus-visible, .rtab.hot:focus-visible { outline-color: rgba(255, 244, 219, 0.95); }   /* UI-617 琥珀底上换亮环 */
   button { font-family: var(--sans); touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
   /* 深色窄滚动条（Windows 默认亮灰粗条是精致感头号杀手） */
   ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -75,7 +76,7 @@
   }
   .tbtn:hover { color: var(--text); background: rgba(255, 255, 255, 0.06); }
   .tbtn:active { transform: translateY(1px); }
-  .tbtn:disabled { color: var(--faint); cursor: default; background: none; transform: none; }
+  .tbtn:disabled { color: var(--faint); cursor: not-allowed; background: none; transform: none; }
   /* 切换热态：琥珀字+淡琥珀底+细描边（读得出「开」但不吵） */
   .tbtn.hot { color: var(--accent-hi); background: var(--accent-dim); box-shadow: inset 0 0 0 1px rgba(217, 164, 65, 0.32); }
   .tbtn.hot:hover { background: rgba(217, 164, 65, 0.19); color: var(--accent-hi); }
@@ -100,8 +101,8 @@
   }
   #topbar .brand { display: flex; align-items: center; gap: 9px; margin-right: 2px; flex: none; }
   #topbar .brand .mark { width: 19px; height: 19px; flex: none; }
-  #topbar .brand h1 { font-size: 12px; font-weight: 650; letter-spacing: .3em; color: var(--text); white-space: nowrap; }
-  #topbar .brand .sub { font-size: 10px; color: var(--faint); letter-spacing: .12em; white-space: nowrap; }
+  #topbar .brand h1 { font-size: 12px; font-weight: 650; letter-spacing: .3em; margin-right: -.3em; color: var(--text); white-space: nowrap; }   /* UI-502 尾字距补偿 */
+  #topbar .brand .sub { font-size: 10px; color: var(--faint); letter-spacing: .12em; margin-right: -.12em; white-space: nowrap; }
   @media (max-width: 1520px) { #topbar .brand .sub { display: none; } }
   .dirty-dot { display: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
     flex: 0 0 auto; box-shadow: 0 0 8px rgba(217, 164, 65, 0.8); }
@@ -123,7 +124,7 @@
     transition: color .12s, border-color .12s;
   }
   .tb-group select:hover, #simbar select:hover { color: var(--text); border-color: var(--line-strong); }
-  .tb-group select:disabled, #simbar select:disabled { color: var(--faint); cursor: default; }
+  .tb-group select:disabled, #simbar select:disabled { color: var(--faint); cursor: not-allowed; }
   .tb-group select option, #simbar select option { background: var(--panel-solid); color: var(--text); }
   #topbar .spacer, #simbar .spacer { flex: 1; }
   #linkClassic { font-size: 10px; color: var(--faint); text-decoration: none; letter-spacing: .1em; flex: none; }
@@ -176,7 +177,8 @@
   .search-input::placeholder { color: var(--faint); }
   .search-input:focus { border-color: rgba(217, 164, 65, 0.5); }
 
-  #catalogList { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 8px; }
+  #catalogList { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 8px;
+    mask-image: linear-gradient(180deg, #000 calc(100% - 22px), transparent); }   /* UI-513 底缘渐隐=可滚暗示 */
   .cat-head { font-size: 10px; color: var(--faint); font-weight: 600; letter-spacing: .12em; padding: 10px 14px 4px; user-select: none; }
   /* 组件目录网格：auto-fill 自适应列数 */
   .cat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 6px; padding: 4px 12px 10px; }
@@ -218,9 +220,10 @@
   .ol-row.sel { background: var(--accent-dim); border-left-color: var(--accent); color: var(--text); }
   .ol-row .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ol-row .ty { font-family: var(--mono); font-size: 9px; color: var(--faint); letter-spacing: .06em; }
-  .ol-row .del { margin-left: auto; color: var(--faint); font-size: 13px; padding: 2px 8px; visibility: hidden; }
+  .ol-row .del { margin-left: auto; color: var(--faint); font-size: 13px; padding: 2px 8px; visibility: hidden; opacity: 0; transition: opacity .12s, visibility 0s .12s, color .12s; }
   .ol-row:hover .del { visibility: visible; }
   .ol-row .del:hover { color: var(--danger); }
+  .ol-row:hover .del, .ol-row:focus-within .del { visibility: visible; opacity: 1; transition-delay: 0s; }
   .ol-empty { padding: 10px 14px; font-size: 11px; color: var(--faint); }
 
   /* ============ 右侧：检查器 ============ */
@@ -251,6 +254,10 @@
   .badge { font-family: var(--mono); font-size: 9px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--dim); letter-spacing: .08em; }
   .badge.src-agent { color: var(--accent-hi); border-color: rgba(217, 164, 65, 0.4); background: var(--accent-dim); }
   .badge.given { color: var(--accent-hi); border-color: rgba(217, 164, 65, 0.4); }
+  .badge.bad { color: var(--danger); border-color: rgba(208, 128, 109, 0.55); background: rgba(208, 128, 109, 0.08); }   /* UI-546 出错徽标 */
+  #verifyBadge .c-ok { color: #7dc87d; }
+  #verifyBadge .c-warn { color: var(--accent-hi); }
+  #verifyBadge .c-err { color: var(--danger); }   /* UI-547 三计数分色 */
   .hint { font-size: 10px; color: var(--faint); line-height: 1.7; margin-top: 6px; }
   .ro-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 12px; }
   .ro-grid .cell { display: flex; justify-content: space-between; align-items: baseline; min-width: 0; }
@@ -273,7 +280,7 @@
   }
   .btnrow button.hot:hover { color: #1a1206; background: linear-gradient(180deg, #eabb64, #dba643); border-color: transparent; }
   .btnrow button.danger:hover { color: var(--danger); border-color: rgba(208, 128, 109, 0.5); }
-  .btnrow button:disabled { color: var(--faint); background: rgba(255, 255, 255, 0.02); border-color: var(--line); cursor: default; }
+  .btnrow button:disabled { color: var(--faint); background: rgba(255, 255, 255, 0.02); border-color: var(--line); cursor: not-allowed; }
   /* 文字链接式小按钮（载入示例/清除选区） */
   .link-btn { appearance: none; background: none; border: none; padding: 0; cursor: pointer;
     font-size: 10px; color: var(--faint); letter-spacing: .05em; text-decoration: underline dotted;
@@ -354,7 +361,7 @@
   #simbar button.hot { color: var(--accent-hi); background: var(--accent-dim); box-shadow: inset 0 0 0 1px rgba(217, 164, 65, 0.32); }
   #simbar button.hot:hover { color: var(--accent-hi); background: rgba(217, 164, 65, 0.19); }
   #simbar button.primary { padding: 0 13px; gap: 6px; }
-  #simbar button:disabled { color: var(--faint); cursor: default; background: none; transform: none; }
+  #simbar button:disabled { color: var(--faint); cursor: not-allowed; background: none; transform: none; }
   #simbar .ro { font-family: var(--mono); font-size: 11px; color: var(--faint); letter-spacing: .03em; white-space: nowrap; }
   #simbar .ro b { color: var(--accent-hi); font-weight: 500; font-variant-numeric: tabular-nums; }
   #simbar .ro:not(:first-of-type) { border-left: 1px solid var(--line); padding-left: 10px; }
@@ -397,22 +404,23 @@
 
   /* 性能 HUD（PL-50） */
   #perfHud {
+    min-width: 132px; width: 150px;   /* UI-574：定宽防数值变宽逐帧抖动 */
     position: fixed; right: calc(var(--right-w) + 20px); top: calc(var(--topbar-h) + 12px); z-index: 14;
     font-family: var(--mono); font-size: 10px; color: var(--dim);
     background: rgba(13, 15, 18, 0.85); padding: 9px 11px 8px; border: 1px solid var(--line);
     border-radius: 8px; box-shadow: var(--shadow-float);
-    user-select: none; pointer-events: none; min-width: 132px;
+    user-select: none; pointer-events: none;
   }
   #perfHud .ph-hd { display: flex; align-items: baseline; gap: 5px; padding-bottom: 6px; margin-bottom: 6px;
     border-bottom: 1px solid var(--line); }
   #perfHud .ph-hd b { font-size: 16px; font-weight: 400; color: var(--text); font-variant-numeric: tabular-nums; }
-  #perfHud .ph-hd .u { font-size: 9px; color: var(--faint); letter-spacing: .14em; }
+  #perfHud .ph-hd .u { font-size: 9px; color: var(--faint); letter-spacing: .14em; align-self: flex-end; padding-bottom: 2px; }   /* UI-575 */
   #perfHud .ph-hd .warn { margin-left: auto; font-size: 9px; font-family: var(--sans); color: var(--danger); letter-spacing: .05em; }
   #perfHud .ph-sec { font-family: var(--sans); font-size: 8px; color: var(--faint); letter-spacing: .24em;
     margin: 6px 0 2px; user-select: none; }
-  #perfHud .ph-row { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; line-height: 1.75; }
+  #perfHud .ph-row { display: grid; grid-template-columns: 1fr auto; align-items: baseline; column-gap: 10px; line-height: 1.75; }   /* UI-573：k 左 v 右各自对齐，长值不挤 k */
   #perfHud .ph-row .k { font-family: var(--sans); font-size: 9px; color: var(--faint); letter-spacing: .1em; white-space: nowrap; }
-  #perfHud .ph-row .v { color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #perfHud .ph-row .v { color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; overflow: hidden; text-overflow: ellipsis; max-width: 96px; }   /* UI-573/574 */
   #perfHud .ph-row .v b { color: var(--text); font-weight: 400; }
   #perfHud .ph-row .v.bad { color: var(--danger); }
   #perfHud .ph-row .v .u2 { color: var(--faint); font-size: 9px; margin-left: 1px; }
@@ -424,7 +432,7 @@
     box-shadow: var(--shadow-float); padding: 8px;
   }
   #curvePanel.on { display: block; }
-  #curvePanel { width: 334px; }
+  #curvePanel { width: 340px; }   /* UI-576：334 时内容盒 316 < 画布 320，右缘戳出圆角 */
   #curvePanel canvas { display: block; background: rgba(0, 0, 0, 0.35); border-radius: 5px; }
   #curvePanel .ctabs { display: flex; gap: 4px; margin-bottom: 5px; }
   #curvePanel .ctabs button {
@@ -456,8 +464,13 @@
   #errbar {
     position: fixed; top: var(--topbar-h); left: 0; right: 0; z-index: 50; display: none;
     background: #2a1512; color: #e0a49a; border-bottom: 1px solid #6b3328;
-    font-family: var(--mono); font-size: 11px; padding: 6px 16px; white-space: pre-wrap;
+    font-family: var(--mono); font-size: 11px; padding: 6px 10px 6px 16px; white-space: pre-wrap;
+    align-items: center; gap: 10px;
   }
+  #errbar #errMsg { flex: 1; min-width: 0; }
+  #errbar #errClose { appearance: none; background: transparent; border: 0; color: #e0a49a; cursor: pointer;
+    width: 22px; height: 22px; border-radius: var(--r-ctl); display: grid; place-items: center; flex: none; }
+  #errbar #errClose:hover { background: rgba(224, 164, 154, 0.12); color: #f0c4ba; }
   #toast {
     position: fixed; top: calc(var(--topbar-h) + 10px); left: 50%; translate: 0 -6px;
     z-index: 45; background: rgba(20, 22, 27, 0.97); border: 1px solid var(--line-strong); border-radius: 999px;
@@ -466,15 +479,20 @@
     opacity: 0; pointer-events: none; transition: opacity .25s, translate .25s;
   }
   #toast.on { opacity: 1; translate: 0 0; }
+  body.erropen #toast { top: calc(var(--topbar-h) + 44px); }   /* UI-585：errbar 可见时下移避让 */
+  /* UI-582 类型语义：左缘 2px 实色条（绿=成功 琥珀=警告 红=错误） */
+  #toast.ok { border-left: 2px solid #7dc87d; }
+  #toast.warn { border-left: 2px solid var(--accent); }
+  #toast.err { border-left: 2px solid var(--danger); }
   /* 解析中徽标的克制转圈（UI-16） */
   .spinner { display: inline-block; width: 9px; height: 9px; margin-left: 5px; vertical-align: -1px;
     border: 1.5px solid rgba(217, 164, 65, 0.35); border-top-color: var(--accent); border-radius: 50%;
     animation: mechspin 1s linear infinite; }
   @keyframes mechspin { to { transform: rotate(360deg); } }
 
-  /* 快捷键速查浮层 */
+  /* 快捷键速查浮层（UI-587：不用 backdrop-filter——WebGL 页面逐帧合成，模糊层代价大，纯色遮罩等效） */
   #helpOverlay { position: fixed; inset: 0; z-index: 55; display: none;
-    background: rgba(5, 6, 8, 0.7); backdrop-filter: blur(3px); align-items: center; justify-content: center; }
+    background: rgba(5, 6, 8, 0.86); align-items: center; justify-content: center; }
   #helpOverlay.on { display: flex; }
   #helpOverlay .card { background: var(--panel-solid); border: 1px solid var(--line-strong); border-radius: var(--r-panel);
     box-shadow: var(--shadow-float);
@@ -488,12 +506,12 @@
 
   /* ============ 场景库弹层（SCN） ============ */
   #sceneLib { position: fixed; inset: 0; z-index: 60; display: none;
-    background: rgba(6, 7, 9, 0.72); backdrop-filter: blur(3px); }
+    background: rgba(6, 7, 9, 0.88); }   /* UI-588：同 helpOverlay 去模糊（WebGL 性能口径） */
   #sceneLib.on { display: block; }
   .scn-dlg {
     position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
     width: min(880px, 92vw); max-height: 84vh; display: flex; flex-direction: column;
-    background: #14161b; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 14px;
+    background: #14161b; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: var(--r-panel);
     box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6), var(--hl); overflow: hidden;
   }
   .scn-head { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
@@ -514,7 +532,7 @@
   /* 库卡片 */
   .lib-card { background: rgba(255, 255, 255, 0.03); border: 1px solid var(--line); border-radius: 8px;
     overflow: hidden; display: flex; flex-direction: column; transition: border-color .12s, transform .15s, box-shadow .15s; }
-  .lib-card:hover { border-color: rgba(217, 164, 65, 0.45); transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35); }
+  .lib-card:hover { border-color: rgba(217, 164, 65, 0.45); transform: translateY(-1px); box-shadow: var(--shadow-float); }
   .lib-card .thumb { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; background: var(--inset); cursor: pointer; }
   .lib-card .bd { padding: 8px 9px 9px; display: flex; flex-direction: column; gap: 5px; }
   .lib-card .nm { font-size: 12px; color: var(--text); cursor: text; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1003,10 +1021,10 @@
       <div id="parseLists"></div>
       <div id="changePreview" style="display:none;margin-top:10px">
         <div class="k" style="font-size:10px;color:var(--faint);margin-bottom:4px">待执行变更（勾选确认，取消勾选=拒绝该条）</div>
-        <div id="changePreviewList" style="max-height:150px;overflow:auto;overscroll-behavior:contain"></div>
+        <div id="changePreviewList" style="max-height:150px;overflow:auto;overscroll-behavior:contain;mask-image:linear-gradient(180deg,#000 calc(100% - 18px),transparent)"></div>
       </div>
       <div class="btnrow" style="margin-top:10px">
-        <button id="btnApplyParse" class="hot"><svg class="ic"><use href="#i-circle-plus"/></svg><span>创建场景实体</span></button>
+        <button id="btnApplyParse" class="hot"><svg class="ic"><use href="#i-circle-plus"/></svg><span class="lab">创建场景实体</span></button>
         <button id="btnClearParse">清空</button>
       </div>
     </div>
@@ -1153,7 +1171,7 @@
     </div>
   </div>
 </div>
-<div id="errbar" role="alert"></div>
+<div id="errbar" role="alert"><span id="errMsg"></span><button id="errClose" aria-label="关闭错误提示" title="关闭（Esc）"><svg class="ic"><use href="#i-x"/></svg></button></div>
 
 <div id="helpOverlay" title="按 Esc 关闭">
   <div class="card">
