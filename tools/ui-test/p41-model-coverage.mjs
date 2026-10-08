@@ -36,6 +36,21 @@ const EXPECT = [
   ['oblique45', { has: ['sphere', 'ground'] }],
   ['elastic', { has: ['sphere'], sphereN: 2 }],
   ['chase', { has: ['sphere'], sphereN: 2 }],
+  // R5-B2 模型波3（MOD-516~545 S 级）
+  ['vertical-down', { has: ['sphere'] }],
+  ['freefall3', { has: ['ground', 'sphere'], sphereN: 3, gs: 1 }],
+  ['oblique60', { has: ['sphere'] }],
+  ['oblique-moon', { has: ['sphere', 'ground'] }],
+  ['elastic-heavy-light', { has: ['sphere'], sphereN: 2 }],
+  ['elastic-light-heavy', { has: ['sphere'], sphereN: 2 }],
+  ['elastic-rear', { has: ['sphere'], sphereN: 2 }],
+  ['elastic-headon', { has: ['sphere'], sphereN: 2 }],
+  ['collision-e05', { has: ['sphere'], sphereN: 2 }],
+  ['recoil-unequal', { has: ['ground', 'sphere'], sphereN: 2 }],
+  ['conveyor-reverse', { has: ['conveyor', 'sphere'] }],
+  ['binary', { has: ['celestial'], celN: 2 }],
+  ['elliptic-deep', { has: ['celestial'], celN: 2 }],
+  ['hinge-l15', { has: ['box'], boxN: 2 }],
 ];
 
 async function withPage(fn) {

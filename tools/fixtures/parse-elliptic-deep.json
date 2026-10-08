@@ -1,0 +1,58 @@
+{
+  "kind": "astro",
+  "gravity": null,
+  "joint": null,
+  "anchorPoints": [],
+  "keyPoints": [],
+  "environment": "",
+  "unknowns": [],
+  "uncertain": [],
+  "confidence": 0.9,
+  "_fixture": true,
+  "_note": "R5-B2 新模型（本地示例解析数据，非真实模型输出）",
+  "questionType": "深椭圆轨道",
+  "goal": "r=4 处以 0.8×v圆 入轨：e≈0.27 深椭圆，验证近/远点速度比 (1+e)/(1−e)≈1.74",
+  "G": 1,
+  "entities": [
+    {
+      "type": "celestial",
+      "name": "中心恒星",
+      "given": {
+        "mass": 100,
+        "position": [
+          0,
+          0,
+          0
+        ]
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "celestial",
+      "name": "卫星",
+      "given": {
+        "mass": 1,
+        "position": [
+          4,
+          0,
+          0
+        ],
+        "velocity": [
+          0,
+          0,
+          4.0
+        ]
+      },
+      "confidence": 0.95
+    }
+  ],
+  "observations": [
+    "偏心率",
+    "近点/远点速度",
+    "开普勒第二定律"
+  ],
+  "assumptions": [
+    "v=4.0≈0.8·√(GM/r)，r=4 为远点",
+    "G=1（教学标度）"
+  ]
+}

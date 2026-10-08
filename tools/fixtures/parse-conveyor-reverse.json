@@ -1,0 +1,47 @@
+{
+  "kind": "",
+  "gravity": 10,
+  "joint": null,
+  "anchorPoints": [],
+  "keyPoints": [],
+  "environment": "",
+  "unknowns": [],
+  "uncertain": [],
+  "confidence": 0.9,
+  "_fixture": true,
+  "_note": "R5-B2 新模型（本地示例解析数据，非真实模型输出）",
+  "questionType": "传送带（反向输运）",
+  "goal": "带速 −0.8 m/s 上轻放物体：先向 −x 加速 t₁=v带/(μg)=0.4s 后共速反向输运",
+  "entities": [
+    {
+      "type": "conveyor",
+      "name": "传送带",
+      "given": {
+        "length": 2.4,
+        "height": 0.16,
+        "width": 0.6,
+        "speed": -0.8,
+        "friction": 0.2
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "sphere",
+      "name": "物块（轻放）",
+      "given": {
+        "mass": 0.5,
+        "radius": 0.1
+      },
+      "confidence": 0.94
+    }
+  ],
+  "observations": [
+    "反向共速时间",
+    "物体速度方向"
+  ],
+  "assumptions": [
+    "轻放到带左端",
+    "μ=0.2 恒定",
+    "带足够长"
+  ]
+}

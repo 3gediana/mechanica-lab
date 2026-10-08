@@ -1,0 +1,76 @@
+{
+  "kind": "",
+  "gravity": 10,
+  "joint": null,
+  "anchorPoints": [],
+  "keyPoints": [],
+  "environment": "",
+  "unknowns": [],
+  "uncertain": [],
+  "confidence": 0.93,
+  "_fixture": true,
+  "_note": "R5-B2 新模型（本地示例解析数据，非真实模型输出）",
+  "questionType": "自由落体（三球不同质量）",
+  "goal": "0.2/2/5 kg 三球同高 2.5m 同时释放，验证落地时刻与质量无关",
+  "entities": [
+    {
+      "type": "ground",
+      "name": "地面",
+      "given": {
+        "length": 8,
+        "width": 4
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "sphere",
+      "name": "轻球（0.2kg）",
+      "given": {
+        "mass": 0.2,
+        "radius": 0.12,
+        "position": [
+          -1.0,
+          2.5,
+          0
+        ]
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "sphere",
+      "name": "中球（2kg）",
+      "given": {
+        "mass": 2,
+        "radius": 0.15,
+        "position": [
+          0,
+          2.5,
+          0
+        ]
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "sphere",
+      "name": "重球（5kg）",
+      "given": {
+        "mass": 5,
+        "radius": 0.18,
+        "position": [
+          1.0,
+          2.5,
+          0
+        ]
+      },
+      "confidence": 0.95
+    }
+  ],
+  "observations": [
+    "三球落地时刻",
+    "是否同时落地"
+  ],
+  "assumptions": [
+    "由静止同时释放",
+    "球心落差按 2.5m 计"
+  ]
+}

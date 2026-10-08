@@ -1,0 +1,65 @@
+{
+  "kind": "",
+  "gravity": 10,
+  "joint": null,
+  "anchorPoints": [],
+  "keyPoints": [],
+  "environment": "",
+  "unknowns": [],
+  "uncertain": [],
+  "confidence": 0.92,
+  "_fixture": true,
+  "_note": "R5-B2 新模型（本地示例解析数据，非真实模型输出）",
+  "questionType": "完全弹性碰撞（追尾速度交换）",
+  "goal": "等质量 3 m/s 追 1 m/s，e=1 速度完全交换",
+  "entities": [
+    {
+      "type": "sphere",
+      "name": "球 A",
+      "given": {
+        "mass": 1,
+        "radius": 0.15,
+        "restitution": 1,
+        "velocity": [
+          3,
+          0,
+          0
+        ],
+        "position": [
+          -1.6,
+          0.155,
+          0
+        ]
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "sphere",
+      "name": "球 B",
+      "given": {
+        "mass": 1,
+        "radius": 0.15,
+        "restitution": 1,
+        "velocity": [
+          1,
+          0,
+          0
+        ],
+        "position": [
+          0.6,
+          0.155,
+          0
+        ]
+      },
+      "confidence": 0.95
+    }
+  ],
+  "observations": [
+    "碰后两球速度（应互换）",
+    "动量守恒"
+  ],
+  "assumptions": [
+    "水平面光滑",
+    "对撞悬浮理想化（重力不影响一维动量）"
+  ]
+}

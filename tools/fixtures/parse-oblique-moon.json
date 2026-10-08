@@ -1,0 +1,55 @@
+{
+  "kind": "",
+  "gravity": 1.6,
+  "joint": null,
+  "anchorPoints": [],
+  "keyPoints": [],
+  "environment": "",
+  "unknowns": [],
+  "uncertain": [],
+  "confidence": 0.92,
+  "_fixture": true,
+  "_note": "R5-B2 新模型（本地示例解析数据，非真实模型输出）",
+  "questionType": "月面斜抛（低重力）",
+  "goal": "gravity=1.6、v=2.5、θ=45°：验证射程 R=v²/g≈3.9m，R∝1/g（滞空 2.2s 在自查探针窗口内）",
+  "entities": [
+    {
+      "type": "ground",
+      "name": "月面",
+      "given": {
+        "length": 16,
+        "width": 8,
+        "friction": 0.3
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "sphere",
+      "name": "月球上的抛体",
+      "given": {
+        "mass": 1,
+        "velocity": [
+          1.768,
+          1.768,
+          0
+        ],
+        "position": [
+          0,
+          0.15,
+          0
+        ]
+      },
+      "confidence": 0.95
+    }
+  ],
+  "observations": [
+    "射程",
+    "滞空时间"
+  ],
+  "assumptions": [
+    "月面重力加速度 1.6 m/s²",
+    "理想抛体",
+    "月面地面足够长，落点可测",
+    "抛速取 2.5 m/s 使滞空在自查探针窗口内（AG-568 动态窗口落地后可放开）"
+  ]
+}

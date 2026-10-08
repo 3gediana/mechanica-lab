@@ -1,0 +1,65 @@
+{
+  "kind": "",
+  "gravity": 10,
+  "joint": null,
+  "anchorPoints": [],
+  "keyPoints": [],
+  "environment": "",
+  "unknowns": [],
+  "uncertain": [],
+  "confidence": 0.92,
+  "_fixture": true,
+  "_note": "R5-B2 新模型（本地示例解析数据，非真实模型输出）",
+  "questionType": "完全弹性碰撞（相向对撞）",
+  "goal": "等质量 ±2 m/s 相向 e=1：碰后各自反向，总动量恒为 0",
+  "entities": [
+    {
+      "type": "sphere",
+      "name": "球 A",
+      "given": {
+        "mass": 1,
+        "radius": 0.15,
+        "restitution": 1,
+        "velocity": [
+          2,
+          0,
+          0
+        ],
+        "position": [
+          -1.6,
+          0.155,
+          0
+        ]
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "sphere",
+      "name": "球 B",
+      "given": {
+        "mass": 1,
+        "radius": 0.15,
+        "restitution": 1,
+        "velocity": [
+          -2,
+          0,
+          0
+        ],
+        "position": [
+          0.6,
+          0.155,
+          0
+        ]
+      },
+      "confidence": 0.95
+    }
+  ],
+  "observations": [
+    "碰后两球速度",
+    "总动量为零"
+  ],
+  "assumptions": [
+    "水平面光滑",
+    "对撞悬浮理想化（重力不影响一维动量）"
+  ]
+}

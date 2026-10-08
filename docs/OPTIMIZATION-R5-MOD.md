@@ -31,36 +31,36 @@
 | MOD-513 | 阻尼对照 parse-damped-compare.json | 两并排振子 damping=0.3/3.0,包络衰减率比 10:1;布局=两锚+两球+双 spring;explain 扩展 spring 分支支持多振子逐个测对数衰减率 δ=ln(A_n/A_{n+1}) | 中 | M |
 | MOD-514 | 受迫振动与共振 parse-resonance.json | 弹簧悬挂端按 A·sinωt 简谐驱动，扫至 ω≈ω0 振幅出峰；布局需引擎支持运动学锚点轨迹驱动(spring 端点受迫)；explain 新分支：稳态振幅 A(ω)=A0/√((1−r²)²+(2ζr)²) | 高 | L |
 | MOD-515 | 耦合摆 parse-coupled-pendulum.json | 两单摆+中间弱弹簧 k=2,对称/反对称模态频率 √(g/L) 与 √(g/L+2k/m);布局=两锚+两球+2 rope+1 spring(attaches≤6 可容)；explain 新分支：双模态频率分裂 | 中 | M |
-| MOD-516 | 竖直下抛 parse-vertical-down.json | h=1.8m 处以 vy=−4 下抛，求落地时间与末速 v=√(v0²+2gh)=7.2m/s;布局=单球抛体布局(自动补地面，projBalls 分支)；explainProjectile 公式已覆盖 vy0<0,纯 fixture | 高 | S |
-| MOD-517 | 三球自由落体 parse-freefall3.json | 质量 0.2/2/5kg 三球同高 2.5m 齐落同时落地；布局=freefall 同款三球(位置高+无初速，重力保留)；explainFreefall rows 已支持 N 球，multi 同落判定扩到三球 | 高 | S |
+| MOD-516 ✅B2 | 竖直下抛 parse-vertical-down.json | h=1.8m 处以 vy=−4 下抛，求落地时间与末速 v=√(v0²+2gh)=7.2m/s;布局=单球抛体布局(自动补地面，projBalls 分支)；explainProjectile 公式已覆盖 vy0<0,纯 fixture | 高 | S |
+| MOD-517 ✅B2 | 三球自由落体 parse-freefall3.json | 质量 0.2/2/5kg 三球同高 2.5m 齐落同时落地；布局=freefall 同款三球(位置高+无初速，重力保留)；explainFreefall rows 已支持 N 球，multi 同落判定扩到三球 | 高 | S |
 | MOD-518 | 落体与下抛对比 parse-freefall-vs-down.json | 同高 2m 甲静止释放、乙同时 vy=−3 下抛，求落地时刻差 Δt≈0.13s;布局=双球一静一抛；explain 需放宽 freefall“全零初速”条件做双球时刻对比分支(注意：现通用布局对带初速球强制悬浮 gravityScale=0,抛体例外需扩展) | 高 | M |
 | MOD-519 | 平抛初速无关性 parse-horizontal-throw2.json | 同高 1.6m 两球 vx=2/4 同时平抛同时落地；布局=双球抛体版(同 518 注：需保留重力的多球抛体布局)；explain 扩展 galileo 分支支持双 mover 同落 | 高 | M |
 | MOD-520 | 斜抛 30°/60° 等射程 parse-range-symmetry.json | v=6 两球 30°/60° 同点齐射，射程相等 3.12m 而高度不同(0.45/1.35m);布局=双球抛体版；explain 新分支双弹道射程对比+对称性 sin2θ | 高 | M |
-| MOD-521 | 斜抛 60° 通式 parse-oblique60.json | v=6 θ=60° 单球：T=2vsinθ/g=1.04s、R=v²sin120°/g=3.12m、H=1.35m;布局=单球抛体布局自动；explainProjectile 原样复用，纯 fixture | 高 | S |
-| MOD-522 | 月面斜抛 parse-oblique-moon.json | gravity=1.6,v=5 θ=45°,射程放大到 15.6m,验证 R∝1/g;布局=单球抛体+题给重力；explainProjectile 读 doc.gravity 原样可用 | 中 | S |
-| MOD-523 | 完全弹性大撞小 parse-elastic-heavy-light.json | 2kg v=2 撞 1kg 静止 e=1:v1′=v0/3、v2′=4v0/3 都前进；布局=通用双球；explainMomentum e=1 闭式公式直接覆盖 | 高 | S |
-| MOD-524 | 完全弹性小撞大 parse-elastic-light-heavy.json | 1kg v=2 撞 2kg 静止 e=1:v1′=−v0/3 原路回弹(入射速度反向判据)；布局同上；explain 同上 | 高 | S |
-| MOD-525 | 完全弹性追尾 parse-elastic-rear.json | 等质量同向 3m/s 追 1m/s,e=1 速度交换；布局=双球同向；explainMomentum 覆盖 | 高 | S |
-| MOD-526 | 相向对撞动量为零 parse-elastic-headon.json | 等质量 ±2 相向 e=1,交换后各自反向、总动量恒 0;布局=双球相向；explainMomentum 覆盖(p0=0 门控注意除零保护) | 高 | S |
-| MOD-527 | 中等弹性 e=0.5 parse-collision-e05.json | 2kg v=2 撞 1kg 静止 e=0.5,验证恢复系数公式与动能损失账；布局=双球+restitution 0.5;explainMomentum 覆盖 | 高 | S |
+| MOD-521 ✅B2 | 斜抛 60° 通式 parse-oblique60.json | v=6 θ=60° 单球：T=2vsinθ/g=1.04s、R=v²sin120°/g=3.12m、H=1.35m;布局=单球抛体布局自动；explainProjectile 原样复用，纯 fixture | 高 | S |
+| MOD-522 ✅B2 | 月面斜抛 parse-oblique-moon.json | gravity=1.6,v=5 θ=45°,射程放大到 15.6m,验证 R∝1/g;布局=单球抛体+题给重力；explainProjectile 读 doc.gravity 原样可用 | 中 | S |
+| MOD-523 ✅B2 | 完全弹性大撞小 parse-elastic-heavy-light.json | 2kg v=2 撞 1kg 静止 e=1:v1′=v0/3、v2′=4v0/3 都前进；布局=通用双球；explainMomentum e=1 闭式公式直接覆盖 | 高 | S |
+| MOD-524 ✅B2 | 完全弹性小撞大 parse-elastic-light-heavy.json | 1kg v=2 撞 2kg 静止 e=1:v1′=−v0/3 原路回弹(入射速度反向判据)；布局同上；explain 同上 | 高 | S |
+| MOD-525 ✅B2 | 完全弹性追尾 parse-elastic-rear.json | 等质量同向 3m/s 追 1m/s,e=1 速度交换；布局=双球同向；explainMomentum 覆盖 | 高 | S |
+| MOD-526 ✅B2 | 相向对撞动量为零 parse-elastic-headon.json | 等质量 ±2 相向 e=1,交换后各自反向、总动量恒 0;布局=双球相向；explainMomentum 覆盖(p0=0 门控注意除零保护) | 高 | S |
+| MOD-527 ✅B2 | 中等弹性 e=0.5 parse-collision-e05.json | 2kg v=2 撞 1kg 静止 e=0.5,验证恢复系数公式与动能损失账；布局=双球+restitution 0.5;explainMomentum 覆盖 | 高 | S |
 | MOD-528 | 二维弹性 90° 散射 parse-momentum2d-right.json | 等质量 e=1 非对心(z 偏移 0.15)斜碰，碰后两速度矢量成 90°(台球定理)；布局=momentum2d 同款改 e=1;explainMomentum2D 加“散开夹角≈90°”check | 高 | M |
 | MOD-529 | 三球弹性链式传递 parse-ball-chain3.json | 三等质量球贴排，甲 2m/s 撞，速度逐级传递末端出射 2m/s 前两球停；布局=三球贴排 e=1;explain 扩展：按碰撞事件序列逐对核对(momentum 分支现只取一对报告) | 高 | M |
 | MOD-530 | 子弹三连发 parse-bullet-burst.json | 三颗 0.02kg 子弹(错开 x=−1/−2/−3,v=15)先后嵌入 1kg 木块，终速 Σmv/Σm=0.849m/s;布局=通用 3 球+box;explain 新分支：多段完全非弹性累加 | 中 | M |
-| MOD-531 | 不等质量反冲 parse-recoil-unequal.json | 静止系统分裂为 1kg 与 2kg,速度比 2:1 反向、动能比 2:1;布局=recoil 同款改质量；explainMomentum 验证 p 恒 0 | 高 | S |
+| MOD-531 ✅B2 | 不等质量反冲 parse-recoil-unequal.json | 静止系统分裂为 1kg 与 2kg,速度比 2:1 反向、动能比 2:1;布局=recoil 同款改质量；explainMomentum 验证 p 恒 0 | 高 | S |
 | MOD-532 | 粗糙斜面下滑 parse-incline-friction.json | θ=30° μ=0.2 滑块下滑 a=g(sinθ−μcosθ)=3.27m/s²,滑完 2m 坡 v=3.62m/s;布局=ramp+box 贴坡(通用)；explainIncline 需扩展 μ>0 口径(现按能量守恒 v=√(2gΔh) 会误判) | 高 | M |
 | MOD-533 | 冲上斜面 parse-incline-up.json | 滑块以 v0=4 沿坡向上冲 θ=30°(μ=0),a=g sinθ 上滑距离 v0²/2a=1.6m 后折返；布局=坡底 given.position+负 x 初速；explain 新分支(现 incline 分支只测 +x 出坡速度) | 高 | M |
 | MOD-534 | 斜面叠块 parse-incline-stacked.json | 坡上 M=1 大块叠 m=0.5 小块，块间 μ1=0.5、块坡 μ2=0.1,验证一起下滑 a=g(sinθ−μ2cosθ)=4.13 且上块不打滑(μ1≥a/(g cosθ)=0.477);布局=ramp+双box 贴坡叠放(given.position);explain 新分支：整体加速度+上块摩擦力上限核对 | 中 | M |
 | MOD-535 | 伽利略斜面理想实验 parse-galileo-ramps.json | 球从左坡 θ=30° 滑下冲上对面光滑右坡，回升到等高 h(无摩擦 never 超过)；布局=双 ramp 对置——现 rampGeom 只取第一个 ramp,需多斜面布局小扩展；explain 新分支：回摆高度比 h′/h≈1 | 高 | M |
 | MOD-536 | 滑轮连接体(坡-坡/坡-悬) parse-pulley-incline.json | 绳跨坡顶定滑轮连两侧坡上滑块(或一坡一悬)，a=(m1g sinθ1−m2g sinθ2)/(m1+m2);现 pulley 布局只支持双竖直球 onPulley,需绳-滑轮-多体路由小扩展 | 高 | L |
-| MOD-537 | 传送带反向 parse-conveyor-reverse.json | 带速 −0.8m/s 上轻放物体，物体向 −x 加速 t1=v带/μg=0.4s 后共速反向输运；布局=conveyor speed 负值(RANGES 已容 ±8);explainConveyor 的 sgn 逻辑已支持，纯 fixture | 高 | S |
+| MOD-537 ✅B2 | 传送带反向 parse-conveyor-reverse.json | 带速 −0.8m/s 上轻放物体，物体向 −x 加速 t1=v带/μg=0.4s 后共速反向输运；布局=conveyor speed 负值(RANGES 已容 ±8);explainConveyor 的 sgn 逻辑已支持，纯 fixture | 高 | S |
 | MOD-538 | 传送带超速物体 parse-conveyor-fast.json | 物体以 v0=1.6 同向放上带速 0.8 的带，μ=0.2 减速段 t=|v0−v带|/μg=0.4s 后共速；布局=conveyor+球题给初速；explainConveyor 需扩展(现按轻放 v0=0 口径) | 高 | M |
 | MOD-539 | 物体滑离带端 parse-conveyor-exit.json | 带长 0.8m、带速 2.0、μ=0.2,物体未及共速即滑离，出带速度 v=√(2μgL)=1.79m/s;布局=conveyor length 0.8;explainConveyor 需“滑离未共速”口径(现只报“带太短未观察”) | 中 | M |
-| MOD-540 | 双星互绕 parse-binary.json | 两星各 60kg 相距 6,各以 v=√(Gm/2d)=2.24 绕质心做圆运动；布局=双 celestial 对称反向切速(归一化逻辑已保 xz 切向)；explainAstro 的 mSum 周期公式(AB-18)已支持 | 高 | S |
+| MOD-540 ✅B2 | 双星互绕 parse-binary.json | 两星各 60kg 相距 6,各以 v=√(Gm/2d)=2.24 绕质心做圆运动；布局=双 celestial 对称反向切速(归一化逻辑已保 xz 切向)；explainAstro 的 mSum 周期公式(AB-18)已支持 | 高 | S |
 | MOD-541 | 三星拉格朗日解 parse-three-body.json | 三星 30kg 等边三角(边长 d)绕质心圆运转，每星受合力 √3Gm²/d² 指向质心；布局=3 celestial;explainAstro 需扩展按质心距 r=d/√3 与 mSum=90 给周期理论值 | 中 | M |
 | MOD-542 | 开普勒第三定律双卫星对照 parse-kepler3.json | 恒星 100+两卫星 r=3(v=5.77)/r=6(v=4.08),周期比 (6/3)^1.5=2.83;布局=3 celestial 各自圆轨；explain 扩展为逐卫星周期测量与比值验证 | 高 | M |
 | MOD-543 | 逃逸速度 parse-escape.json | r=4 处以 v=√2·v圆=7.07 入轨恰逃逸，验证机械能 E≥0 判据；布局=双 celestial(速度超圆轨)；explainAstro 现把逃逸判 fail,需加“逃逸成功”教学口径(E=½v²−GM/r≥0) | 高 | M |
-| MOD-544 | 深椭圆轨道 parse-elliptic-deep.json | v=0.8v圆=4.0 入轨，r=4 成远点，e=0.2 深椭圆，近日/远日速度比 (1+e)/(1−e)=1.5;布局=双 celestial;explainAstro 已合法化椭圆(UX-R),纯 fixture | 高 | S |
-| MOD-545 | 复摆杆长变体 parse-hinge-l15.json | L=1.5m 均质杆绕端点，T=2π√(2L/3g)=1.99s(对比 L=1 的 1.62s);布局=hingeLayout 已消费 rod.given.length,纯 fixture | 高 | S |
+| MOD-544 ✅B2 | 深椭圆轨道 parse-elliptic-deep.json | v=0.8v圆=4.0 入轨，r=4 成远点，e=0.2 深椭圆，近日/远日速度比 (1+e)/(1−e)=1.5;布局=双 celestial;explainAstro 已合法化椭圆(UX-R),纯 fixture | 高 | S |
+| MOD-545 ✅B2 | 复摆杆长变体 parse-hinge-l15.json | L=1.5m 均质杆绕端点，T=2π√(2L/3g)=1.99s(对比 L=1 的 1.62s);布局=hingeLayout 已消费 rod.given.length,纯 fixture | 高 | S |
 | MOD-546 | 转台双滑块 parse-spin-two-sliders.json | 转台上两滑块对称同时外滑，ΔI=2mr²,ω 降幅加倍；rotationLayout 现只支持单滑块，需双滑块扩展；explain 扩展 L=(I+Σmr²)ω | 中 | L |
 | MOD-547 | 刹车距离验证 parse-braking.json | 单箱 μ=0.25、v0=3m/s 在粗糙地面滑行，验证 a=μg=2.5m/s²、d=v0²/2μg=1.8m、t=1.2s;布局=ground+box(通用)；现单动态体+地面非腾空场景落入 unsupported,需新匀减速 explain 分支 | 高 | M |
 | MOD-548 | 竖直环形轨道(离心轨道) parse-loop-track.json | 球沿管轨过竖直环，顶部最小速度判据；registry 有 track 组件但 TYPE_MAP 无 track/onTrack 映射，需 schema+布局扩展；explain 新分支：能量守恒 v_top²=v0²−4gR 与管轨/绳轨临界差异(管轨可 v_top→0) | 高 | L |

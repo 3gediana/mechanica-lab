@@ -1,0 +1,58 @@
+{
+  "kind": "hinge",
+  "gravity": 10,
+  "joint": {
+    "type": "revolute",
+    "from": 0,
+    "to": 1,
+    "axis": [
+      0,
+      0,
+      1
+    ]
+  },
+  "anchorPoints": [],
+  "keyPoints": [],
+  "environment": "",
+  "unknowns": [],
+  "uncertain": [],
+  "confidence": 0.92,
+  "_fixture": true,
+  "_note": "R5-B2 新模型（本地示例解析数据，非真实模型输出）",
+  "questionType": "复摆（杆长 1.5m 变体）",
+  "goal": "L=1.5m 均质杆绕端点摆动，验证 T=2π√(2L/3g)≈2.0s（对比 L=1.0 的 1.62s）",
+  "entities": [
+    {
+      "type": "box",
+      "name": "铰链基座",
+      "given": {
+        "position": [
+          0,
+          2.5,
+          0
+        ]
+      },
+      "confidence": 0.93
+    },
+    {
+      "type": "box",
+      "name": "摆杆",
+      "given": {
+        "position": [
+          -0.27,
+          1.78,
+          0
+        ],
+        "length": 1.5
+      },
+      "confidence": 0.92
+    }
+  ],
+  "observations": [
+    "摆动周期"
+  ],
+  "assumptions": [
+    "均质细杆",
+    "初始摆角 0.4 rad（小角近似）"
+  ]
+}

@@ -1,0 +1,63 @@
+{
+  "kind": "astro",
+  "gravity": null,
+  "joint": null,
+  "anchorPoints": [],
+  "keyPoints": [],
+  "environment": "",
+  "unknowns": [],
+  "uncertain": [],
+  "confidence": 0.9,
+  "_fixture": true,
+  "_note": "R5-B2 新模型（本地示例解析数据，非真实模型输出）",
+  "questionType": "双星互绕",
+  "goal": "两颗 60kg 星相距 6 各以 v=√(Gm/2d)≈2.24 绕质心做圆运动，验证周期 T=2πd/(2v)≈8.4s",
+  "G": 1,
+  "entities": [
+    {
+      "type": "celestial",
+      "name": "星 A",
+      "given": {
+        "mass": 60,
+        "position": [
+          3,
+          0,
+          0
+        ],
+        "velocity": [
+          0,
+          0,
+          2.236
+        ]
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "celestial",
+      "name": "星 B",
+      "given": {
+        "mass": 60,
+        "position": [
+          -3,
+          0,
+          0
+        ],
+        "velocity": [
+          0,
+          0,
+          -2.236
+        ]
+      },
+      "confidence": 0.95
+    }
+  ],
+  "observations": [
+    "周期",
+    "两星间距是否恒定",
+    "总动量"
+  ],
+  "assumptions": [
+    "双星等质量绕质心圆运动",
+    "G=1（教学标度）"
+  ]
+}

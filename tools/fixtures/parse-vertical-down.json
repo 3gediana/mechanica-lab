@@ -1,0 +1,43 @@
+{
+  "kind": "",
+  "gravity": 10,
+  "joint": null,
+  "anchorPoints": [],
+  "keyPoints": [],
+  "environment": "",
+  "unknowns": [],
+  "uncertain": [],
+  "confidence": 0.92,
+  "_fixture": true,
+  "_note": "R5-B2 新模型（本地示例解析数据，非真实模型输出）",
+  "questionType": "竖直下抛",
+  "goal": "h=1.8m 处以 4 m/s 竖直下抛，求落地时间与落地速度 v=√(v0²+2gh)=√(16+35.3)≈7.2 m/s",
+  "entities": [
+    {
+      "type": "sphere",
+      "name": "下抛小球",
+      "given": {
+        "mass": 1,
+        "velocity": [
+          0,
+          -4,
+          0
+        ],
+        "position": [
+          0,
+          1.8,
+          0
+        ]
+      },
+      "confidence": 0.95
+    }
+  ],
+  "observations": [
+    "落地时间",
+    "落地速度"
+  ],
+  "assumptions": [
+    "不计空气阻力",
+    "抛出点球心高 1.8m"
+  ]
+}

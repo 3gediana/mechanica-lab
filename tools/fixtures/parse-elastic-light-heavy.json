@@ -1,0 +1,66 @@
+{
+  "kind": "",
+  "gravity": 10,
+  "joint": null,
+  "anchorPoints": [],
+  "keyPoints": [],
+  "environment": "",
+  "unknowns": [],
+  "uncertain": [],
+  "confidence": 0.92,
+  "_fixture": true,
+  "_note": "R5-B2 新模型（本地示例解析数据，非真实模型输出）",
+  "questionType": "完全弹性碰撞（小撞大）",
+  "goal": "1kg v=2 撞 2kg 静止 e=1：v1′=−v0/3 原路回弹、v2′=4v0/3≈1.33 前进",
+  "entities": [
+    {
+      "type": "sphere",
+      "name": "球 A",
+      "given": {
+        "mass": 1,
+        "radius": 0.15,
+        "restitution": 1,
+        "velocity": [
+          2,
+          0,
+          0
+        ],
+        "position": [
+          -1.6,
+          0.155,
+          0
+        ]
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "sphere",
+      "name": "球 B",
+      "given": {
+        "mass": 2,
+        "radius": 0.15,
+        "restitution": 1,
+        "velocity": [
+          0,
+          0,
+          0
+        ],
+        "position": [
+          0.6,
+          0.155,
+          0
+        ]
+      },
+      "confidence": 0.95
+    }
+  ],
+  "observations": [
+    "入射球是否反向",
+    "动量守恒",
+    "动能守恒"
+  ],
+  "assumptions": [
+    "水平面光滑",
+    "对撞悬浮理想化（重力不影响一维动量）"
+  ]
+}

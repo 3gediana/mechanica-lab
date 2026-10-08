@@ -1,0 +1,44 @@
+{
+  "kind": "",
+  "gravity": 10,
+  "joint": null,
+  "anchorPoints": [],
+  "keyPoints": [],
+  "environment": "",
+  "unknowns": [],
+  "uncertain": [],
+  "confidence": 0.92,
+  "_fixture": true,
+  "_note": "R5-B2 新模型（本地示例解析数据，非真实模型输出）",
+  "questionType": "斜抛运动（60° 通式）",
+  "goal": "v=6 θ=60°：验证 T=2vsinθ/g≈1.04s、R=v²sin2θ/g≈3.12m、H=v²sin²θ/2g≈1.35m",
+  "entities": [
+    {
+      "type": "sphere",
+      "name": "斜抛小球",
+      "given": {
+        "mass": 1,
+        "velocity": [
+          3.0,
+          5.196,
+          0
+        ],
+        "position": [
+          0,
+          0.15,
+          0
+        ]
+      },
+      "confidence": 0.95
+    }
+  ],
+  "observations": [
+    "飞行时间",
+    "射程",
+    "最大高度"
+  ],
+  "assumptions": [
+    "理想抛体，v=6 m/s、θ=60°",
+    "落回同高（球心口径）"
+  ]
+}
