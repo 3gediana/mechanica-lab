@@ -323,7 +323,10 @@ export class Viewport {
       this._probeP = gp; this._probeRot = rotY;
       this._ghostOverlap = this.cb.ghostProbe ? this.cb.ghostProbe(gp, rotY) : false;
     }
-    if (this._ghost.material) this._ghost.material.color.set(this._ghostOverlap ? 0xc96a5a : 0xd9a441);
+    if (this._ghost.material) {
+      this._ghost.material.color.set(this._ghostOverlap ? 0xc96a5a : 0xd9a441);
+      this._ghost.material.opacity = this._ghostOverlap ? 0.55 : 0.35;   // UI-610：警示态更醒目
+    }
     this.markDirty();
   }
 

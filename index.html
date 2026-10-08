@@ -105,7 +105,9 @@
   #topbar .brand .sub { font-size: 10px; color: var(--faint); letter-spacing: .12em; margin-right: -.12em; white-space: nowrap; }
   @media (max-width: 1520px) { #topbar .brand .sub { display: none; } }
   .dirty-dot { display: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
-    flex: 0 0 auto; box-shadow: 0 0 8px rgba(217, 164, 65, 0.8); }
+    flex: 0 0 auto; box-shadow: 0 0 8px rgba(217, 164, 65, 0.8); cursor: pointer; }
+  .dirty-dot.on { display: inline-block; animation: dirtyIn .16s ease; }   /* UI-504 出现渐入不硬切 */
+  @keyframes dirtyIn { from { opacity: 0; transform: scale(.4); } }
   #sceneName {
     background: transparent; border: 1px solid transparent; color: var(--text);
     font-family: var(--sans); font-size: 12px; padding: 4px 8px; width: 136px; border-radius: var(--r-ctl);
@@ -211,7 +213,7 @@
   .comp-item .need2 { position: absolute; right: 0; bottom: 0; font-size: 8px; color: var(--accent-hi);
     background: rgba(13, 15, 19, 0.9); border: 1px solid rgba(217, 164, 65, 0.4); border-right: 0; border-bottom: 0;
     padding: 0 3px; white-space: nowrap; line-height: 1.5; }
-  #outline { max-height: 34%; overflow-y: auto; overscroll-behavior: contain; border-top: 1px solid var(--line); }
+  #outline { max-height: 34%; overflow-y: auto; overscroll-behavior: contain; border-top: 1px solid var(--line); padding-right: 6px; }   /* UI-523：滚动条别压住徽标 */
   .ol-row {
     display: flex; align-items: center; gap: 6px; padding: 5px 10px 5px 14px; cursor: pointer;
     border-left: 2px solid transparent; font-size: 12px; color: var(--dim);
@@ -262,7 +264,7 @@
   .ro-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 12px; }
   .ro-grid .cell { display: flex; justify-content: space-between; align-items: baseline; min-width: 0; }
   .ro-grid .k { font-size: 10px; color: var(--faint); flex: 0 0 auto; }
-  .ro-grid .v { font-family: var(--mono); font-size: 12px; color: var(--accent-hi); font-variant-numeric: tabular-nums; word-break: break-all; min-width: 0; text-align: right; }
+  .ro-grid .v { font-family: var(--mono); font-size: 12px; color: var(--accent-hi); font-variant-numeric: tabular-nums; overflow-wrap: break-word; min-width: 0; text-align: right; }   /* UI-541：断词不断数 */
   .ro-grid .v.plain { color: var(--text); }
   /* 面板动作钮（btnrow）：托盘同族的浅底钮 */
   .btnrow { display: flex; gap: 7px; }
@@ -275,10 +277,9 @@
   .btnrow button:hover { color: var(--text); border-color: var(--line-strong); background: rgba(255, 255, 255, 0.065); }
   .btnrow button:active { transform: translateY(1px); }
   .btnrow button.hot {
-    color: #1a1206; background: linear-gradient(180deg, #e2af56, #d19a38); border-color: transparent; font-weight: 600;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    color: var(--accent-hi); background: rgba(217, 164, 65, 0.13); border-color: rgba(217, 164, 65, 0.5); font-weight: 400;
   }
-  .btnrow button.hot:hover { color: #1a1206; background: linear-gradient(180deg, #eabb64, #dba643); border-color: transparent; }
+  .btnrow button.hot:hover { color: #f0cd7e; background: rgba(217, 164, 65, 0.2); border-color: rgba(217, 164, 65, 0.75); }   /* UI-533：琥珀描边款，实底渐变全站只留 #btnPlay */
   .btnrow button.danger:hover { color: var(--danger); border-color: rgba(208, 128, 109, 0.5); }
   .btnrow button:disabled { color: var(--faint); background: rgba(255, 255, 255, 0.02); border-color: var(--line); cursor: not-allowed; }
   /* 文字链接式小按钮（载入示例/清除选区） */
@@ -305,6 +306,7 @@
   #dropZone:hover { border-color: rgba(217, 164, 65, 0.5); color: var(--text); background: rgba(217, 164, 65, 0.04); }
   #imgPrev { display: block; max-width: 100%; max-height: 240px; margin: 2px auto 0; border: 1px solid var(--line); border-radius: 6px; }
   #camVideo { display: block; width: 100%; border: 1px solid var(--line); border-radius: 6px; }
+  #camWrap { position: relative; }
   /* 语音口述热态：琥珀微呼吸（reduced-motion 全局冻结） */
   #btnMic.listening { animation: micpulse 1.6s ease-in-out infinite; }
   @keyframes micpulse { 0%, 100% { box-shadow: inset 0 0 0 1px rgba(217,164,65,.32); } 50% { box-shadow: inset 0 0 0 1px rgba(217,164,65,.7); } }
@@ -503,6 +505,7 @@
   #helpOverlay td.k { font-family: var(--mono); color: var(--text); padding-right: 18px; white-space: nowrap; }
   #helpOverlay td.k span { display: inline-block; padding: 1px 7px; border: 1px solid var(--line);
     border-radius: var(--r-ctl); background: var(--raise); font-size: 10px; line-height: 1.6; }
+  #helpOverlay tr.grp td { font-size: 9px; color: var(--faint); letter-spacing: .24em; padding: 9px 0 3px; border-bottom: 1px solid var(--line); }   /* UI-591 分组头 */
 
   /* ============ 场景库弹层（SCN） ============ */
   #sceneLib { position: fixed; inset: 0; z-index: 60; display: none;
@@ -535,12 +538,14 @@
   .lib-card:hover { border-color: rgba(217, 164, 65, 0.45); transform: translateY(-1px); box-shadow: var(--shadow-float); }
   .lib-card .thumb { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; background: var(--inset); cursor: pointer; }
   .lib-card .bd { padding: 8px 9px 9px; display: flex; flex-direction: column; gap: 5px; }
-  .lib-card .nm { font-size: 12px; color: var(--text); cursor: text; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lib-card .nm { font-size: 12px; color: var(--text); cursor: default; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .lib-card .nm input { width: 100%; background: var(--inset); border: 1px solid rgba(217, 164, 65, 0.55); border-radius: var(--r-ctl); color: var(--text); font: inherit; padding: 2px 4px; outline: none; }
   .lib-card .meta { font-size: 10px; color: var(--faint); }
   .lib-card .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .lib-card.on { border-color: rgba(217, 164, 65, 0.65); background: rgba(217, 164, 65, 0.05); }   /* UI-598 当前场景 */
+  .lib-card.enter-hint { border-color: rgba(217, 164, 65, 0.55); box-shadow: inset 0 0 0 1px rgba(217, 164, 65, 0.35); }   /* UI-601 回车目标 */
   .chip-tag { font-size: 10px; color: var(--accent-hi); background: var(--accent-dim); border: 1px solid rgba(217, 164, 65, 0.3); border-radius: 999px; padding: 1px 7px; cursor: default; }
-  .chip-tag .x { margin-left: 4px; cursor: pointer; color: var(--faint); }
+  .chip-tag .x { margin-left: 4px; cursor: pointer; color: var(--faint); display: inline-block; padding: 2px 3px; margin: -2px 1px -2px 1px; }
   .chip-tag .x:hover { color: var(--danger); }
   .chip-add { font-size: 10px; color: var(--faint); background: none; border: 1px dashed var(--line-strong); border-radius: 999px; padding: 1px 7px; cursor: pointer; }
   .chip-add:hover { color: var(--accent-hi); border-color: rgba(217, 164, 65, 0.45); }
@@ -549,6 +554,7 @@
     border: 1px solid var(--line); border-radius: var(--r-ctl); color: var(--dim); cursor: pointer;
     transition: color .12s, border-color .12s; }
   .lib-card .ops button:hover { color: var(--text); border-color: var(--line-strong); }
+  .lib-card .ops button:active { transform: translateY(1px); }
   .lib-card .ops button.danger { color: var(--danger); }
   .lib-card .ops button.danger:hover { border-color: rgba(208, 128, 109, 0.5); }
 </style>
@@ -861,7 +867,7 @@
 
 <header id="topbar">
   <div class="brand"><svg class="mark" viewBox="0 0 16 16" aria-hidden="true"><rect width="16" height="16" rx="4.5" fill="rgba(217,164,65,.13)"/><circle cx="8" cy="8" r="4.4" fill="none" stroke="#d9a441" stroke-width="1.5"/><circle cx="8" cy="3.9" r="1.6" fill="#d9a441"/></svg><h1>MECHANICA</h1><div class="sub">物理教学工作台</div></div>
-  <span id="dirtyDot" class="dirty-dot" title="有未保存的改动（Ctrl+S 保存到场景库）" style="display:none"></span>
+  <span id="dirtyDot" class="dirty-dot" title="有未保存的改动（点这里或 Ctrl+S 保存到场景库）" role="button" tabindex="0" aria-label="保存到场景库" style="display:none"></span>
   <input id="sceneName" maxlength="40" value="未命名场景" spellcheck="false" title="场景名称（点一下=全选改名，Esc 还原）">
   <div class="tb-group">
     <button id="btnNew" class="tbtn" aria-label="新建空场景" title="新建空场景"><svg class="ic"><use href="#i-file-plus"/></svg></button>
@@ -905,9 +911,9 @@
 </aside>
 
 <aside id="right">
-  <div id="rtabs">
-    <button id="tabInspector" class="rtab hot">属性检查器</button>
-    <button id="tabAgent" class="rtab">Agent 解析</button>
+  <div id="rtabs" role="tablist">
+    <button id="tabInspector" class="rtab hot" role="tab" aria-selected="true">属性检查器</button>
+    <button id="tabAgent" class="rtab" role="tab" aria-selected="false">Agent 解析</button>
   </div>
   <div id="inspWrap">
     <div id="inspEmpty">在视口点击对象，或从左侧目录添加组件。<br><br>拖动 gizmo 移动 / 旋转；底部控制栏运行物理模拟。</div>
@@ -927,6 +933,7 @@
       </div>
       <div id="camWrap" style="display:none">
         <video id="camVideo" autoplay playsinline muted></video>
+        <span style="position:absolute;top:6px;left:6px;font-size:9px;letter-spacing:.08em;color:var(--accent-hi);background:rgba(20,22,27,.85);border:1px solid rgba(217,164,65,.4);border-radius:999px;padding:1px 8px;pointer-events:none">摄像头预览中</span>   <!-- UI-559 隐私标识 -->
         <div class="btnrow" style="margin-top:6px">
           <button id="btnCapture" class="hot">捕获此帧</button>
           <button id="btnCamCancel">取消</button>
@@ -1003,7 +1010,7 @@
       </div>
       <div style="margin-top:10px;border-top:1px solid var(--line);padding-top:8px">
         <div class="k" style="font-size:10px;color:var(--faint);margin-bottom:4px">文字要求（混合搭建：按文字补充/调整当前场景）</div>
-        <textarea id="agentTextReq" class="ta-req" maxlength="4000" rows="3" placeholder="例：在现有斜面上放一个质量 2 kg 的小球，光滑无初速，从顶端释放…（Ctrl+Enter 直接解析；也可点「口述」用语音输入）"></textarea>
+        <textarea id="agentTextReq" class="ta-req" maxlength="4000" rows="3" spellcheck="false" placeholder="例：在现有斜面上放一个质量 2 kg 的小球，光滑无初速，从顶端释放…（Ctrl+Enter 直接解析；也可点「口述」用语音输入）"></textarea>
         <div class="btnrow" style="margin-top:5px">
           <button id="btnMic" title="语音口述题目（识别结果追加进上方文本框，可再编辑后解析）"><svg class="ic"><use href="#i-microphone"/></svg><span>口述</span></button>
           <button id="btnParseText">解析文字要求</button>
@@ -1041,12 +1048,12 @@
       <div id="assumpBody" class="hint" style="margin-top:0"></div>
     </div>
     <div class="grp" id="explainGrp" style="display:none">
-      <div class="grp-h">运行解释 <span id="explainBadge" class="badge given" style="margin-left:auto"></span></div>
+      <div class="grp-h">运行解释 <span id="explainBadge" class="badge" style="margin-left:auto"></span></div>
       <div id="explainBody"></div>
       <div class="btnrow" style="margin-top:10px">
         <button id="btnRunExplain" class="hot"><svg class="ic"><use href="#i-player-play"/></svg><span>运行并生成解释</span></button>
         <button id="btnCopyExplain" title="复制解释文本与关键数据（备课用）" disabled>复制结果</button>
-        <button id="btnExportCSV" title="导出最近一次运行/自查探针的逐时刻采样数据（Excel 可开）">导出数据</button>
+        <button id="btnExportCSV" disabled title="先「运行并生成解释」或建场自查，才有可导出的采样数据">导出数据</button>
       </div>
     </div>
   </div>
@@ -1080,6 +1087,7 @@
     <button id="btnReplay" title="回放录制的帧序列" disabled><svg class="ic"><use href="#i-history"/></svg><span>回放</span></button>
   </div>
   <input type="range" id="replayBar" min="0" max="100" value="0" step="1" title="回放时间轴（拖动逐帧检查）" style="display:none;width:120px">
+  <span class="ro" id="roFrame" style="display:none" title="回放帧号（逐帧检查用）"></span>
   <div class="sgroup">
     <button id="btnSound" title="碰撞与状态音效（程序合成，静音状态刷新后保持）"><svg class="ic"><use href="#i-volume-2"/></svg><span>音效</span></button>
     <button id="btnShake" title="碰撞镜头微震（trauma² 曲线，重击才抖；关闭状态刷新后保持）"><svg class="ic"><use href="#i-wave-sine"/></svg><span>震屏</span></button>
@@ -1090,7 +1098,7 @@
   <span class="ro" title="物理引擎固定步长：确定性演化的基础，读数与理论对照都在这个口径上">步长 <b>1/120s</b></span>
   <span class="ro" title="当前场景实体数（含连接件与传感器）">实体 <b id="roN">0</b></span>
   <div class="spacer"></div>
-  <span class="ro" id="roSel">未选中</span>
+  <span class="ro" id="roSel" style="max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="">未选中</span>
 </footer>
 
 <div id="consbar">
@@ -1174,28 +1182,33 @@
 <div id="errbar" role="alert"><span id="errMsg"></span><button id="errClose" aria-label="关闭错误提示" title="关闭（Esc）"><svg class="ic"><use href="#i-x"/></svg></button></div>
 
 <div id="helpOverlay" title="按 Esc 关闭">
-  <div class="card">
+  <div class="card" role="dialog" aria-modal="true" aria-label="快捷键速查" tabindex="-1">
     <h2>快捷键速查</h2>
     <table>
+      <tr class="grp"><td colspan="2">模拟控制</td></tr>
       <tr><td class="k"><span>空格</span></td><td>运行 / 暂停</td></tr>
-      <tr><td class="k"><span>Shift+空格</span></td><td>慢动作 0.1x 互切（记忆原档）</td></tr>
-      <tr><td class="k"><span>- / =</span></td><td>时间倍率降 / 升档（0.1~4x）</td></tr>
+      <tr><td class="k"><span>Shift</span>+<span>空格</span></td><td>慢动作 0.1x 互切（记忆原档）</td></tr>
+      <tr><td class="k"><span>-</span> / <span>=</span></td><td>时间倍率降 / 升档（0.1~4x）</td></tr>
       <tr><td class="k"><span>.</span></td><td>单步推进一个固定步长</td></tr>
       <tr><td class="k"><span>R</span></td><td>重置到初始态</td></tr>
       <tr><td class="k"><span>B</span></td><td>自动子弹时间开关（强碰撞慢放）</td></tr>
       <tr><td class="k"><span>P</span>（运行态）</td><td>图钉：钉住 / 放开选中体</td></tr>
-      <tr><td class="k"><span>W / E</span></td><td>移动 / 旋转 gizmo</td></tr>
+      <tr class="grp"><td colspan="2">编辑与视图</td></tr>
+      <tr><td class="k"><span>W</span> / <span>E</span></td><td>移动 / 旋转 gizmo</td></tr>
+      <tr><td class="k"><span>[</span> / <span>]</span></td><td>放置预览中旋转朝向（右键取消）</td></tr>
       <tr><td class="k"><span>F</span></td><td>聚焦选中对象</td></tr>
-      <tr><td class="k"><span>Ctrl+Z / Ctrl+Shift+Z</span></td><td>撤销 / 重做</td></tr>
-      <tr><td class="k"><span>Ctrl+D</span></td><td>复制选中对象</td></tr>
-      <tr><td class="k"><span>Ctrl+S</span></td><td>保存到场景库（自动缩略图/标签）</td></tr>
-      <tr><td class="k"><span>Ctrl+O</span></td><td>场景库：打开 / 改名 / 标签 / 导出</td></tr>
       <tr><td class="k"><span>Home</span></td><td>全景取景（全部实体入画）</td></tr>
       <tr><td class="k"><span>双击实体</span></td><td>相机聚焦该对象</td></tr>
-      <tr><td class="k"><span>Delete</span></td><td>删除选中对象</td></tr>
       <tr><td class="k"><span>方向键</span></td><td>微调选中对象位置（Shift 大步）</td></tr>
-      <tr><td class="k"><span>Ctrl+Enter</span></td><td>Agent 文字框：解析输入的要求</td></tr>
-      <tr><td class="k"><span>?</span></td><td>打开 / 关闭本速查</td></tr>
+      <tr><td class="k"><span>Delete</span></td><td>删除选中对象</td></tr>
+      <tr class="grp"><td colspan="2">场景与文件</td></tr>
+      <tr><td class="k"><span>Ctrl</span>+<span>Z</span> / <span>Ctrl</span>+<span>Shift</span>+<span>Z</span></td><td>撤销 / 重做</td></tr>
+      <tr><td class="k"><span>Ctrl</span>+<span>D</span></td><td>复制选中对象</td></tr>
+      <tr><td class="k"><span>Ctrl</span>+<span>S</span></td><td>保存到场景库（自动缩略图/标签）</td></tr>
+      <tr><td class="k"><span>Ctrl</span>+<span>O</span></td><td>场景库：打开 / 改名 / 标签 / 导出</td></tr>
+      <tr class="grp"><td colspan="2">Agent 与帮助</td></tr>
+      <tr><td class="k"><span>Ctrl</span>+<span>Enter</span></td><td>Agent 文字框：解析输入的要求</td></tr>
+      <tr><td class="k"><span>?</span> / <span>F1</span></td><td>打开 / 关闭本速查</td></tr>
       <tr><td class="k"><span>Esc</span></td><td>关闭浮层 / 退出框选</td></tr>
     </table>
   </div>

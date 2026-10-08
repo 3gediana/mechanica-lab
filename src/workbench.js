@@ -96,6 +96,21 @@ function toast(msg, type) {
   toastTimer = setTimeout(() => { t.classList.remove('on'); toastLastMsg = ''; }, toastMs(msg));
 }
 
+// UI-589/616：帮助浮层统一开关——记 opener 关时还焦点、开时移焦入卡；? 与 F1 同走这里
+let helpOpener = null;
+function toggleHelp() {
+  const h = $('helpOverlay');
+  const opening = !h.classList.contains('on');
+  h.classList.toggle('on', opening);
+  if (opening) {
+    helpOpener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    h.querySelector('.card').focus();
+  } else if (helpOpener) {
+    helpOpener.focus();
+    helpOpener = null;
+  }
+}
+
 // ============ 全局状态 ============
 let doc = null;                 // 当前场景文档（唯一事实源）
 let selectedId = null;          // 主选中（gizmo/检查器对象）
@@ -811,9 +826,9 @@ function updateSimbarStatic() {
     viewport.setBoxSelect(false);
     $('btnBoxSel').classList.remove('hot');
   }
-  const chip = $('modeChip');
-  chip.textContent = mode === 'edit' ? '编辑态' : (paused ? '暂停态' : '运行态') + (timeScale !== 1 ? ` ${timeScale}x` : '');
   const dropped = runtime.dropped > 0.1;   // 性能欠载透明化（UI-61）
+  const chip = $('modeChip');
+  chip.textContent = (mode === 'edit' ? '编辑态' : (paused ? '暂停态' : '运行态')) + (timeScale !== 1 ? ` ${timeScale}x` : '') + (dropped ? ' ⚠' : '');   // UI-571：欠载加字形不只靠变色
   chip.className = 'chip ' + (mode === 'edit' ? '' : (paused ? 'pause' : 'run')) + (dropped ? ' warn' : '');
   chip.title = dropped
     ? `性能欠载：已丢弃 ${runtime.dropped.toFixed(2)}s 模拟步（可降低时间倍率或关闭叠加层）`
@@ -867,9 +882,13 @@ function snapshotThumb() {
     const cv = document.createElement('canvas');
     cv.width = 160; cv.height = 90;
     const g = cv.getContext('2d');
-    const k = Math.max(cv.width / src.width, cv.height / src.height);
-    const w = src.width * k, h = src.height * k;
-    g.drawImage(src, (cv.width - w) / 2, (cv.height - h) / 2, w, h);   // cover 裁剪
+    // UI-595：全视口 cover 主体太小——取中央 62%（等效 1.6x 变焦）再 cover，四周留白收掉
+    const Z = 0.62;
+    const sx = src.width * (1 - Z) / 2, sy = src.height * (1 - Z) / 2;
+    const sw = src.width * Z, sh = src.height * Z;
+    const k = Math.max(cv.width / sw, cv.height / sh);
+    const w = sw * k, h = sh * k;
+    g.drawImage(src, sx, sy, sw, sh, (cv.width - w) / 2, (cv.height - h) / 2, w, h);
     return cv.toDataURL('image/jpeg', 0.72);
   } catch { return null; }
 }
@@ -974,10 +993,10 @@ function renderLibrary() {
   }
   grid.innerHTML = '';
   const curId = doc.sceneId;
-  for (const sc of list) {
+  const firstHit = q ? 0 : -1;   // UI-601：搜索时首卡描边=回车目标（list 已按 q 过滤，首位即命中）
+  list.forEach((sc, i) => {
     const card = document.createElement('div');
-    card.className = 'lib-card';
-    if (sc.id === curId) card.style.borderColor = 'rgba(217,164,65,.65)';
+    card.className = 'lib-card' + (sc.id === curId ? ' on' : '') + (i === firstHit ? ' enter-hint' : '');
     const src = LIB_SOURCE_LABEL[sc.source] ? ` · ${LIB_SOURCE_LABEL[sc.source]}` : '';
     card.innerHTML = `
       ${sc.thumb ? `<img class="thumb" alt="" loading="lazy">` : `<div class="thumb" style="display:flex;align-items:center;justify-content:center;color:var(--faint);font-size:10px">无缩略图</div>`}
@@ -999,7 +1018,7 @@ function renderLibrary() {
     const nm = card.querySelector('.nm');
     nm.appendChild(document.createTextNode(sc.name));
     const img = card.querySelector('img.thumb');
-    if (img) { img.src = sc.thumb; img.title = '点击打开「' + sc.name + '」（双击卡片同）'; }
+    if (img) { img.src = sc.thumb; img.title = '点击打开「' + sc.name + '」（双击卡片同）'; img.alt = `场景 ${sc.name} 缩略图`; }   // UI-600
     // 标签 chips：x 移除；+加标签（Enter 提交）
     const chips = card.querySelector('.chips');
     for (const t of sc.tags || []) {
@@ -1099,7 +1118,7 @@ function renderLibrary() {
       inp.select();
     };
     grid.appendChild(card);
-  }
+  });
 }
 function openSceneById(id) {
   // 库条目只存元数据；正文 = 当前正在编辑的同一场景（sceneId 绑定）→ 已经是它就不动；
@@ -1136,8 +1155,10 @@ function saveSceneSnap() {
   } catch { /* 空间不足静默：自动存档仍是主通道 */ }
 }
 
+let libOpener = null;   // UI-590：关库还焦点给打开者
 function openLibrary() {
   libOpen = true;
+  libOpener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   $('sceneLib').style.display = 'block';
   $('libSearch').value = libQuery;
   renderLibrary();
@@ -1146,7 +1167,17 @@ function openLibrary() {
 function closeLibrary() {
   libOpen = false;
   $('sceneLib').style.display = 'none';
+  if (libOpener) { libOpener.focus(); libOpener = null; }
 }
+// UI-590：Tab 圈限在弹层内
+$('sceneLib').addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Tab') return;
+  const f = $('sceneLib').querySelectorAll('button, [href], input, select, [tabindex="0"]');
+  if (!f.length) return;
+  const first = f[0], last = f[f.length - 1];
+  if (ev.shiftKey && document.activeElement === first) { ev.preventDefault(); last.focus(); }
+  else if (!ev.shiftKey && document.activeElement === last) { ev.preventDefault(); first.focus(); }
+});
 
 // 脏跟踪：任何 commitChange（=文档变了）→ 脏；保存/打开/新建入库动作 → 清
 let dirtySinceSave = false;
@@ -1293,6 +1324,7 @@ function bindUI() {
       scrubbing = true;
       replayIdx = Math.min(+bar.value, runtime.frames.length - 1);
       runtime.applyFrame(replayIdx);
+      updateReplayFrameReadout();   // UI-567：拖动逐帧也有读数
       viewport.markDirty();
     });
     bar.addEventListener('change', () => { scrubbing = false; _replayAcc = 0; });
@@ -1304,10 +1336,16 @@ function bindUI() {
     $('btnBoxSel').classList.toggle('hot', on);
   };
   $('btnSnap').onclick = () => cycleSnap();
-  $('btnViewReset').onclick = () => viewport.resetView();
-  $('btnViewTop').onclick = () => viewport.setViewPreset('top');
-  $('btnViewFront').onclick = () => viewport.setViewPreset('front');
-  $('btnViewSide').onclick = () => viewport.setViewPreset('side');
+  // UI-508：视角切换瞬时脉冲反馈（不改布局，hot 样式一闪）
+  const viewPulse = (btn, fn) => () => {
+    fn();
+    btn.classList.add('hot');
+    setTimeout(() => btn.classList.remove('hot'), 160);
+  };
+  $('btnViewReset').onclick = viewPulse($('btnViewReset'), () => viewport.resetView());
+  $('btnViewTop').onclick = viewPulse($('btnViewTop'), () => viewport.setViewPreset('top'));
+  $('btnViewFront').onclick = viewPulse($('btnViewFront'), () => viewport.setViewPreset('front'));
+  $('btnViewSide').onclick = viewPulse($('btnViewSide'), () => viewport.setViewPreset('side'));
   $('btnFocus').onclick = () => viewport.focusOn(selectedId ? runtime.binds.get(selectedId).mesh : null);
 
   $('btnPlay').onclick = play;
@@ -1350,12 +1388,26 @@ function bindUI() {
     if (e.key === 'Enter') e.target.blur();   // 回车=提交改名
   };
   $('sceneName').onblur = (e) => { if (e.target.value.trim() === '') e.target.value = doc.name; };
+  $('helpOverlay').addEventListener('keydown', (ev) => {   // UI-589：Tab 圈限在弹层内
+    if (ev.key !== 'Tab') return;
+    const focusables = $('helpOverlay').querySelectorAll('button, [href], input, [tabindex="0"]');
+    if (!focusables.length) { ev.preventDefault(); return; }
+    const first = focusables[0], last = focusables[focusables.length - 1];
+    if (ev.shiftKey && document.activeElement === first) { ev.preventDefault(); last.focus(); }
+    else if (!ev.shiftKey && document.activeElement === last) { ev.preventDefault(); first.focus(); }
+  });
   $('dirtyDot').style.cursor = 'pointer';
   $('dirtyDot').onclick = () => saveFile();   // 点脏点=顺手保存（所见即所按）
-  $('btnHelpQuick').onclick = () => $('helpOverlay').classList.toggle('on');
+  $('dirtyDot').onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); saveFile(); } };   // UI-505 键盘可达
+  $('btnHelpQuick').onclick = () => toggleHelp();
 
   const osb = document.getElementById('outlineSearch');
-  if (osb) osb.oninput = (e) => { outlineQuery = e.target.value; renderOutline(); };
+  if (osb) {
+    osb.oninput = (e) => { outlineQuery = e.target.value; renderOutline(); };
+    osb.onkeydown = (e) => {   // UI-603：对齐目录框——Esc 清词，空词再冒泡
+      if (e.key === 'Escape' && osb.value) { e.stopPropagation(); osb.value = ''; outlineQuery = ''; renderOutline(); }
+    };
+  }
   $('catalogSearch').oninput = (e) => {
     catalogFilter = e.target.value;
     const pos = e.target.selectionStart;
@@ -1503,9 +1555,9 @@ function onKey(e) {
     else if (k === 'd') { e.preventDefault(); if (selectedId) opDuplicate(selectedId); }
     return;
   }
-  if (e.key === '?') {
+  if (e.key === '?' || e.key === 'F1') {
     e.preventDefault();
-    $('helpOverlay').classList.toggle('on');
+    toggleHelp();   // UI-616：F1 同 ?（教学演示时投影上直接按 F1）
     return;
   }
   if (e.code === 'Escape') {
@@ -1514,7 +1566,7 @@ function onKey(e) {
     if (document.activeElement === $('catalogSearch') && catalogFilter) { $('catalogSearch').value = ''; catalogFilter = ''; renderCatalog(); return; }
     if (viewport.gizmo.dragging) { viewport.gizmo.reset(); viewport.markDirty(); return; }   // FZ-57：拖错当场 Esc 弹回，不产生提交
     const help = $('helpOverlay');
-    if (help.classList.contains('on')) { help.classList.remove('on'); return; }
+    if (help.classList.contains('on')) { toggleHelp(); return; }
     if (viewport.boxSelectMode) { viewport.setBoxSelect(false); $('btnBoxSel').classList.remove('hot'); return; }
     viewport.hideGhost();
     return;
@@ -1637,6 +1689,16 @@ function addCatalogRow(box, c, faved = false) {
     if (!comp || comp.isLink) return;   // 连接类两实体语义无单体预览；保持现有 ghost 不动
     viewport.showGhost(comp);
     viewport.setGhostFollow(true);
+    // UI-612：旋转/取消快捷键发现成本高——首次激活提示一次（记忆防骚扰）
+    if (!viewport.__ghostHintShown) {
+      viewport.__ghostHintShown = true;
+      let seen = false;
+      try { seen = !!localStorage.getItem('mech.ghostHint'); } catch { /* 隐私模式 */ }
+      if (!seen) {
+        try { localStorage.setItem('mech.ghostHint', '1'); } catch { /* 隐私模式 */ }
+        toast('放置提示：[ ] 旋转预览 · 左键放置 · 右键取消', 'ok');
+      }
+    }
   };
   // FZ-1/13：ghost 激活期视口左键=在 ghost 位放置（点击落点即所得，不再悄悄落 n%3 槽位）；
   // 右键轻点退出放置。目录行点击仍=默认摆位放置（两条通路并存）
@@ -1649,14 +1711,22 @@ function addCatalogRow(box, c, faved = false) {
     }, { resolvePlacement: true, ghost: true });
     if (id) {
       viewport.spawnImpact([pos.x, pos.y, pos.z]);   // FZ-4：落点环闪
-      toast(`已放置 ${comp.label} @ (${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)})`);
+      toast(`已放置 ${comp.label} @ (${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)})`, 'ok');
       viewport.hideGhost();   // 单次放置语义（连续放置 FZ-5 另批实施）
+    } else {
+      // UI-609：被防穿模拦截不再纯静默（ghost 红色态之外补一句去哪里）
+      const now = performance.now();
+      if (now - _ghostBlockToastAt > 2500) {
+        _ghostBlockToastAt = now;
+        toast('该位置被占用（红色预览）——挪到空地再点放置', 'warn');
+      }
     }
     // 被阻挡（id=null，放置防穿模）：ghost 留在原地（红色警示态），用户挪到空位再点——不吞掉放置意图
   };
   viewport.cb.onGhostCancel = () => viewport.hideGhost();
   box.appendChild(row);
 }
+let _ghostBlockToastAt = 0;   // UI-609：防穿模拦截提示节流
 
 // 目录搜索别名（UX-audit F2 首用视角）：教师口语词汇 → 卡片标签。
 // 「斜面」搜不到叫「斜坡」的卡片=首用者卡死点；双向都收。
@@ -1828,7 +1898,16 @@ function renderOutline() {
   const olTitle = document.getElementById('olCount');
   if (olTitle) olTitle.textContent = doc.entities.length ? `（${doc.entities.length}）` : '';
   if (!doc.entities.length) {
-    box.innerHTML = '<div class="ol-empty">场景为空——从左侧组件目录添加，或在 Agent 页签解析题目自动建场</div>';
+    const empty = document.createElement('div');
+    empty.className = 'ol-empty';
+    empty.textContent = '场景为空——从左侧组件目录添加，或在 Agent 页签解析题目自动建场';
+    const go = document.createElement('button');   // UI-522：空态给行动入口
+    go.className = 'link-btn';
+    go.textContent = '打开组件目录';
+    go.onclick = () => { const cs = document.getElementById('catalogSearch'); if (cs) { cs.focus(); cs.select(); } };
+    empty.appendChild(document.createElement('br'));
+    empty.appendChild(go);
+    box.appendChild(empty);
     box.scrollTop = keepTop;
     return;
   }
@@ -1848,7 +1927,8 @@ function renderOutline() {
     head.dataset.group = gname;
     head.style.cssText = 'display:flex;align-items:center;gap:6px;padding:3px 6px;margin-top:3px;background:rgba(217,164,65,.08);border-left:2px solid rgba(217,164,65,.55);cursor:pointer;font-size:11px;color:var(--accent)';
     const nm = document.createElement('span');
-    nm.textContent = `▦ ${gname}`;
+    nm.innerHTML = '<svg class="ic" style="width:11px;height:11px;vertical-align:-1px"><use href="#i-box-multiple"/></svg> ';   // UI-524：组头图标归队 sprite
+    nm.appendChild(document.createTextNode(gname));
     const cnt = document.createElement('span');
     cnt.style.cssText = 'font-size:9px;color:var(--faint)';
     cnt.textContent = `${members.length} 个对象`;
@@ -1874,11 +1954,14 @@ function renderOutlineRow(box, e, inGroup = false) {
     const row = document.createElement('div');
     row.dataset.id = e.id;
     row.className = 'ol-row' + (selectedIds.includes(e.id) ? ' sel' : '');
+    row.setAttribute('tabindex', '0');   // UI-518：大纲行键盘可达
+    row.setAttribute('role', 'button');
+    row.onkeydown = (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); selectEntity(e.id); } };
     if (inGroup) row.style.borderLeft = '2px solid rgba(217,164,65,.25)';
-    row.innerHTML = `<span class="nm"></span><span class="ty"></span><span class="vis" title="显示/隐藏（仅视觉隐藏，参与物理）"></span><span class="lock" title="锁定（防误选/防拖动）"></span><span class="del" title="删除" role="button" aria-label="删除该对象">×</span>`;
+    row.innerHTML = `<span class="nm"></span><span class="ty"></span><span class="vis" title="显示/隐藏（仅视觉隐藏，参与物理）"></span><span class="lock" title="锁定（防误选/防拖动）"></span><span class="del" title="删除" role="button" aria-label="删除该对象" tabindex="0">×</span>`;
     const vis = row.querySelector('.vis');
     vis.textContent = e.visible === false ? '隐' : '显';
-    vis.style.cssText = 'cursor:pointer;font-size:9px;color:' + (e.visible === false ? 'var(--danger)' : 'var(--faint)');
+    vis.style.cssText = 'cursor:pointer;font-size:10px;color:' + (e.visible === false ? 'var(--danger)' : 'var(--faint)') + ';min-width:16px;display:inline-block;text-align:center';   // UI-521
     vis.onclick = (ev) => {
       ev.stopPropagation();
       opUpdateEntity(e.id, { visible: e.visible === false }, (e.visible === false ? '显示 ' : '隐藏 ') + e.name, { rebuild: false });
@@ -1894,7 +1977,7 @@ function renderOutlineRow(box, e, inGroup = false) {
       const input = document.createElement('input');
       input.type = 'text';
       input.value = e.name;
-      input.style.cssText = 'flex:1;min-width:0;background:rgba(255,255,255,.05);border:1px solid rgba(217,164,65,.5);color:var(--text);font-size:11px;padding:1px 4px;border-radius:2px';
+      input.style.cssText = 'flex:1;min-width:0;background:rgba(255,255,255,.05);border:1px solid rgba(217,164,65,.5);color:var(--text);font-size:11px;padding:1px 4px;border-radius:var(--r-ctl)';
       nm.replaceWith(input);
       input.focus();
       input.select();
@@ -1909,7 +1992,7 @@ function renderOutlineRow(box, e, inGroup = false) {
     };
     const lock = row.querySelector('.lock');
     lock.textContent = e.locked ? '已锁' : '锁';
-    lock.style.cssText = 'cursor:pointer;font-size:9px;color:' + (e.locked ? 'var(--accent)' : 'var(--faint)');
+    lock.style.cssText = 'cursor:pointer;font-size:10px;color:' + (e.locked ? 'var(--accent)' : 'var(--faint)') + ';min-width:16px;display:inline-block;text-align:center';   // UI-521
     lock.onclick = (ev) => {
       ev.stopPropagation();
       if (mode === 'run') { toast('运行态不可锁定，请先重置'); return; }
@@ -1941,13 +2024,15 @@ function renderOutlineRow(box, e, inGroup = false) {
     }
     row.title = `类型 ${c.label} · 来源 ${e.source === 'agent' ? 'Agent 建场' : e.source === 'preset' ? '预置' : '手动添加'}`;
     row.onclick = () => selectEntity(e.id);
-    row.querySelector('.del').onclick = (ev) => { ev.stopPropagation(); opRemoveEntity(e.id); };   // opRemoveEntity 内 toast 自带 [撤销]
+    const delBtn = row.querySelector('.del');
+    delBtn.onclick = (ev) => { ev.stopPropagation(); opRemoveEntity(e.id); };   // opRemoveEntity 内 toast 自带 [撤销]
+    delBtn.onkeydown = (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.stopPropagation(); opRemoveEntity(e.id); } };   // UI-518
     // 选中对象定位：⌖ 把相机 target/距离平滑移向该实体（组内成员与链接实体同样可用）
     const focusBtn = document.createElement('span');
     focusBtn.className = 'focus-btn';
-    focusBtn.textContent = '⌖';
+    focusBtn.innerHTML = '<svg class="ic" style="width:11px;height:11px"><use href="#i-focus-2"/></svg>';   // UI-525：字符形归队 sprite
     focusBtn.title = '在视口中定位（相机聚焦）';
-    focusBtn.style.cssText = 'cursor:pointer;font-size:10px;color:var(--faint);margin-right:2px';
+    focusBtn.style.cssText = 'cursor:pointer;color:var(--faint);margin-right:2px;display:inline-flex';
     focusBtn.onclick = (ev) => {
       ev.stopPropagation();
       const b = runtime.binds.get(e.id);
@@ -2002,6 +2087,14 @@ function renderInspector() {
   }
   empty.style.display = 'none';
   box.style.display = 'block';
+  // UI-620：重建前记焦点（组内 label 文本定位）——paramsRebuild 类参数提交后面板重建不丢焦点
+  const prevFocus = document.activeElement;
+  let prevLabel = null;
+  if (prevFocus instanceof HTMLElement && box.contains(prevFocus) && (prevFocus.tagName === 'INPUT' || prevFocus.tagName === 'SELECT')) {
+    const row = prevFocus.closest('.frow, .cell');
+    const lab = row ? row.querySelector('label') : null;
+    prevLabel = lab ? lab.textContent : null;
+  }
   // 面板重建保持滚动位置（UI-75）：参数多的实体在长面板里调参不该跳回顶部
   const rightPane = $('right');
   const keepScroll = rightPane.scrollTop;
@@ -2269,7 +2362,7 @@ function renderInspector() {
   grpR.appendChild(grid);
   const hint = document.createElement('div');
   hint.className = 'hint';
-  hint.textContent = '数值由固定步长物理演化实时读出，单位: m/s、m、kg、kg·m/s、J';
+  hint.textContent = '数值由固定步长物理演化实时读出，单位: m/s、m、kg、kg·m/s、J、rad/s';   // UI-540 单位口径统一在 hint
   grpR.appendChild(hint);
   box.appendChild(grpR);
 
@@ -2287,6 +2380,21 @@ function renderInspector() {
   grpA.appendChild(br);
   box.appendChild(grpA);
   rightPane.scrollTop = keepScroll;
+  // UI-620：还原焦点到同 label 的输入件（重建后 DOM 全新）
+  if (prevLabel) {
+    const rows = box.querySelectorAll('.frow, .cell');
+    for (const r of rows) {
+      const lab = r.querySelector('label');
+      if (lab && lab.textContent === prevLabel) {
+        const inp = r.querySelector('input, select');
+        if (inp && !inp.disabled) {
+          inp.focus();
+          requestAnimationFrame(() => { try { inp.select(); } catch { /* 非文本输入 */ } });
+        }
+        break;
+      }
+    }
+  }
 }
 
 function patchTransform(e, t, label) { opUpdateEntity(e.id, { transform: t }, label, { rerender: false }); }
@@ -2737,12 +2845,15 @@ function updateReadouts() {
   setTxt($('roN'), String(doc.entities.length));
   const e = selectedId ? getEntity(doc, selectedId) : null;
   const roSel = $('roSel');
-  if (!e) { setTxt(roSel, '未选中'); }
+  if (!e) { setTxt(roSel, '未选中'); if (roSel) roSel.title = ''; }
   else {
     const t = runtime.telemetry(e.id);
-    setTxt(roSel, t
-      ? `${e.name}  v=${t.speed.toFixed(2)}m/s  h=${t.height.toFixed(2)}m  |p|=${t.momentum.toFixed(2)}`
-      : `${e.name}  仅视觉`);
+    // UI-543：动量带单位（与其余读数口径一致）
+    const selTxt = t
+      ? `${e.name}  v=${t.speed.toFixed(2)}m/s  h=${t.height.toFixed(2)}m  |p|=${t.momentum.toFixed(2)}N·s`
+      : `${e.name}  仅视觉`;
+    setTxt(roSel, selTxt);
+    if (roSel) roSel.title = selTxt;   // UI-542：截断时悬停读全文
     const { grid, map } = liveEls();
     if (grid) {
       const set = (k, v) => { const el = map.get(k); if (el) setTxt(el, v); };
@@ -2752,7 +2863,7 @@ function updateReadouts() {
         set('mass', t.mass.toFixed(2));
         set('momentum', t.momentum.toFixed(3));
         set('keTrans', t.keTrans.toFixed(3));
-        set('omega', `${Math.hypot(t.angvel[0], t.angvel[1], t.angvel[2]).toFixed(2)} rad/s`);
+        set('omega', Math.hypot(t.angvel[0], t.angvel[1], t.angvel[2]).toFixed(2));   // UI-540：单位口径统一进格内（.u2）
         set('vel', `[${t.vel[0].toFixed(2)}, ${t.vel[1].toFixed(2)}, ${t.vel[2].toFixed(2)}]`);
         const col = runtime.lastCollisionFor(e.id);
         set('coll', col ? `t=${col.t.toFixed(2)}s` : '无');
@@ -2767,7 +2878,9 @@ function updateReadouts() {
           set('roll', t.speed <= 0.02 ? '静止' : '—');
         }
       } else {
-        ['speed', 'height', 'mass', 'momentum', 'keTrans', 'omega', 'vel', 'coll', 'roll'].forEach((k) => set(k, '--'));
+        // UI-539：编辑态「待运行」区别于真零值（运行中无数据仍是 --）
+        const nd = mode === 'run' ? '--' : '待运行';
+        ['speed', 'height', 'mass', 'momentum', 'keTrans', 'omega', 'vel', 'coll', 'roll'].forEach((k) => set(k, nd));
       }
     }
   }
@@ -2930,10 +3043,12 @@ let scrubbing = false;   // 回放时间轴拖动中：暂停自动推进，逐�
 let _replayAcc = 0;      // FEEL-99 收编：帧数据 60Hz 采样（every:2×1/120s），墙钟配速推进——
                          // 旧 round(rawDt*60)+max(1) 钳制在高刷屏变倍速（240Hz=4x）
 
+let _recTimer = 0;   // UI-566：录制时长读数
 function toggleFrameRec() {
   if (replaying) { stopReplay(); return; }
   if (runtime.recFrames) {
     runtime.recFrames = false;
+    clearInterval(_recTimer);
     $('btnRec').classList.remove('hot');
     setBtnText('btnRec', '录制');
     $('btnReplay').disabled = runtime.frames.length < 2;
@@ -2944,6 +3059,12 @@ function toggleFrameRec() {
     runtime.recFrames = true;
     $('btnRec').classList.add('hot');
     setBtnText('btnRec', '停止录制');
+    const recStart = performance.now();
+    clearInterval(_recTimer);
+    _recTimer = setInterval(() => {   // UI-566：录制中有秒数反馈
+      if (!runtime.recFrames) { clearInterval(_recTimer); return; }
+      setBtnText('btnRec', `停止 ${((performance.now() - recStart) / 1000).toFixed(0)}s`);
+    }, 1000);
     play();
     toast('录制中（最长约 30s）');
   }
@@ -2966,14 +3087,25 @@ function startReplay() {
   bar.max = Math.max(1, runtime.frames.length - 1);
   bar.value = 0;
   bar.style.display = 'block';
+  const rf = $('roFrame');
+  if (rf) rf.style.display = '';   // UI-567：逐帧检查要有帧号读数
+  updateReplayFrameReadout();
   updateSimbarStatic();
   toast('回放中（拖动时间轴可逐帧检查，结束后自动恢复编辑态）');
+}
+
+// UI-567：帧号读数（拖动/自动推进共用）
+function updateReplayFrameReadout() {
+  const rf = $('roFrame');
+  if (rf) setTxt(rf, `帧 ${replayIdx + 1}/${runtime.frames.length}`);
 }
 
 function stopReplay() {
   replaying = false;
   scrubbing = false;
   $('replayBar').style.display = 'none';
+  const rf = $('roFrame');
+  if (rf) rf.style.display = 'none';
   mode = 'edit';
   paused = false;
   viewport.setGizmoEnabled(true);
@@ -3000,7 +3132,10 @@ let juice = null;
 function setShake(on) {
   if (juice) juice.setShake(on);
   const btn = $('btnShake');
-  if (btn) btn.classList.toggle('hot', juice ? juice.shakeOn === true : false);
+  if (btn) {
+    btn.classList.toggle('hot', juice ? juice.shakeOn === true : false);
+    btn.title = juice && juice.shakeOn ? '震屏开启中——点击关闭（重击才抖）' : '震屏已关——点击开启碰撞镜头微震';   // UI-572 对齐 btnSound 动态开关文案
+  }
 }
 
 // ============ 运行中交互（层 2，PL-10..14） ============
@@ -3196,6 +3331,7 @@ function tick() {
     else {
       runtime.applyFrame(replayIdx);
       $('replayBar').value = replayIdx;
+      updateReplayFrameReadout();   // UI-567
     }
     viewport.markDirty();
   } else if (mode === 'run' && !paused) {
@@ -3471,20 +3607,48 @@ function selectTab(which) {
   const insp = which === 'inspector';
   $('tabInspector').classList.toggle('hot', insp);
   $('tabAgent').classList.toggle('hot', !insp);
+  $('tabInspector').setAttribute('aria-selected', insp ? 'true' : 'false');   // UI-529
+  $('tabAgent').setAttribute('aria-selected', insp ? 'false' : 'true');
   $('inspWrap').style.display = insp ? 'block' : 'none';
   $('agentWrap').style.display = insp ? 'none' : 'block';
 }
+// UI-530：两页签间方向键移动
+$('rtabs').addEventListener('keydown', (ev) => {
+  if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return;
+  ev.preventDefault();
+  const toAgent = (ev.key === 'ArrowRight') === ($('tabInspector').classList.contains('hot'));
+  selectTab(toAgent ? 'agent' : 'inspector');
+  (toAgent ? $('tabAgent') : $('tabInspector')).focus();
+});
 
 function bindAgentPanel() {
   const fileInput = $('agentFile');
   const dz = $('dropZone');
+  // UI-562：字数计数（打满才截断不可见）——>90% 转琥珀提醒
+  {
+    const req = $('agentTextReq');
+    const cnt = document.createElement('div');
+    cnt.style.cssText = 'text-align:right;font-size:9px;color:var(--faint);margin-top:2px;font-family:var(--mono)';
+    const syncCnt = () => {
+      const n = req.value.length;
+      cnt.textContent = `${n}/4000`;
+      cnt.style.color = n > 3600 ? 'var(--accent)' : 'var(--faint)';
+    };
+    req.addEventListener('input', syncCnt);
+    req.after(cnt);
+    syncCnt();
+  }
   dz.onclick = () => fileInput.click();
+  // UI-619：键盘可达上传（Enter/Space 触发选文件）
+  dz.setAttribute('tabindex', '0');
+  dz.setAttribute('role', 'button');
+  dz.onkeydown = (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); fileInput.click(); } };
   // 拖拽上传（UI-3）：教师传题高频路径，drop 与点击同一条 readQuestionImage 链
-  dz.addEventListener('dragover', (ev) => { ev.preventDefault(); dz.style.borderColor = 'rgba(217,164,65,.6)'; dz.style.color = 'var(--text)'; });
-  dz.addEventListener('dragleave', () => { dz.style.borderColor = ''; dz.style.color = ''; });
+  dz.addEventListener('dragover', (ev) => { ev.preventDefault(); dz.style.borderColor = 'rgba(217,164,65,.6)'; dz.style.color = 'var(--text)'; dz.style.background = 'rgba(217,164,65,.06)'; });   // UI-557 拖入底色反馈
+  dz.addEventListener('dragleave', () => { dz.style.borderColor = ''; dz.style.color = ''; dz.style.background = ''; });
   dz.addEventListener('drop', (ev) => {
     ev.preventDefault();
-    dz.style.borderColor = ''; dz.style.color = '';
+    dz.style.borderColor = ''; dz.style.color = ''; dz.style.background = '';
     const f = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
     if (!f) return;
     if (!f.type.startsWith('image/')) { setParseStatus('只支持图片文件（PNG/JPG）', true); return; }
@@ -3635,7 +3799,12 @@ function setAgentImageFromCanvas(cv, note = '') {
   agentImageDataUrl = cv.toDataURL('image/jpeg', 0.85);
   agentCrop = null;
   stopCamera();
-  $('imgPrev').src = agentImageDataUrl;
+  const ip = $('imgPrev');
+  // UI-558：大图解码期给状态底，不白板
+  ip.style.background = 'var(--inset)';
+  ip.style.opacity = '0.55';
+  ip.onload = () => { ip.style.background = ''; ip.style.opacity = ''; };
+  ip.src = agentImageDataUrl;
   $('cropRect').style.display = 'none';
   $('cropHint').style.display = 'none';
   $('dropZone').style.display = 'none';
@@ -3907,7 +4076,7 @@ function tryLocalAgentCommand(raw) {
   else if (/^(新建|新场景)/.test(t)) { $('btnNew').click(); }
   else if (/^(保存|存档)$/.test(t)) { $('btnSave').click(); }
   else if (/^导出(数据|csv)$/i.test(t)) { exportSeriesCSV(); }
-  else if (/^(帮助|快捷键|怎么用)$/.test(t)) { $('helpOverlay').classList.toggle('on'); }
+  else if (/^(帮助|快捷键|怎么用)$/.test(t)) { toggleHelp(); }
   else return false;
   setParseStatus(`本地指令已执行：${t}（未使用模型）`);
   return true;
@@ -4131,10 +4300,13 @@ function buildChangePreview() {
     const cb = document.createElement('input');
     cb.type = 'checkbox';
     cb.checked = !c.skipped;
-    cb.onchange = () => { agentChanges[i].skipped = !cb.checked; };
+    // UI-556：取消勾选的行要看得出来（整行降透明），勾回即恢复
+    const syncDim = () => { row.style.opacity = cb.checked ? '1' : '.45'; };
+    cb.onchange = () => { agentChanges[i].skipped = !cb.checked; syncDim(); };
     const txt = document.createElement('span');
     txt.textContent = c.label + (c.detail ? `（${c.detail}）` : '');
     row.append(cb, txt);
+    syncDim();
     list.appendChild(row);
   });
   // 全选/全不选工具行（条目多时逐个点很磨；默认全选语义不变）
@@ -4196,7 +4368,13 @@ function renderParseResult(warnings = []) {
   gInput.value = plan.gravity;
   gInput.onchange = () => {
     const v = Number(gInput.value);
-    if (!Number.isFinite(v) || v < 0 || v > 50) { gInput.value = plan.gravity; return; }
+    if (!Number.isFinite(v) || v < 0 || v > 50) {
+      // UI-553：重力行同款 .bad 反馈（与 numRow 双标准问题一并收口）
+      gInput.classList.add('bad');
+      setTimeout(() => { if (gInput.isConnected) { gInput.classList.remove('bad'); gInput.value = plan.gravity; } }, 2200);
+      return;
+    }
+    gInput.classList.remove('bad');
     recordCorrection('gravity', plan.gravity, v);
     plan.gravity = v;
   };
@@ -4245,6 +4423,8 @@ function renderParseResult(warnings = []) {
     const conf = document.createElement('span');
     conf.className = 'conf';
     conf.textContent = e.confidence != null ? (e.confidence * 100).toFixed(0) + '%' : '--';
+    // UI-552：单实体置信度复用总体同款色阶，弱项可扫读
+    if (e.confidence != null) conf.style.color = e.confidence < 0.7 ? 'var(--danger)' : (e.confidence < 0.85 ? 'var(--accent)' : 'var(--faint)');
     head.append(nm, ty, conf);
     row.appendChild(head);
     const grid = document.createElement('div');
@@ -4266,9 +4446,19 @@ function renderParseResult(warnings = []) {
       const isInferred = given[key] !== undefined && inferredKeys.includes(key);
       src.className = 'badge' + (given[key] !== undefined ? ' given' : '');
       src.textContent = isInferred ? '推断' : (given[key] !== undefined ? '题给' : '默认');
+      // UI-554：归因徽标给教师解释（题给/默认/推断各是什么口径）
+      src.title = isInferred ? '推断：模型推算值，建议核对（改动后自动转为题给）'
+        : (given[key] !== undefined ? '题给：题目原文明示的数值' : '默认：组件缺省值（题目未给出）');
       inp.onchange = () => {
         const v = Number(inp.value);
-        if (!Number.isFinite(v) || v < range[0] || v > range[1]) { inp.value = val; return; }
+        if (!Number.isFinite(v) || v < range[0] || v > range[1]) {
+          // UI-553：与检查器 numRow 同款反馈，不再静默还原
+          inp.classList.add('bad');
+          inp.title = `允许范围 ${range[0]} ~ ${range[1]}${unit ? ' ' + unit : ''}`;
+          setTimeout(() => { if (inp.isConnected) { inp.classList.remove('bad'); inp.value = val; } }, 2200);
+          return;
+        }
+        inp.classList.remove('bad');
         recordCorrection(`entities[${i}].${key}`, val, v);
         plan.entities[i].given[key] = v;
         if (inferredKeys.includes(key)) inferredKeys.splice(inferredKeys.indexOf(key), 1);   // 用户改过=接管归因
@@ -5089,6 +5279,8 @@ function snapshotSeries(points, entityName, label) {
     points: points.map((p) => ({ t: p.t, pos: [...p.pos], vel: [...(p.vel || [0, 0, 0])], speed: p.speed, rotz: p.rotz })),
     entityName: entityName || '动态体', label: label || '', at: Date.now(),
   };
+  const be = $('btnExportCSV');
+  if (be) { be.disabled = false; be.title = ''; }   // UI-551：有数据才亮
 }
 function exportSeriesCSV() {
   if (!lastSeries || !lastSeries.points.length) {
@@ -5284,6 +5476,7 @@ function renderExplanation() {
   grp.style.display = 'block';
   const badge = $('explainBadge');
   badge.textContent = r.supported ? '确定性计算' : '不支持该题型';
+  badge.classList.toggle('given', !!r.supported);   // UI-550：生成后才高亮，初始素徽标
   const box = $('explainBody');
   box.innerHTML = '';
   if (!r.supported) {
