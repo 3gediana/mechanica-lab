@@ -18,7 +18,7 @@
 | AG-505 | tools/serve.py:55 | 「未给 g 填 null」正确,但题面明示「取 g=10」时模型仍可能输出 null → 补规则「题面明示 g 取值时输出该值，仍禁止把答案数值当 g」 | P2 | S |
 | AG-506 | tools/serve.py:46 (输出纪律) | 「实体不超过 16 个」无超限行为约定，模型静默砍实体 → 补「超限时保留与 observations 直接相关的实体，被舍弃的写进 unknowns」 | P2 | S |
 | AG-507 | tools/serve.py:16-39 (schema 块) | schema 多行缩进+行内中文注释占大量 prompt token,思考型模型响应慢被进一步放大 → 压缩为单行紧凑 schema+要点列表，省 ~30% prompt token | P2 | S |
-| AG-508 | tools/serve.py:134-158 (call_step_messages) | finish_reason=length(思考流+正文超 8192)时静默走提取链失败，用户只见「无法解析」→ 检测 finish_reason,失败文案区分「输出被截断」并自动重试一次 | P1 | M |
+| AG-508 ✅B3 | tools/serve.py:134-158 (call_step_messages) | finish_reason=length(思考流+正文超 8192)时静默走提取链失败，用户只见「无法解析」→ 检测 finish_reason,失败文案区分「输出被截断」并自动重试一次 | P1 | M |
 | AG-509 | tools/serve.py:122-127 (temperature) | 解析与修订共用 temperature=0.2,patch 通道要的是确定性重写 → patch 请求单独降 0~0.1,减少修订引入新偏差 | P2 | S |
 | AG-510 | tools/serve.py:171-176 (call_step_text) | 文字通道复用「看图中的物理题」导语，与纯文字输入语义矛盾 → 文字通道换独立导语「根据以下文字描述的物理题…」,schema/规则不变 | P2 | S |
 | AG-511 ✅B3a | tools/serve.py:60 (attaches 说明) | prompt 只教 spring;客户端已支持 rope(attaches.type='rope' 归一)但模型无从知晓 → 补 rope 语义一句(轻绳不可伸长，length=绳长，缺省按端距×1.03) | P1 | S |
@@ -38,7 +38,7 @@
 | AG-525 | src/engine/parse-schema.js:84 (name) | name 只截 24 字符不查重，同名实体使 removals/findLocalEntities 匹配歧义 → 重名自动加后缀并 uncertain 说明 | P3 | S |
 | AG-526 | src/engine/parse-schema.js:20-26 (KIND_MAP) | 无「防误判」负清单:模型输出 kind='碰撞'/'动量'/'平抛'/'传送带' 原样保留 → 显式映射为 ''(与 prompt 负清单呼应) | P3 | S |
 | AG-527 ✅B3a | src/engine/parse-schema.js:54-81 (given 键) | 模型偶发输出 mu/μ→friction、v0→velocity、m→mass、theta→angleDeg,全被丢进 droppedNotes → 加 GIVEN_KEY_ALIAS 归一(归一后仍走 RANGES 校验) | P1 | S |
-| AG-528 | src/engine/parse-schema.js:28-33,147 | RANGES.mass [0.01,10000] 对 celestial 过窄(真实行星量级被拒),而 PEDIT celestial 允许 1e6 → celestial 质量独立放宽(≤1e30)或按类型选范围 | P1 | S |
+| AG-528 ✅B3 | src/engine/parse-schema.js:28-33,147 | RANGES.mass [0.01,10000] 对 celestial 过窄(真实行星量级被拒),而 PEDIT celestial 允许 1e6 → celestial 质量独立放宽(≤1e30)或按类型选范围 | P1 | S |
 | AG-529 | src/engine/parse-schema.js:170-173 (gravity 缺省) | gravity 缺省恒 9.81,国内教材大量题按 g=10 出题，理论对照系统性偏差 ~2% → gravityDefault 时评审行加「9.81/10」一键切换(记 correction) | P1 | S |
 | AG-530 | src/engine/parse-schema.js:180-194 (光滑注入) | 光滑正则只扫 questionType/goal/environment/assumptions,写在 keyPoints/observations 的「光滑」漏注入 → 扫描范围并入 keyPoints | P2 | S |
 | AG-531 | src/engine/parse-schema.js:100-105 + workbench.js:4540 | stiffness/restLength/damping 缺省散落建场层(k=20/restLength=端距/damping 0.5) → 缺省上收 normalize 按质量给合理默认并标 inferred,评审可见可改 | P2 | M |
@@ -77,7 +77,7 @@
 | AG-564 | src/workbench.js:4622-4628 (scheduleAgentPatch) | patch 触发只看 error>0,不看是否「题给数值冲突」类修不了的问题 → findings 带 given 冲突标记时跳过 patch 直接提示人工(省 2 轮×8-30s API) | P1 | S |
 | AG-565 | src/workbench.js:4643-4657 (patch 验收) | 新计划仅过 normalizeParse 即采纳，无「修订后不劣于上一轮」比较，第 2 轮可能更差 → 保留上一轮 findings 计数，error 数上升时回滚旧 plan(快照在 agentVerifyCtx.plan) | P1 | M |
 | AG-566 | src/engine/agent-verify.js:169-175 (patchBrief) | error 全量拼接，16 实体全嵌时 brief 挤占 patch payload(12000 硬截可能截掉题目文字) → error>8 时截断附「另 N 处同类」，保证题目文字完整 | P2 | S |
-| AG-567 | tools/serve.py:196-204 (call_step_patch) | payload 超 12000 从尾部硬截，先截掉的恰是拼在最后的题目文字 → 按预算分配:plan 压缩(去 null 字段)+issues 截断+题目文字保留完整 | P1 | S |
+| AG-567 ✅B3 | tools/serve.py:196-204 (call_step_patch) | payload 超 12000 从尾部硬截，先截掉的恰是拼在最后的题目文字 → 按预算分配:plan 压缩(去 null 字段)+issues 截断+题目文字保留完整 | P1 | S |
 | AG-568 | src/workbench.js:4767-4778 (motionProbe needT) | needT 按题型固定(斜面 4s),长坡/低速球走不完，理论对照恒「未走完」warn → 按坡长与 g·sinθ 确定性估算到达时间动态 needT(封顶 8s) | P2 | M |
 | AG-569 | src/workbench.js:4837-4839 (verifyTheory unsupported 分支) | explainRun 不支持时只报「暂无解释器」；系统级能量漂移仍可作降级核对 → unsupported 分支加 KE+PE 漂移检查(漂移>5% warn,数据已有 runtime.energyTotals) | P2 | M |
 | AG-570 | src/engine/agent-verify.js:42-60 (坡面语义核对) | 坡面位置核对只覆盖 sphere;box/cylinder 悬空/埋坡漏检 → 按 slopeSpot 公式扩展 box/cylinder 期望位核对(cylinder 计入躺平 yOff=r) | P2 | M |
@@ -103,13 +103,13 @@
 | AG-590 | src/workbench.js:3866 (interimResults=false) | 长句听写无实时反馈，不知是否在收音 → interim 结果显示在状态行/placeholder(不写 textarea,避免光标打架) | P3 | S |
 | AG-591 | src/workbench.js:3865 (rec.lang) | lang 固定 zh-CN,题目含公式/英文(V=2m/s)识别差 → 提供中/英切换按钮或按首 chunk 自动切换 | P3 | S |
 | AG-592 | tools/serve.py:14 (CALL_TIMEOUT) | 三通道共用 90s 超时;patch 通道 payload 大思考久偶发不够，图片 90s 又偏长占线程 → 按通道分级(image 90/text 75/patch 120) | P2 | S |
-| AG-593 | src/workbench.js:3706-3709 (isRetryableParseError) | 重试判断靠错误文案前缀「解析服务」，401「鉴权失败」也命中被盲目重试(白等 8-30s) → 服务端返回结构化 {retryable} 字段;429 退避 3s 再重试 | P1 | M |
+| AG-593 ✅B3 | src/workbench.js:3706-3709 (isRetryableParseError) | 重试判断靠错误文案前缀「解析服务」，401「鉴权失败」也命中被盲目重试(白等 8-30s) → 服务端返回结构化 {retryable} 字段;429 退避 3s 再重试 | P1 | M |
 | AG-594 | tools/serve.py:280 (429 处理) | 上游 429 不读 Retry-After,客户端只能盲等 → 透传秒数进错误文案(「限流，请 N 秒后重试」) | P2 | S |
 | AG-595 | src/workbench.js:3711-3733 (parseQuestion) | 相同图片/文字重复提交无缓存，误点=再等 8-30s+再计费 → 按 body 哈希缓存最近 1 次成功结果，同输入 5 分钟内直接回放并标注「缓存」 | P2 | M |
 | AG-596 | tools/serve.py:207-291 (H) | ThreadingHTTPServer 无并发上限，多标签页并发全打上游加剧阵发限流 → 简单信号量(≤2),排队超 30s 返回友好 429 | P2 | S |
 | AG-597 | src/workbench.js:3484-3488 (无 Key 探针) | /api/status 只在 boot 问一次，服务中途起/停状态不更新 → 状态条常驻(轮询或失败时刷新)，离线标注「仅本地指令/示例可用」 | P2 | S |
 | AG-598 | src/workbench.js:3714-3715 (重复编码) | 上传时 toDataURL(0.85) 一次，解析时对同一画布再编码一次(耗时+画质损失) → 无裁剪时直接复用 agentImageDataUrl | P2 | S |
-| AG-599 | src/workbench.js:4635-4639 (patch 失败路径) | patch 失败一律 agentPatchRounds=MAX 钉死，网络瞬断也永久放弃修订 → 网络类失败(AbortError/连接失败)不计轮数，仅模型输出无效才钉死 | P1 | S |
+| AG-599 ✅B3 | src/workbench.js:4635-4639 (patch 失败路径) | patch 失败一律 agentPatchRounds=MAX 钉死，网络瞬断也永久放弃修订 → 网络类失败(AbortError/连接失败)不计轮数，仅模型输出无效才钉死 | P1 | S |
 | AG-600 | src/workbench.js:3753 (24 字门槛) | ≤24 字硬门槛先于词表匹配，稍长的操控句全落模型 → 本地词表先匹配(命中即执行)，未命中才按长度分流 | P2 | S |
 | AG-601 | tools/serve.py:273 (图片大小) | 体积用 len(b64)*3/4 高估(未解码校验)，边界图误拒/无分辨率指引 → 精确估算解码字节并在拒绝文案给「建议 ≤1400px」(与客户端降采样一致) | P3 | S |
 | AG-602 | src/workbench.js:3492-3509 (setAgentStage) | 各阶段无耗时统计(文字通道临时算了一次) → 阶段时间戳数组，任务行显示「解析 12.3s · 建场 1.2s · 自查 6.8s · 修订 2 轮 21s」 | P2 | M |

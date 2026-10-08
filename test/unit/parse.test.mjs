@@ -348,3 +348,15 @@ test('R5-AG-527：given 键别名（mu→friction / m→mass / theta→angleDeg�
   assert.equal(g.friction, 0.2, 'friction=' + g.friction);
   assert.equal(g.angleDeg, 30, 'angleDeg=' + g.angleDeg);
 });
+
+test('R5-AG-528：celestial 质量域放宽（真实行星量级放行，普通体仍限 1e4）', () => {
+  const plan = { kind: '', gravity: 0, attaches: [], entities: [
+    { type: 'celestial', name: '地球', given: { mass: 5.97e24, radius: 0.5 } },
+    { type: 'sphere', name: '球', given: { mass: 20000 } },
+  ] };
+  const n = normalizeParse(plan);
+  const earth = n.plan.entities.find((e) => e.type === 'celestial');
+  const ball = n.plan.entities.find((e) => e.type === 'sphere');
+  assert.equal(earth.given.mass, 5.97e24, 'celestial mass=' + earth.given.mass);
+  assert.equal(ball.given.mass, undefined, '普通体 2e4 kg 应拒（>1e4）');
+});

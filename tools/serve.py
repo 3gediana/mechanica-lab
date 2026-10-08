@@ -158,6 +158,10 @@ def call_step_messages(messages):
         except json.JSONDecodeError as e:
             err = e
     if err:
+        # AG-508：finish_reason=length（思考流+正文顶满 max_tokens）时提取链必然失败——
+        # 如实上报截断，与「内容不可解析」区分（客户端按 retryable 自动重试）
+        if (out.get("choices") or [{}])[0].get("finish_reason") == "length":
+            raise json.JSONDecodeError("__truncated__ 模型输出被截断（达到 max_tokens）", "", 0)
         raise err
     raise json.JSONDecodeError("empty content and reasoning", "", 0)
 
@@ -194,18 +198,35 @@ PARSE_PATCH_PROMPT = """你是物理沙盒建场计划修订器。一次建场�
 """
 
 
+def _compact_plan(plan):
+    """AG-567：payload 预算第一步——剥 null/空字段与注释元数据，plan 本体显著缩水。"""
+    def clean(o):
+        if isinstance(o, dict):
+            return {k: clean(v) for k, v in o.items()
+                    if v is not None and v != [] and v != {} and k not in ("_note", "_fixture")}
+        if isinstance(o, list):
+            return [clean(x) for x in o]
+        return o
+    return clean(plan)
+
+
 def call_step_patch(text, plan, verify):
-    """AG-V3 修订通道：自查报告回喂模型，输出修订后的完整计划（同一 schema）。"""
+    """AG-V3 修订通道：自查报告回喂模型，输出修订后的完整计划（同一 schema）。
+    AG-567：预算分配制——plan 压缩去空 + issues 逐条截断（≤160 字×12 条），
+    题目文字永远完整保留在末尾（旧版超长从尾部硬截，先截掉的恰是题目文字，
+    模型失去校对基准）。"""
     brief = (verify or {}).get("issues") or []
-    payload = (PARSE_PATCH_PROMPT
-               + json.dumps(plan, ensure_ascii=False)
-               + "\n\n自查问题（错误必须消除，提醒酌情参考）：\n"
-               + ("\n".join(brief) if brief else "（无明细，仅汇总计数）")
-               + "\n\n题目文字（可能为空，以它为准校对计划）：\n"
-               + (text or "（无文字，按当前计划与自查问题修订）"))
-    if len(payload) > 12000:
-        payload = payload[:12000]
-    return call_step_messages([{"role": "user", "content": payload}])
+    issues = ("\n".join("- " + b[:160] for b in brief[:12]) if brief else "（无明细，仅汇总计数）")
+    question = (text or "").strip()
+    tail = ("\n\n题目文字（可能为空，以它为准校对计划）：\n"
+            + (question if question else "（无文字，按当前计划与自查问题修订）"))
+    head = (PARSE_PATCH_PROMPT
+            + json.dumps(_compact_plan(plan), ensure_ascii=False)
+            + "\n\n自查问题（错误必须消除，提醒酌情参考）：\n" + issues)
+    budget = 12000 - len(tail)
+    if len(head) > budget:
+        head = head[:budget]
+    return call_step_messages([{"role": "user", "content": head + tail}])
 
 
 class H(http.server.SimpleHTTPRequestHandler):
@@ -280,14 +301,22 @@ class H(http.server.SimpleHTTPRequestHandler):
                 parse = call_step(data_url)
             self._json(200, {"ok": True, "parse": parse})
         except urllib.error.HTTPError as e:
-            # 不透传上游响应体（可能含 key 相关信息），只给状态码归类
-            msg = {401: "解析服务鉴权失败", 429: "解析服务限流，请稍后重试"}.get(e.code, f"解析服务错误(HTTP {e.code})")
-            self._json(502, {"ok": False, "error": msg})
-        except json.JSONDecodeError:
-            self._json(502, {"ok": False, "error": "解析服务返回了无法解析的内容，请重试"})
+            # 不透传上游响应体（可能含 key 相关信息），只给状态码归类；
+            # retryable=结构化重试信号（AG-593）：401 鉴权失败绝不重试，429 退避后可重试
+            if e.code == 401:
+                self._json(502, {"ok": False, "error": "解析服务鉴权失败", "retryable": False})
+            elif e.code == 429:
+                self._json(502, {"ok": False, "error": "解析服务限流，请稍后重试", "retryable": True, "retryAfterMs": 3000})
+            else:
+                self._json(502, {"ok": False, "error": f"解析服务错误(HTTP {e.code})", "retryable": True})
+        except json.JSONDecodeError as e:
+            if "__truncated__" in str(getattr(e, "msg", "")):
+                self._json(502, {"ok": False, "error": "模型输出被截断（达到 max_tokens 上限），请重试", "retryable": True})   # AG-508
+            else:
+                self._json(502, {"ok": False, "error": "解析服务返回了无法解析的内容，请重试", "retryable": True})
         except Exception as e:
             msg = "解析服务连接失败" + ("（超时）" if isinstance(e, TimeoutError) else "")
-            self._json(502, {"ok": False, "error": msg})
+            self._json(502, {"ok": False, "error": msg, "retryable": True})
 
 
 if __name__ == "__main__":

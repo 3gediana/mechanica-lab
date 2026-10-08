@@ -102,7 +102,9 @@ export function normalizeParse(raw) {
         continue;
       }
       if (!(k in RANGES)) { dropped.push(k); continue; }   // 未知键丢弃不猜，但让用户看见（AG-9）
-      const n = num(v, RANGES[k]);
+      // AG-528：按类型选范围——celestial 真实行星质量 1e24~1e30 kg，通用 mass 上限 1e4 会拒真值
+      const range = (type === 'celestial' && k === 'mass') ? [0.01, 1e30] : RANGES[k];
+      const n = num(v, range);
       if (n === null) {
         const hint = Number.isFinite(parseLoose(v)) ? '（注意单位需为 SI：m/kg/s，cm/g/km·h 请先换算）' : '';
         errors.push(`${e.name || type}.${k} 值无效（${v}），已忽略${hint}`);

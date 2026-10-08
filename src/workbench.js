@@ -3985,6 +3985,23 @@ async function fetchParse(url, body) {
 function isRetryableParseError(errMsg) {
   return typeof errMsg === 'string' && errMsg.startsWith('解析服务');
 }
+// AG-593：优先服务端结构化 {retryable}（401=false 绝不白等，429=true+退避），旧响应回退文案前缀判断
+function parseRetryable(out) {
+  if (!out || out.ok !== false) return { retry: false };
+  if (out.retryable === true) return { retry: true, backoffMs: out.retryAfterMs || 0 };
+  if (out.retryable === false) return { retry: false };
+  return { retry: isRetryableParseError(out.error) };   // 旧版服务端无结构化字段
+}
+async function parseWithRetry(url, body, statusEl) {
+  let out = await (await fetchParse(url, body)).json();
+  const r = parseRetryable(out);
+  if (r.retry) {
+    if (r.backoffMs) await new Promise((res) => setTimeout(res, r.backoffMs));   // 429 退避
+    if (statusEl) setParseStatus(`首次解析失败（${out.error}），自动重试一次…`, false, true);
+    out = await (await fetchParse(url, body)).json();
+  }
+  return out;
+}
 
 async function parseQuestion() {
   if (parseBusy) return;
@@ -3995,11 +4012,7 @@ async function parseQuestion() {
   setAgentStage('parsing', '正在解析题目…');
   setParseStatus(`正在解析${tag}（step-5-preview 视觉模型）…`, false, true);
   try {
-    let out = await (await fetchParse('/api/parse-question', { image: dataUrl })).json();
-    if (!out.ok && isRetryableParseError(out.error)) {
-      setParseStatus(`首次解析失败（${out.error}），自动重试一次…`, false, true);
-      out = await (await fetchParse('/api/parse-question', { image: dataUrl })).json();
-    }
+    const out = await parseWithRetry('/api/parse-question', { image: dataUrl }, true);
     if (!out.ok) { setAgentStage('error', '解析失败'); setParseStatus('解析失败：' + out.error + '（可重试，或用下方示例数据）', true); return; }
     adoptServerParse(out);
   } catch (e) {
@@ -4191,11 +4204,7 @@ async function parseTextQuestion() {
   setParseStatus('正在解析文字要求（step-5-preview）…', false, true);
   const t0 = performance.now();
   try {
-    let out = await (await fetchParse('/api/parse-text', { text })).json();
-    if (!out.ok && isRetryableParseError(out.error)) {
-      setParseStatus(`首次解析失败（${out.error}），自动重试一次…`, false, true);
-      out = await (await fetchParse('/api/parse-text', { text })).json();
-    }
+    const out = await parseWithRetry('/api/parse-text', { text }, true);
     if (!out.ok) { setAgentStage('error', '解析失败'); setParseStatus('解析失败：' + out.error + '（可重试）', true); return; }
     if (adoptServerParse(out)) {
       $('parseSrcBadge').textContent = 'step-5-preview·文字';
@@ -4949,18 +4958,11 @@ async function maybeAgentPatch() {
   setAgentStage('patching', `自查未过，模型修订中（第 ${rnd}/${AGENT_PATCH_MAX} 轮）…`);
   setParseStatus(`自查发现 ${st.summary.error} 处未解决问题，正在请模型修订计划（第 ${rnd}/${AGENT_PATCH_MAX} 轮）…`, false, true);
   try {
-    let out = await (await fetchParse('/api/parse-patch', {
+    const out = await parseWithRetry('/api/parse-patch', {
       text: ($('agentTextReq') && $('agentTextReq').value.trim()) || '',
       plan: agentPlan,
       verify: { summary: st.summary, issues: patchBrief(st.findings) },
-    })).json();
-    if (!out.ok && isRetryableParseError(out.error)) {
-      out = await (await fetchParse('/api/parse-patch', {
-        text: ($('agentTextReq') && $('agentTextReq').value.trim()) || '',
-        plan: agentPlan,
-        verify: { summary: st.summary, issues: patchBrief(st.findings) },
-      })).json();
-    }
+    });
     if (!out.ok || !out.parse) { fail('模型修订失败：' + (out.error || '空响应')); return; }
     const n = normalizeParse(out.parse);
     if (!n.ok) { fail('修订计划无效：' + n.errors.join('; ')); return; }
@@ -4974,8 +4976,15 @@ async function maybeAgentPatch() {
     // 关互斥（AG-72）：上面那句把 parseBusy 置真后没人收尾，重武装 schedule 会被 parseBusy 卡死（实测）
     setParseStatus(`模型修订第 ${rnd} 轮已重建并复验，结果见自查报告`, false);
   } catch (e) {
-    fail((e && e.name === 'AbortError' ? '模型修订超时' : '模型修订请求失败')
-      + (e && e.message ? '：' + String(e.message).slice(0, 120) : ''));
+    // AG-599：网络类失败（超时/连接失败）不计入修订轮数——瞬断不该永久放弃修订；
+    // 只有模型真的回了话（out.ok=false / 计划无效）才钉死轮数
+    const netFail = e && (e.name === 'AbortError' || e.name === 'TypeError');
+    if (netFail) {
+      setAgentStage('built', '自查未过；修订请求网络失败（未计轮数）');
+      setParseStatus('修订请求网络失败（未计入修订轮数）——网络恢复后点「重跑自查」可再试', true);
+    } else {
+      fail('模型修订请求失败' + (e && e.message ? '：' + String(e.message).slice(0, 120) : ''));
+    }
   } finally {
     agentPatchBusy = false;
     // 再武装：本轮重建后的场景若仍有 error，schedule 在这里补触发（V2 finally 时 busy 还挂着
