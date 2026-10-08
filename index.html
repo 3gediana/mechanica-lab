@@ -67,6 +67,8 @@
     stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
 
   /* ============ 按钮体系：.tbtn 工具钮（托盘内） / .btnrow 面板钮 / .primary 唯一实底 ============ */
+  .tbtn { position: relative; }
+  .tbtn::after { content: ""; position: absolute; inset: -4px; }   /* UI-510 热区外扩，外观不动 */
   .tbtn {
     appearance: none; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
     background: transparent; border: none; border-radius: var(--r-ctl);
@@ -89,6 +91,7 @@
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 1px 8px rgba(217, 164, 65, 0.22);
   }
   .tbtn.primary:hover, #simbar button.primary:hover { background: linear-gradient(180deg, #eabb64, #dba643); color: #1a1206; }
+  #simbar button.primary.hot { background: rgba(217, 164, 65, 0.16); color: var(--accent-hi); box-shadow: inset 0 0 0 1px rgba(217, 164, 65, 0.6); }   /* UI-564 暂停态主按钮与运行态可辨（.hot 时去实底改描边） */
   .tbtn.primary:disabled { background: var(--raise); color: var(--faint); box-shadow: none; }
 
   /* ============ 顶栏：品牌 + 场景名 + 工具托盘 + 状态 ============ */
@@ -121,15 +124,16 @@
     background: rgba(255, 255, 255, 0.028); border: 1px solid var(--line); border-radius: 6px;
   }
   .tb-group select, #simbar select {
-    appearance: none; background: var(--inset); border: 1px solid var(--line); border-radius: var(--r-ctl);
-    color: var(--dim); font-family: var(--mono); font-size: 11px; height: 26px; padding: 0 8px; cursor: pointer;
+    appearance: none; background: var(--inset) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 24 24' fill='none' stroke='%239aa3af' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 7px center;
+    border: 1px solid var(--line); border-radius: var(--r-ctl);
+    color: var(--dim); font-family: var(--mono); font-size: 11px; height: 26px; padding: 0 18px 0 8px; cursor: pointer;
     transition: color .12s, border-color .12s;
   }
   .tb-group select:hover, #simbar select:hover { color: var(--text); border-color: var(--line-strong); }
   .tb-group select:disabled, #simbar select:disabled { color: var(--faint); cursor: not-allowed; }
   .tb-group select option, #simbar select option { background: var(--panel-solid); color: var(--text); }
   #topbar .spacer, #simbar .spacer { flex: 1; }
-  #linkClassic { font-size: 10px; color: var(--faint); text-decoration: none; letter-spacing: .1em; flex: none; }
+  #linkClassic { font-size: 10px; color: var(--dim); text-decoration: none; letter-spacing: .1em; flex: none; }
   #linkClassic:hover { color: var(--dim); }
   .chip {
     font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-indent: .12em;
@@ -138,6 +142,7 @@
   .chip.run { color: #1a1206; border-color: transparent; background: var(--accent); font-weight: 600; }
   .chip.pause { color: var(--text); border-color: var(--line-strong); }
   .chip.warn { color: var(--danger); border-color: rgba(208, 128, 109, 0.5); }
+  .chip.grab { box-shadow: inset 0 0 0 1px rgba(217, 164, 65, 0.7); }   /* UI-509 抓取/子弹态与运行态区分 */
   #modeChip.grab { color: #0b0c0e; background: var(--accent); border-color: transparent; }
 
   /* ============ 左右面板：浮动岛（视口四边透气） ============ */
@@ -166,7 +171,7 @@
   .searchbox { position: relative; margin: 8px 10px 4px; flex: none; }
   .searchbox .ic { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); width: 13px; height: 13px; color: var(--faint); }
   .searchbox input {
-    width: 100%; background: var(--inset); border: 1px solid var(--line); border-radius: 6px;
+    width: 100%; background: var(--inset); border: 1px solid var(--line); border-radius: var(--r-ctl);
     color: var(--text); font-size: 11px; padding: 6px 8px 6px 26px; outline: none; font-family: var(--sans);
   }
   .searchbox input::placeholder { color: var(--faint); }
@@ -188,7 +193,7 @@
     display: flex; flex-direction: column; align-items: center; gap: 4px;
     padding: 7px 3px 6px; cursor: pointer; border-radius: 6px; overflow: hidden;
     background: rgba(255, 255, 255, 0.025); border: 1px solid rgba(255, 255, 255, 0.045);
-    transition: background .12s, border-color .12s, transform .15s;
+    transition: background .12s, border-color .12s, transform .12s;
     position: relative;
   }
   .comp-item .thumbbox { position: relative; flex: none; }
@@ -210,7 +215,8 @@
   .comp-item:hover .plus { color: var(--accent-hi); }
   .comp-item .fav:hover { color: var(--accent-hi); }
   /* 连接/绑定语义徽标：压缩略图右下角小条 */
-  .comp-item .need2 { position: absolute; right: 0; bottom: 0; font-size: 8px; color: var(--accent-hi);
+  .comp-item.dim { opacity: .45; }   /* UI-526 前置不可用态 */
+  .comp-item .need2 { position: absolute; right: 0; bottom: 0; font-size: 9px; color: var(--accent-hi);
     background: rgba(13, 15, 19, 0.9); border: 1px solid rgba(217, 164, 65, 0.4); border-right: 0; border-bottom: 0;
     padding: 0 3px; white-space: nowrap; line-height: 1.5; }
   #outline { max-height: 34%; overflow-y: auto; overscroll-behavior: contain; border-top: 1px solid var(--line); padding-right: 6px; }   /* UI-523：滚动条别压住徽标 */
@@ -248,7 +254,7 @@
   }
   .frow input:focus:not(:focus-visible), .frow select:focus:not(:focus-visible) { outline: none; }
   .frow input.bad { border-color: var(--danger); background: rgba(208, 128, 109, 0.08); }
-  .frow input:disabled, .frow select:disabled { opacity: .45; }
+  .frow input:disabled, .frow select:disabled { opacity: 1; color: var(--faint); background: var(--inset); }   /* UI-534 轴色 border 不随禁用淡出 */
   .frow input[type=checkbox], .pgrid input[type=checkbox] { accent-color: var(--accent); }
   .tri { display: flex; gap: 6px; flex: 1; min-width: 0; }
   .tri input { flex: 1 1 0px; width: 0; min-width: 0; }
@@ -335,6 +341,7 @@
   .vrow { display: flex; align-items: baseline; gap: 7px; padding: 3px 0; font-size: 11px; line-height: 1.65; }
   .vrow .mk { flex: none; width: 12px; text-align: center; }
   .vrow .tx { min-width: 0; word-break: break-word; }
+  .vrow .cat { color: var(--faint); font-size: 9px; flex: none; }
   .vrow.v-error { color: var(--danger); }
   .vrow.v-warn { color: var(--accent-hi); }
   .vrow.v-ok { color: var(--faint); }
@@ -394,7 +401,7 @@
   #consbar .efillpe { background: var(--pe); opacity: .75; }
   #consbar .emark { position: absolute; left: 66.67%; top: -2px; width: 1px; height: 9px; background: var(--line-strong); }
   #consbar .erow .k { flex: 0 0 auto; }
-  #consbar .erow .v { flex: 0 0 52px; text-align: right; font-family: var(--mono); font-size: 11px; color: var(--accent-hi); }
+  #consbar .erow .v { flex: 0 0 56px; text-align: right; font-family: var(--mono); font-size: 11px; color: var(--accent-hi); overflow: hidden; text-overflow: ellipsis; }
 
   /* 单位标尺读数 */
   #scaleReadout {
@@ -1066,7 +1073,7 @@
     <button id="btnStep" title="推进一个固定步长 1/120s"><svg class="ic"><use href="#i-player-track-next"/></svg><span>单步</span></button>
     <button id="btnReset" title="回到初始态（R）"><svg class="ic"><use href="#i-refresh"/></svg><span>重置</span></button>
   </div>
-  <select id="selSpeed" title="时间倍率（- / = 键连续换档，Shift+Space 慢动作互切）">
+  <select id="selSpeed" aria-label="时间倍率" title="时间倍率（- / = 键连续换档，Shift+Space 慢动作互切）">
     <option value="0.1">0.1x</option>
     <option value="0.25">0.25x</option>
     <option value="0.5">0.5x</option>
@@ -1102,7 +1109,7 @@
 </footer>
 
 <div id="consbar">
-  <div class="erow"><span class="k">能量保持</span><div class="ebar"><div class="efill" id="ebFill"></div><div class="efillpe" id="ebFillPE"></div><div class="emark"></div></div><span class="v" id="ebPct">--</span></div>
+  <div class="erow"><span class="k">能量保持</span><div class="ebar" title="竖刻度线 = 初始动能/势能构成 66.7% 分界（能量条按初始态归一）"><div class="efill" id="ebFill"></div><div class="efillpe" id="ebFillPE"></div><div class="emark"></div></div><span class="v" id="ebPct">--</span></div>
   <div class="cgrid" id="consMomentum">
     <div class="cell"><span class="k">总动量</span><span class="v" id="cbP">--</span></div>
     <div class="cell"><span class="k">总动能</span><span class="v" id="cbKE">--</span></div>

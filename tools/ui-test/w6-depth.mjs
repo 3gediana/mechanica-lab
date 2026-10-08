@@ -53,7 +53,7 @@ try {
     '预置本身给守恒量条实时读数（漂移/周期/偏心率），解释块需经解析建场');
 
   // ===== G1b. 天体预置真实运行 + 守恒量条数值（E4 领域不变量，Goal 三核心）=====
-  await page.click('#btnClearParse');   // 丢弃误载的 incline plan
+  await page.click('#btnClearParse'); await page.click('#btnClearParse');   // UI-545 两段式：第二次=确认   // 丢弃误载的 incline plan
   await page.waitForTimeout(300);
   await page.click('#btnPlay');
   await page.waitForTimeout(5000);
@@ -170,7 +170,7 @@ try {
   await page.screenshot({ path: 'shots/w6/04-noise-parse.png' });
   if (/待确认/.test(g5.stage)) {
     // 若模型硬猜出结构：清空不污染
-    await page.click('#btnClearParse');
+    await page.click('#btnClearParse'); await page.click('#btnClearParse');   // UI-545 两段式：第二次=确认
     await page.waitForTimeout(300);
     const afterClear = await page.evaluate(() => window.MECH.state().count);
     check('G5b 噪声解析硬猜结果可丢弃(清空后场景不变)', afterClear === 3, `n=${afterClear}`);

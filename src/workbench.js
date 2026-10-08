@@ -28,6 +28,7 @@ const setBtnText = (id, txt) => {
   (lab || b).textContent = txt;
 };
 const veil = $('veil'), veilStatus = $('veilStatus'), errbar = $('errbar');
+veil.addEventListener('transitionend', () => { if (veil.classList.contains('gone')) veil.style.visibility = 'hidden'; });   // UI-586：退场后移出 AT 树
 
 // PL-51 DOM 读数脏检查：textContent 只在文本真变时写（0.15s 节流后仍每帧比较，
 // 但相同值零布局/零绘制提交——运行态读数是常驻 DOM 写入源）
@@ -63,6 +64,7 @@ function fail(msg) {
   veilStatus.classList.add('err');
   showErr(msg);
   veil.classList.remove('gone');
+  veil.style.visibility = '';   // UI-586：重进可再次可见
   const retry = document.getElementById('btnVeilRetry');   // UI-13
   if (retry) retry.style.display = 'inline-block';
 }
@@ -1267,6 +1269,20 @@ function bindUI() {
     selPreset.innerHTML = '';
     selPreset.appendChild(frag);
   }
+  // UI-512：Windows Chrome 关闭态下拉方向键每移一项就触发 change=连续 applyDoc 重建世界。
+  // 关闭态方向键只移高亮不载入（弹层打开时按键被弹层吞掉，不会进到这里）；Enter 开弹层原生可用
+  $('selPreset').onkeydown = (ev) => {
+    if (ev.key !== 'ArrowDown' && ev.key !== 'ArrowUp') return;
+    ev.preventDefault();
+    const sel = ev.target;
+    const opts = sel.options;
+    const dir = ev.key === 'ArrowDown' ? 1 : -1;
+    let i = sel.selectedIndex + dir;
+    while (i >= 0 && i < opts.length && opts[i].disabled) i += dir;
+    if (i < 0 || i >= opts.length) return;
+    sel.selectedIndex = i;
+    if (opts[i].title) sel.title = opts[i].title;
+  };
   $('selPreset').onchange = (e) => {
     const picked = e.target.value;
     e.target.value = '';   // 立刻回占位：同一条预置可反复重选（否则选同项不再触发 change）
@@ -1757,21 +1773,17 @@ function renderCatalog() {
   };
   if (q) {
     // 搜索：跨分类平铺匹配项（带收藏切换）
+    const matches = [];
+    for (const cat of registry.catalog()) {
+      for (const c of cat.items) if (catalogItemMatches(c, q)) matches.push(c);
+    }
     const h = document.createElement('div');
     h.className = 'cat-head';
-    h.textContent = '搜索结果';
+    h.textContent = `搜索结果（${matches.length}）`;   // UI-515：命中计数
     box.appendChild(h);
     const g = grid();
-    let hit = 0;
-    for (const cat of registry.catalog()) {
-      for (const c of cat.items) {
-        if (catalogItemMatches(c, q)) {
-          addCatalogRow(g, c, favs.includes(c.id));
-          hit++;
-        }
-      }
-    }
-    if (!hit) {
+    for (const c of matches) addCatalogRow(g, c, favs.includes(c.id));
+    if (!matches.length) {
       const none = document.createElement('div');
       none.className = 'ol-empty';
       none.textContent = '无匹配组件';
@@ -1854,11 +1866,15 @@ function renderCatalogEnvMats(box, grid) {
     sw.dataset.mat = mo.key;
     // 真材质球预览优先（renderMaterialSwatches 异步产物），色块仅作生成期/失败期降级
     const pv = swatchPreviews && swatchPreviews[mo.key];
-    sw.style.cssText = 'display:block;height:54px;width:54px;border-radius:3px;border:1px solid var(--line);background:' + (pv
-      ? '#0c0d0f url(' + pv + ') center/cover no-repeat'
-      : (M && M[mo.key] && M[mo.key].color ? '#' + M[mo.key].color.getHexString() : 'rgba(255,255,255,.06)'));
+    sw.style.cssText = 'display:block;height:54px;width:54px;border-radius:3px;' + (pv
+      ? 'border:1px solid var(--line);background:#0c0d0f url(' + pv + ') center/cover no-repeat'
+      : 'border:1px dashed var(--line-strong);background:' + (M && M[mo.key] && M[mo.key].color ? '#' + M[mo.key].color.getHexString() : 'rgba(255,255,255,.06)'));   // UI-614 降级虚线
+    if (!pv) sw.title = '真实材质预览生成中…';   // UI-614
     card.querySelector('.nm').textContent = mo.label;
-    card.title = `把选中实体的材质换成${mo.label}（未选中实体时无效）`;
+    // UI-526：没选中实体先给前置状态（dim+title），不再点了才 toast
+    const sel = !!window.MECH.selectionState().main;
+    card.classList.toggle('dim', !sel);
+    card.title = sel ? `把选中实体的材质换成${mo.label}` : '先选中一个实体（点场景或大纲），再来点材质卡';
     card.onclick = () => {
       const eid = window.MECH.selectionState().main;
       if (!eid) { toast('先选中一个实体，再点材质卡'); return; }
@@ -2104,7 +2120,7 @@ function renderInspector() {
   // 运行态横幅（一次说清，替代散在各输入上的 disabled 猜谜）
   if (dis) {
     const banner = document.createElement('div');
-    banner.style.cssText = 'margin:0 0 8px;padding:6px 10px;background:rgba(217,164,65,.10);border:1px solid rgba(217,164,65,.35);border-radius:2px;font-size:11px;color:var(--accent)';
+    banner.style.cssText = 'margin:0 0 8px;padding:6px 10px;background:rgba(217,164,65,.10);border:1px solid rgba(217,164,65,.35);border-radius:var(--r-ctl);font-size:11px;color:var(--accent-hi)';   // UI-531 圆角归 token、字色提对比
     banner.textContent = '运行态只读——「重置」回编辑态后可修改参数';
     box.appendChild(banner);
   }
@@ -2256,11 +2272,13 @@ function renderInspector() {
   // 观察点：一键飞回保存的视角（相机和观察点分类）
   if (e.type === 'viewpoint') {
     const grpV = grp('观察点');
+    const brow = document.createElement('div');   // UI-537：套全站 btnrow 风格，不再裸 button
+    brow.className = 'btnrow';
     const fly = document.createElement('button');
     fly.textContent = '飞到观察点';
-    fly.style.cssText = 'width:100%;padding:6px;cursor:pointer';
     fly.onclick = () => viewport.flyToPose(e.transform.pos, e.params.target || [0, 0.5, 0]);
-    grpV.appendChild(fly);
+    brow.appendChild(fly);
+    grpV.appendChild(brow);
     box.appendChild(grpV);
   }
 
@@ -2311,7 +2329,7 @@ function renderInspector() {
       row.className = 'frow';
       const tgt = getEntity(doc, j.target);
       const jlabel = j.type === 'revolute' ? '转轴' : (j.type === 'prismatic' ? '滑槽' : j.type);
-      row.innerHTML = `<label>${jlabel}</label><span style="flex:1;font-size:11px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span><button class="danger" style="flex:0 0 auto;appearance:none;background:none;border:1px solid var(--line);border-radius:2px;color:var(--dim);font-size:10px;padding:2px 8px;cursor:pointer">删除</button>`;
+      row.innerHTML = `<label>${jlabel}</label><span style="flex:1;font-size:11px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span><button class="danger" style="flex:0 0 auto;appearance:none;background:none;border:1px solid var(--line);border-radius:var(--r-ctl);color:var(--dim);font-size:10px;padding:2px 8px;cursor:pointer">删除</button>`;
       row.children[1].textContent = '→ ' + (tgt ? tgt.name : j.target);
       row.children[1].title = `axis=[${(j.axis || []).map((x) => +x.toFixed(2))}]`;
       row.querySelector('button').onclick = () => {
@@ -2984,13 +3002,20 @@ function updateCurveLegend() {
   const el = $('curveLegend');
   if (!el) return;
   el.innerHTML = '';
+  // UI-578：每项前 8px 色块——色弱/投影下不只靠字色辨线
+  const item = (txt, c) => {
+    const sp = document.createElement('span');
+    sp.style.cssText = 'display:inline-flex;align-items:center;gap:4px;color:' + c;
+    const dot = document.createElement('span');
+    dot.style.cssText = 'width:8px;height:8px;border-radius:2px;background:' + c + ';flex:none';
+    sp.appendChild(dot);
+    sp.appendChild(document.createTextNode(txt));
+    return sp;
+  };
   if (curveMode === 'energy') {
     // 能量模式图例（量纲 J；重力势能基准 y=0，天体引力势能口径属守恒量条）
     for (const [txt, c] of [['动能KE', '#7dc87d'], ['势能PE', '#5b8dd9'], ['总能量E', '#d9a441']]) {
-      const sp = document.createElement('span');
-      sp.style.color = c;
-      sp.textContent = txt;
-      el.appendChild(sp);
+      el.appendChild(item(txt, c));
     }
     return;
   }
@@ -2999,19 +3024,10 @@ function updateCurveLegend() {
     const c = CURVE_PALETTE[i % CURVE_PALETTE.length];
     // 括号注记（如"入射球 (e=1)"）在图例里是复读噪声：只留主名，速率/高度关键词保留（p22 断言依赖）
     const base = sr.name.replace(/\s*\([^)]*\)\s*$/, '').trim() || sr.name;
-    const sp = document.createElement('span');
-    sp.style.color = c;
-    sp.textContent = `${base}速率`;
-    const hp = document.createElement('span');
-    hp.style.color = c;
-    hp.textContent = `${base}高度`;
-    el.append(sp, hp);
+    el.append(item(`${base}速率`, c), item(`${base}高度`, c));
     i++;
   }
-  const ke = document.createElement('span');
-  ke.style.color = '#7dc87d';
-  ke.textContent = '系统KE';
-  el.appendChild(ke);
+  el.appendChild(item('系统KE', '#7dc87d'));
 }
 
 // ============ 单位标尺动态刻度（档位 0.1/0.5/1/5 m 随视野自适应，网格视觉密度联动） ============
@@ -3315,14 +3331,17 @@ let _lastFrameT = performance.now();   // 手动 delta（THREE.Clock r186 起弃
 function tick() {
   requestAnimationFrame(tick);
   const _now = performance.now();
-  const rawDt = Math.min((_now - _lastFrameT) / 1000, 0.05);
+  const rawDtRaw = (_now - _lastFrameT) / 1000;
+  const rawDt = Math.min(rawDtRaw, 0.05);   // sim 步进钳 50ms：maxStepsPerFrame 饱和点不漂（慢放比率标定口径）
   _lastFrameT = _now;
   if (!appReady) return;
   if (rawDt > 0) _fps += (Math.min(1 / rawDt, 240) - _fps) * 0.06;
   const _t0 = performance.now();
   if (replaying) {
     if (!scrubbing) {
-      _replayAcc += rawDt * 60;                    // 墙钟配速：任意刷新率下都按 60 帧/s 推进
+      // 墙钟配速用宽钳 100ms：SwiftShader/弱GPU 低至 10fps 仍守 60 帧/s 回放（FEEL-99）；
+      // 只影响回放推进（帧数据应用无饱和问题），sim 步进仍走上面 50ms 钳
+      _replayAcc += Math.min(rawDtRaw, 0.1) * 60;
       const adv = Math.floor(_replayAcc);
       _replayAcc -= adv;
       if (adv > 0) replayIdx += adv;
@@ -3705,7 +3724,19 @@ function bindAgentPanel() {
   });
   $('btnFixtureParse').onclick = () => loadFixtureParse();
   $('btnApplyParse').onclick = () => applyAgentPlan({ vivid: true });
-  $('btnClearParse').onclick = () => { resetAgentPanel(); };
+  $('btnClearParse').onclick = () => {
+    // UI-545：清空丢解析结果不可逆——两段式确认（2.6s 复原），与库删除钮同款交互
+    const b = $('btnClearParse');
+    if (b.dataset.armed) {
+      delete b.dataset.armed;
+      b.textContent = '清空';
+      resetAgentPanel();
+    } else {
+      b.dataset.armed = '1';
+      b.textContent = '确认清空?';
+      setTimeout(() => { if (b.isConnected && b.dataset.armed) { delete b.dataset.armed; b.textContent = '清空'; } }, 2600);
+    }
+  };
   $('btnRunExplain').onclick = () => runAndExplain();
   $('btnExportCSV').onclick = exportSeriesCSV;
   $('btnVeilRetry').onclick = () => location.reload();
@@ -5151,9 +5182,10 @@ function renderAgentVerify() {
     const el = document.createElement('div');
     el.className = 'vrow v-' + f.sev;
     const mark = f.sev === 'error' ? '✗' : f.sev === 'warn' ? '⚠' : '✓';
-    el.innerHTML = `<span class="mk"></span><span class="tx"></span>`;
+    el.innerHTML = `<span class="mk"></span><span class="cat"></span><span class="tx"></span>`;
     el.querySelector('.mk').textContent = mark;
-    el.querySelector('.tx').textContent = `[${f.cat}] ${f.msg}`;
+    el.querySelector('.cat').textContent = `[${f.cat}] `;   // UI-548：分类拆弱化色，正文可扫读
+    el.querySelector('.tx').textContent = f.msg;
     return el;
   };
   for (const f of notable) body.appendChild(row(f));

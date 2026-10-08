@@ -89,7 +89,7 @@ try {
   // ===== D3. 解析拒绝路径：清空解析（用户拒绝整个计划）=====
   // 注：应用启动即载入 incline 预置（3 实体），「清空解析」的语义=丢弃解析计划且不污染已有场景文档
   const docBeforeClear = await page.evaluate(() => JSON.stringify(window.MECH.doc()));
-  await page.click('#btnClearParse');
+  await page.click('#btnClearParse'); await page.click('#btnClearParse');   // UI-545 两段式：第二次=确认
   await page.waitForTimeout(500);
   const st4 = await page.evaluate(() => ({
     total: window.MECH.state().count,
