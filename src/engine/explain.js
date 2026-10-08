@@ -17,6 +17,12 @@ export function explainRun(plan, doc, series, reports = [], astro = null, rotati
   // 传送带（RUN-2）：必须先于抛体分派——带上单球+地面恰好满足抛体的「离地单球」条件，
   // 会被拿去算「射程」（球明明贴带走）
   if (doc.entities.some((e) => e.type === 'conveyor') && series.length > 10) return explainConveyor(plan, doc, series);
+  // 单摆（MOD-501）：轻绳悬单球——绳连接+恰好一个动态球、无斜面/弹簧/引力体（铰链复摆已在上面的
+  // hasHinge 分支接管）。必须在动量分支前：绳+球会落进「两球对撞」兜底被误读
+  const hasRopeLink = doc.entities.some((e) => e.type === 'rope' && Array.isArray(e.attach) && e.attach.length === 2);
+  if (hasRopeLink && spheres.length === 1 && dynBodies.length === 1 && !hasRamp && !hasSpring && !hasGrav) {
+    return explainPendulum(plan, doc, series);
+  }
   // 抛体：单球带初速 + 地面（无斜面/弹簧/引力）且无其它动态体（AB-11：子弹打木块等
   // 「球+块」场景曾误入抛体分支拿 15m/s 算「射程」——条件收窄到真单球场景）
   const projBalls = doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
@@ -192,6 +198,68 @@ function explainInelastic(plan, doc, reports, bodies) {
     observation: plan.observations[0] || '碰后共速与动能损失',
     theoretical: { vCommon, keBefore, keAfter: keAfterTheory, lossPct, formula: 'v′ = (m1u1+m2u2)/(m1+m2)' },
     measured: { v1: w1, v2: w2 },
+    errPct, pass,
+    summary,
+  };
+}
+
+// ---------- 单摆（MOD-501）：轻绳悬球小角摆动 T = 2π√(L/g)，与摆球质量无关 ----------
+function explainPendulum(plan, doc, series) {
+  const ball = doc.entities.find((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
+  const rope = doc.entities.find((e) => e.type === 'rope' && Array.isArray(e.attach) && e.attach.length === 2);
+  if (!ball || !rope || series.length < 10) {
+    return { supported: false, reason: '单摆解释需要 悬点+绳+摆球 且运行轨迹足够长', summary: telemetrySummary(series) };
+  }
+  const anchor = doc.entities.find((e) => e.id === rope.attach.find((id) => id !== ball.id));
+  if (!anchor) return { supported: false, reason: '找不到悬点实体', summary: telemetrySummary(series) };
+  const g = Math.abs(doc.gravity) || 9.81;
+  const A = anchor.transform.pos, B = ball.transform.pos;
+  // 摆长 = 悬点到球心的初始距离（绷直绳即摆长；fixture 按绳长给位，自然场景同口径）
+  const L = Math.hypot(B[0] - A[0], B[1] - A[1], B[2] - A[2]);
+  const Ttheory = 2 * Math.PI * Math.sqrt(L / g);
+  // 摆动主轴 = 水平两轴中方差大者（摆平面可能是 x-y 或 z-y），周期用横摆方向峰间隔
+  const varOf = (d) => {
+    const a = series.map((p) => p.pos[d]);
+    const mean = a.reduce((x, y) => x + y, 0) / a.length;
+    return a.reduce((v, x) => v + (x - mean) * (x - mean), 0);
+  };
+  const axis = varOf(0) >= varOf(2) ? 0 : 2;
+  const xs = series.map((p) => p.pos[axis]);
+  const rawPeaks = [];
+  for (let i = 1; i < xs.length - 1; i++) {
+    if (xs[i] > xs[i - 1] && xs[i] >= xs[i + 1] && xs[i] - xs[i - 1] > 1e-6) rawPeaks.push(i);
+  }
+  const peaks = [];   // 平台坍缩（同 explainSpring）：60Hz 采样 apex 邻域多帧同为极大
+  for (const i of rawPeaks) {
+    const last = peaks[peaks.length - 1];
+    if (last != null && i - last <= 10) { if (xs[i] > xs[last]) peaks[peaks.length - 1] = i; }
+    else peaks.push(i);
+  }
+  let Tmeasured = null;
+  if (peaks.length >= 2) {
+    const span = series[series.length - 1].t - series[0].t;
+    const dt = span / (series.length - 1);
+    const gaps = peaks.slice(1).map((p, i) => p - peaks[i]).sort((a, b) => a - b);
+    Tmeasured = gaps[Math.floor(gaps.length / 2)] * dt;   // 中位间隔抗个别漏峰
+  }
+  const errPct = Tmeasured != null ? Math.abs(Tmeasured - Ttheory) / Ttheory * 100 : null;
+  const pass = errPct != null && errPct < 8;
+  const theta0 = Math.atan2(Math.abs(B[axis] - A[axis]), Math.max(A[1] - B[1], 1e-6)) * 180 / Math.PI;
+  const summary = [
+    `单摆（轻绳 L=${L.toFixed(3)} m，g=${g} m/s²，摆球 ${ball.physics.mass} kg）：小角周期理论 T = 2π√(L/g) = ${Ttheory.toFixed(3)} s。`,
+    `初始摆角约 ${theta0.toFixed(1)}°${theta0 < 20 ? '（<20°，小角近似 sinθ≈θ 成立）' : '（偏大：实际周期会略长于小角公式）'}。`,
+    Tmeasured != null
+      ? `实测周期 ${Tmeasured.toFixed(3)} s（横摆峰值间隔法，${peaks.length} 个峰），偏差 ${errPct.toFixed(2)}%。`
+      : '运行时长不足两个完整摆动，周期未测出——加长探针窗口后重跑自查。',
+    pass ? `实测与 T=2π√(L/g) 一致：周期只与摆长/重力有关，与摆球质量（${ball.physics.mass} kg）无关。` : '周期偏差偏大，建议核对绳长与释放方式（应由静止释放、无初速）。',
+  ].join('');
+  return {
+    supported: true,
+    kind: 'pendulum',
+    simT: series[series.length - 1].t,
+    observation: plan.observations[0] || '单摆周期',
+    theoretical: { period: Ttheory, formula: 'T = 2π√(L/g)', L, g },
+    measured: { period: Tmeasured, peaks: peaks.length, angle0deg: theta0 },
     errPct, pass,
     summary,
   };

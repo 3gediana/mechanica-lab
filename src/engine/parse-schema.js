@@ -516,7 +516,8 @@ export function planToOverrides(plan) {
         o.physics.friction = 0;
         // 自由落体例外（波2 补课）：无初速且题给高位置（y > r+0.1）=「从高处由静止释放」语义，
         // 必须保留重力——悬浮理想化只属于带初速的对撞场景（freefall fixture 此前一直悬浮，
-        // p41 靠 vacuous verify 绿，教学上是坏的）
+        // p41 靠 vacuous verify 绿，教学上是坏的）。带初速+显式地面的抛体场景应走单实体
+        // 自动抛体布局（不要显式给 ground），否则会被此处悬浮化劫持（月面斜抛实测 +56%）
         const dropFromHigh = !e.given.velocity && e.given.position != null && e.given.position[1] > r + 0.1;
         if (!dropFromHigh) o.physics.gravityScale = 0;
       } else {
@@ -590,7 +591,8 @@ export function planToOverrides(plan) {
       o.params = { sx: e.given.length ?? 10, sy: 0.1, sz: e.given.width ?? 8 };   // AG-20
       // 显式地面也要有 physics（AG-V3 修：模型修订计划常补 ground，缺 body 下游读 physics.body 炸）
       o.physics = { body: 'fixed', friction: e.given.friction ?? 0, restitution: e.given.restitution ?? 0.05 };
-      o.transform = { pos: [0, -0.05, 0], rot: [0, 0, 0] };
+      // 题给 position 尊重（月面斜抛等长地面需偏移覆盖落点；缺省居中原点）
+      o.transform = { pos: e.given.position ?? [0, -0.05, 0], rot: [0, 0, 0] };
     }
     out.push(o);
   }

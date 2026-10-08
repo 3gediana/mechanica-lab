@@ -1,0 +1,33 @@
+{
+  "_fixture": true,
+  "_note": "本地示例解析数据（单摆小角摆动，MOD-501），用于验证 绳悬单摆 链路；不是真实模型输出",
+  "kind": "pendulum",
+  "questionType": "单摆周期测量（轻绳小角摆动）",
+  "goal": "观察单摆小角往复摆动，测量周期并与 T=2π√(L/g) 对照",
+  "gravity": 9.81,
+  "entities": [
+    {
+      "type": "box",
+      "name": "悬点支架",
+      "given": { "position": [0, 2.6, 0], "fixed": 1, "length": 0.25, "height": 0.25, "width": 0.25 },
+      "confidence": 0.95
+    },
+    {
+      "type": "sphere",
+      "name": "摆球",
+      "given": { "mass": 0.5, "radius": 0.12, "position": [0.259, 1.634, 0], "friction": 0 },
+      "confidence": 0.92
+    }
+  ],
+  "attaches": [
+    { "type": "rope", "from": 0, "to": 1, "length": 1.0 }
+  ],
+  "observations": ["摆球往复摆动的周期"],
+  "unknowns": ["摆动周期 T"],
+  "assumptions": [
+    "轻绳不可伸长且质量不计",
+    "摆角约 15°，小角近似 sinθ≈θ 成立",
+    "摆球由静止释放（无初速）"
+  ],
+  "confidence": 0.92
+}

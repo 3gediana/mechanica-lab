@@ -1,0 +1,33 @@
+{
+  "_fixture": true,
+  "_note": "本地示例解析数据（竖直弹簧振子，MOD-506），验证 T=2π√(m/k) 与重力无关；不是真实模型输出",
+  "kind": "spring-vertical",
+  "questionType": "竖直弹簧振子周期",
+  "goal": "竖直悬挂的弹簧振子自由振动，验证周期 T=2π√(m/k) 与重力取值无关",
+  "gravity": 9.81,
+  "entities": [
+    {
+      "type": "box",
+      "name": "悬点支架",
+      "given": { "position": [0, 3.4, 0], "fixed": 1, "length": 0.25, "height": 0.25, "width": 0.25 },
+      "confidence": 0.95
+    },
+    {
+      "type": "sphere",
+      "name": "振子",
+      "given": { "mass": 1.0, "radius": 0.15, "position": [0, 2.4, 0] },
+      "confidence": 0.92
+    }
+  ],
+  "attaches": [
+    { "type": "spring", "from": 0, "to": 1, "stiffness": 25, "restLength": 1.0, "damping": 0 }
+  ],
+  "observations": ["振子的振动周期"],
+  "unknowns": ["平衡位置相对自然长度的伸长量 mg/k"],
+  "assumptions": [
+    "轻弹簧竖直悬挂，劲度系数 k=25 N/m",
+    "无阻尼（振动能量守恒，振幅不衰减）",
+    "振子由静止释放（初始位移=新平衡位置上方 mg/k 处）"
+  ],
+  "confidence": 0.93
+}

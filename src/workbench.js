@@ -5081,10 +5081,24 @@ async function motionProbe() {
   const isAtwood = doc.entities.some((e) => e.type === 'pulley');
   const isHinge = doc.entities.some((e) => e.joints && e.joints.some((j) => j.type === 'revolute'));
   const hasGround = doc.entities.some((e) => e.type === 'ground');
-  const isProjectile = !hasRamp && !isSpring && !isAtwood && !isHinge && !isAstro && hasGround
+  // 单摆（MOD-501）：绳连接+恰好一个动态球（须在 momentum 兜底前判）
+  const isPendulum = !hasRamp && !isSpring && !isAtwood && !isHinge && !isAstro
+    && doc.entities.some((e) => e.type === 'rope')
     && doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic').length === 1;
-  const isMomentum = !hasRamp && !isAstro && !isRotation && !isSpring && !isAtwood && !isHinge && !isProjectile;
-  const needT = isProjectile ? 2.5 : (isHinge ? 5.5 : (isAtwood ? 1.6 : (isSpring ? 6.5 : (isAstro ? 11 : (isRotation ? 3.5 : (isMomentum ? 2.0 : 4))))));
+  const isProjectile = !hasRamp && !isSpring && !isAtwood && !isHinge && !isAstro && !isPendulum && hasGround
+    && doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic').length === 1;
+  const isMomentum = !hasRamp && !isAstro && !isRotation && !isSpring && !isAtwood && !isHinge && !isProjectile && !isPendulum;
+  let needT = isProjectile ? 2.5 : (isHinge ? 5.5 : (isAtwood ? 1.6 : (isSpring ? 6.5 : (isAstro ? 11 : (isRotation ? 3.5 : (isMomentum ? 2.0 : (isPendulum ? 5 : 4)))))));
+  if (isProjectile) {
+    // AG-568：抛体固定 2.5s 窗口在低重力/长滞空误判（月面斜抛滞空 6.25s → 理论对照假阳 44.4%）。
+    // 窗口按真实滞空动态给：t=(vy0+√(vy0²+2g·h0))/g 再留 35% 采样余量，上限 14s
+    const g = Math.max(0.3, Math.abs(doc.gravity) || 9.81);
+    const pb = doc.entities.find((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
+    const y0 = pb ? Math.max(0.2, pb.transform.pos[1]) : 1;
+    const vy0 = pb && pb.physics.linvel ? pb.physics.linvel[1] : 0;
+    const tFly = (vy0 + Math.sqrt(vy0 * vy0 + 2 * g * y0)) / g;
+    needT = Math.min(14, Math.max(2.5, tFly * 1.35 + 0.4));
+  }
   const ball = doc.entities.find((e) => (e.type === 'sphere' || e.type === 'celestial') && e.physics.body === 'dynamic')
     || doc.entities.find((e) => e.physics.body === 'dynamic');
   if (isRotation) rotationWithDrift();
@@ -5248,7 +5262,11 @@ async function runAndExplain() {
   const isAtwood = doc.entities.some((e) => e.type === 'pulley');
   const isHinge = doc.entities.some((e) => e.joints && e.joints.some((j) => j.type === 'revolute'));
   const hasGround = doc.entities.some((e) => e.type === 'ground');
-  const isProjectile = !hasRamp && !isSpring && !isAtwood && !isHinge && !isAstro
+  // 单摆（MOD-501）：绳连接+恰好一个动态球（与 motionProbe 同口径）
+  const isPendulum = !hasRamp && !isSpring && !isAtwood && !isHinge && !isAstro
+    && doc.entities.some((e) => e.type === 'rope')
+    && doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic').length === 1;
+  const isProjectile = !hasRamp && !isSpring && !isAtwood && !isHinge && !isAstro && !isPendulum
     && hasGround && doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic').length === 1;
   if (mode !== 'edit') resetSim();
 
@@ -5257,8 +5275,17 @@ async function runAndExplain() {
   const btn = $('btnRunExplain');
   btn.disabled = true;
   setBtnText('btnRunExplain', '运行并记录中…');
-  const isMomentum = !hasRamp && !isAstro && !isRotation && !isSpring && !isAtwood && !isHinge && !isProjectile;
-  const needT = isProjectile ? 2.5 : (isHinge ? 5.5 : (isAtwood ? 1.6 : (isSpring ? 6.5 : (isAstro ? 11 : (isRotation ? 3.5 : 4)))));
+  const isMomentum = !hasRamp && !isAstro && !isRotation && !isSpring && !isAtwood && !isHinge && !isProjectile && !isPendulum;
+  let needT = isProjectile ? 2.5 : (isHinge ? 5.5 : (isAtwood ? 1.6 : (isSpring ? 6.5 : (isAstro ? 11 : (isRotation ? 3.5 : (isMomentum ? 2.0 : (isPendulum ? 5 : 4)))))));
+  if (isProjectile) {
+    // AG-568：抛体窗口按真实滞空动态给（同 motionProbe），月面/低重力不再假阳
+    const g = Math.max(0.3, Math.abs(doc.gravity) || 9.81);
+    const pb = doc.entities.find((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
+    const y0 = pb ? Math.max(0.2, pb.transform.pos[1]) : 1;
+    const vy0 = pb && pb.physics.linvel ? pb.physics.linvel[1] : 0;
+    const tFly = (vy0 + Math.sqrt(vy0 * vy0 + 2 * g * y0)) / g;
+    needT = Math.min(14, Math.max(2.5, tFly * 1.35 + 0.4));
+  }
   const u0 = ball.physics.linvel[0];
   // 运行前预采守恒基准（初始态），避免首采落在演化中
   if (isRotation) rotationWithDrift();
@@ -5433,6 +5460,30 @@ function renderAtwoodExplain(r, box) {
   box.appendChild(p);
 }
 
+// 单摆解释渲染（MOD-501）：与弹簧同款网格——摆长/周期理论/实测/偏差/摆角/判定
+function renderPendulumExplain(r, box) {
+  const grid = document.createElement('div');
+  grid.className = 'ro-grid';
+  const rows = [
+    ['摆长 L', `${r.theoretical.L.toFixed(3)} m`],
+    ['重力 g', `${r.theoretical.g} m/s²`],
+    ['周期（理论 2π√(L/g)）', `${r.theoretical.period.toFixed(3)} s`],
+    ['周期（实测·峰值间隔法）', r.measured.period != null ? `${r.measured.period.toFixed(3)} s` : '采样中'],
+    ['周期偏差', r.errPct != null ? `${r.errPct.toFixed(2)}%` : '--'],
+    ['初始摆角', `${r.measured.angle0deg.toFixed(1)}°`],
+    ['判定', r.pass ? '通过（T=2π√(L/g) 验证，与质量无关）' : '未通过'],
+  ];
+  grid.innerHTML = rows.map(([k], i) =>
+    `<div class="cell" style="grid-column:1/-1"><span class="k">${k}</span><span class="v ${i === 6 ? 'acc' : 'plain'}"></span></div>`
+  ).join('');
+  [...grid.querySelectorAll('.v')].forEach((el, i) => { el.textContent = rows[i][1]; });
+  box.appendChild(grid);
+  const p = document.createElement('div');
+  p.className = 'hint';
+  p.textContent = r.summary;
+  box.appendChild(p);
+}
+
 function renderSpringExplain(r, box) {
   const grid = document.createElement('div');
   grid.className = 'ro-grid';
@@ -5550,6 +5601,7 @@ function renderMomentum2DExplain(r, box) {
   if (r.kind === 'astro') { renderAstroExplain(r, box); return; }
   if (r.kind === 'rotation') { renderRotationExplain(r, box); return; }
   if (r.kind === 'spring') { renderSpringExplain(r, box); return; }
+  if (r.kind === 'pendulum') { renderPendulumExplain(r, box); return; }
   if (r.kind === 'atwood') { renderAtwoodExplain(r, box); return; }
   if (r.kind === 'hinge') { renderHingeExplain(r, box); return; }
   if (r.kind === 'projectile') { renderProjectileExplain(r, box); return; }

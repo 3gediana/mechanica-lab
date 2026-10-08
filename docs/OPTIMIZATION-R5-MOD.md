@@ -16,12 +16,12 @@
 
 | 编号 | 模型/文件 | 内容(一句话题目+布局+explain 要点) | P | S/M/L |
 |---|---|---|---|---|
-| MOD-501 | 单摆(绳系球) parse-pendulum.json | L=1.0m 轻绳系 0.5kg 球拉开小角由静止释放求周期；布局=固定锚box+球+attaches rope(通用路径可承)；explain 新增 explainPendulum:小角 T=2π√(L/g)≈1.99s,峰间隔测周期，窗口8% | 高 | M |
+| MOD-501 ✅B2m | 单摆(绳系球) parse-pendulum.json | L=1.0m 轻绳系 0.5kg 球拉开小角由静止释放求周期；布局=固定锚box+球+attaches rope(通用路径可承)；explain 新增 explainPendulum:小角 T=2π√(L/g)≈1.99s,峰间隔测周期，窗口8% | 高 | M |
 | MOD-502 | 单摆摆长对照 parse-pendulum-compare.json | 双摆 L=1.0/0.5m 同角齐释，验证 T∝√L(T 比 1:√2≈0.707);布局=两锚+两球+双 rope;explain 扩展 501 分支做双摆周期比 | 高 | M |
 | MOD-503 | 圆锥摆 parse-conical.json | 绳 1m 球给切向初速做水平匀速圆周，求周期与锥角关系；布局=锚+球+rope(球题给切向 v);explain 新分支：稳态锥角 θ 下 T=2π√(L·cosθ/g)、F向=mg·tanθ=m v²/(L sinθ) | 高 | M |
 | MOD-504 | 竖直圆周绳系球(临界速度) parse-vert-circle.json | 绳 0.8m 球在最低点以 v0=√(5gL)≈6.32 入轨，判断能否过顶；布局=锚+球+rope+初速；explain 新分支：顶部临界 v_top=√(gL)、机械能 ½v0²=½v_top²+2gL、张力差 T底−T顶=6mg | 高 | M |
 | MOD-505 | 水平圆周(绳系球测向心力) parse-horiz-circle.json | 光滑面绳系球 v=2m/s r=1m 匀速圆周，求周期与向心力；布局=固定锚+球+rope+切向初速；explain 新分支：轨迹圆拟合 r、T=2πr/v=3.14s、F=mv²/r=2N | 高 | M |
-| MOD-506 | 竖直弹簧振子 parse-spring-vert.json | k=25 弹簧上端固定下挂 1kg 球竖直振动，验证 T=2π√(m/k)=1.26s 与重力无关；布局=固定锚box+球+spring(通用路径，重力保留)；explainSpring 三轴方差选主轴已支持竖直，直接复用 | 高 | S |
+| MOD-506 ✅B2m | 竖直弹簧振子 parse-spring-vert.json | k=25 弹簧上端固定下挂 1kg 球竖直振动，验证 T=2π√(m/k)=1.26s 与重力无关；布局=固定锚box+球+spring(通用路径，重力保留)；explainSpring 三轴方差选主轴已支持竖直，直接复用 | 高 | S |
 | MOD-507 | 胡克定律静态伸长 parse-hooke-static.json | k=20 弹簧挂 2kg 砝码静止，测静伸长 x=mg/k=1.0m 反证 F=kx;布局同 506(无初速)；explain 新静态分支：末段位移均值 vs mg/k,窗口5% | 高 | M |
 | MOD-508 | 弹簧串联 parse-spring-series.json | 两 k=20 弹簧经轻质中间环串接挂 1kg 球，k_eff=k/2=10,T 增至√2 倍；布局=墙锚+中间fixed box+球，attaches 2 条链式；explain 扩展 explainSpring 识别串联给等效劲度 | 中 | M |
 | MOD-509 | 弹簧并联 parse-spring-parallel.json | 墙与球之间并接两条 k=20 弹簧，k_eff=2k,T 除以√2;布局=墙锚+球+attaches 2 条同端点；explain 扩展并联 k_eff=k1+k2 | 中 | M |

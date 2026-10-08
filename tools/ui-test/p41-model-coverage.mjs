@@ -51,6 +51,9 @@ const EXPECT = [
   ['binary', { has: ['celestial'], celN: 2 }],
   ['elliptic-deep', { has: ['celestial'], celN: 2 }],
   ['hinge-l15', { has: ['box'], boxN: 2 }],
+  // R5-B2 模型波4（单摆族+竖直弹簧，MOD-501/506）
+  ['pendulum', { has: ['rope', 'sphere', 'box'], ropeN: 1, sphereN: 1, n: 3 }],
+  ['spring-vert', { has: ['spring', 'sphere', 'box'], springN: 1, sphereN: 1, n: 3 }],
 ];
 
 async function withPage(fn) {
@@ -98,6 +101,7 @@ for (const [name, exp] of EXPECT) {
         errs: st.findings.filter((f) => f.sev === 'error').map((f) => `${f.cat}:${f.msg.slice(0, 60)}`),
         types: d.entities.map((e) => e.type),
         springN: d.entities.filter((e) => e.type === 'spring').length,
+        ropeN: d.entities.filter((e) => e.type === 'rope').length,
         boxN: d.entities.filter((e) => e.type === 'box').length,
         sphereN: d.entities.filter((e) => e.type === 'sphere').length,
         celN: d.entities.filter((e) => e.type === 'celestial').length,
@@ -113,6 +117,7 @@ for (const [name, exp] of EXPECT) {
     if (exp.boxN != null) check(`${name} box=${exp.boxN}`, out.boxN === exp.boxN, 'got ' + out.boxN);
     if (exp.sphereN != null) check(`${name} sphere=${exp.sphereN}`, out.sphereN === exp.sphereN, 'got ' + out.sphereN);
     if (exp.springN != null) check(`${name} spring=${exp.springN}`, out.springN === exp.springN, 'got ' + out.springN);
+    if (exp.ropeN != null) check(`${name} rope=${exp.ropeN}`, out.ropeN === exp.ropeN, 'got ' + out.ropeN);
     if (exp.celN != null) check(`${name} celestial=${exp.celN}`, out.celN === exp.celN, 'got ' + out.celN);
     if (exp.onRamp === 'cylinder' && out.cylPos) {
       // 圆柱应贴坡（y 高于地面且在坡高处，而非默认平地 [0, h/2, 0.8]）
