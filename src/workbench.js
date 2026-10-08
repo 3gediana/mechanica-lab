@@ -2460,6 +2460,11 @@ const PARAM_HINTS = {
   momentOfInertia: '转动惯量（题给）：角动量 L=Iω 的 I',
   gravityScale: '重力缩放：0=该物体不受重力（悬浮理想化）',
 };
+// UI(视觉门)：+Number(toFixed) 会把 -0.0004 变 -0，number 输入框显示「-0」破相——负零归零
+const fmtNum = (v) => {
+  const n = +Number(v).toFixed(3);
+  return Object.is(n, -0) ? 0 : n;
+};
 function numRow(parent, label, unit, value, step, onCommit, { min, max, schema } = {}) {
   const row = document.createElement('div');
   row.className = 'frow';
@@ -2467,7 +2472,7 @@ function numRow(parent, label, unit, value, step, onCommit, { min, max, schema }
   row.querySelector('label').textContent = label;
   row.querySelector('.u').textContent = unit;
   const input = row.querySelector('input');
-  input.value = +Number(value).toFixed(3);
+  input.value = fmtNum(value);
   input.step = step;
   if (min !== undefined) input.min = min;
   if (max !== undefined) input.max = max;
@@ -2487,7 +2492,7 @@ function numRow(parent, label, unit, value, step, onCommit, { min, max, schema }
   const clearErr = () => {
     input.classList.remove('bad');
     err.style.display = 'none';
-    input.value = +Number(value).toFixed(3);
+    input.value = fmtNum(value);
   };
   const showNumErr = (msg) => {
     input.classList.add('bad');
@@ -2531,7 +2536,7 @@ function triRow(parent, label, unit, values, step, onCommit) {
   const AXES = ['X', 'Y', 'Z'];
   const AX_COLORS = ['#c97a6a', '#8fbf7a', '#6a8fbf'];   // 三轴习惯色（X红/Y绿/Z蓝，低饱和配深底）
   inputs.forEach((inp, i) => {
-    inp.value = +Number(values[i]).toFixed(3);
+    inp.value = fmtNum(values[i]);
     inp.step = step;
     inp.disabled = mode === 'run';
     inp.title = `${label}·${AXES[i]} 轴${mode === 'run' ? '（运行态只读，重置后可改）' : ''}`;
@@ -2539,7 +2544,7 @@ function triRow(parent, label, unit, values, step, onCommit) {
     inp.onfocus = () => requestAnimationFrame(() => inp.select());   // 双击/Tab 进入即全选，直接输新值
     inp.onchange = () => {
       const vals = inputs.map((x) => Number(x.value));
-      if (vals.some((v) => !Number.isFinite(v))) { inputs.forEach((x, j) => { x.value = +Number(values[j]).toFixed(3); }); return; }
+      if (vals.some((v) => !Number.isFinite(v))) { inputs.forEach((x, j) => { x.value = fmtNum(values[j]); }); return; }
       onCommit(vals);
     };
   });
@@ -3013,20 +3018,14 @@ function updateCurveLegend() {
   const el = $('curveLegend');
   if (!el) return;
   el.innerHTML = '';
-  // UI-578：每项前 8px 色块——色弱/投影下不只靠字色辨线
-  const item = (txt, c) => {
-    const sp = document.createElement('span');
-    sp.style.cssText = 'display:inline-flex;align-items:center;gap:4px;color:' + c;
-    const dot = document.createElement('span');
-    dot.style.cssText = 'width:8px;height:8px;border-radius:2px;background:' + c + ';flex:none';
-    sp.appendChild(dot);
-    sp.appendChild(document.createTextNode(txt));
-    return sp;
-  };
+  // UI-578：色块用 span::before + currentColor 实现（不增 DOM 节点，p15/p22 的 span 计数与文案断言保持）
   if (curveMode === 'energy') {
     // 能量模式图例（量纲 J；重力势能基准 y=0，天体引力势能口径属守恒量条）
     for (const [txt, c] of [['动能KE', '#7dc87d'], ['势能PE', '#5b8dd9'], ['总能量E', '#d9a441']]) {
-      el.appendChild(item(txt, c));
+      const sp = document.createElement('span');
+      sp.style.color = c;
+      sp.textContent = txt;
+      el.appendChild(sp);
     }
     return;
   }
@@ -3035,10 +3034,19 @@ function updateCurveLegend() {
     const c = CURVE_PALETTE[i % CURVE_PALETTE.length];
     // 括号注记（如"入射球 (e=1)"）在图例里是复读噪声：只留主名，速率/高度关键词保留（p22 断言依赖）
     const base = sr.name.replace(/\s*\([^)]*\)\s*$/, '').trim() || sr.name;
-    el.append(item(`${base}速率`, c), item(`${base}高度`, c));
+    const sp = document.createElement('span');
+    sp.style.color = c;
+    sp.textContent = `${base}速率`;
+    const hp = document.createElement('span');
+    hp.style.color = c;
+    hp.textContent = `${base}高度`;
+    el.append(sp, hp);
     i++;
   }
-  el.appendChild(item('系统KE', '#7dc87d'));
+  const ke = document.createElement('span');
+  ke.style.color = '#7dc87d';
+  ke.textContent = '系统KE';
+  el.appendChild(ke);
 }
 
 // ============ 单位标尺动态刻度（档位 0.1/0.5/1/5 m 随视野自适应，网格视觉密度联动） ============
@@ -3285,7 +3293,7 @@ function setPerfHud(on) {
 // 每帧收口：渲染帧提交分段样本；HUD 0.25s 节流拼串（脏检查后才写 DOM）；1s 窗口评估降/升档
 function tickPerfHud(rawDt, rendered, phys, ov, rnd, dom) {
   if (rendered) {
-    if (_bootFrames < 120) { _bootFrames++; }   // 预热豁免：内核编译/首帧资源不进预算窗
+    if (_bootFrames < 60) { _bootFrames++; }   // 预热豁免：内核编译/首帧资源不进预算窗（60 帧=60fps 机 1s；弱机 6s 起即见数据）
     else perfMon.commit({ frame: phys + ov + rnd + dom, physics: phys, overlay: ov, render: rnd, dom, calls: viewport.drawCalls, tris: viewport.triangles });
   }
   _perfHudT += rawDt;
@@ -4506,7 +4514,7 @@ function renderParseResult(warnings = []) {
       const inferredKeys = Array.isArray(plan.entities[i].inferred) ? plan.entities[i].inferred : [];
       const defVal = (e.type === 'sphere' && key === 'friction' && pairFriction != null) ? pairFriction : def;
       const val = given[key] !== undefined ? given[key] : defVal;
-      inp.value = val;
+      inp.value = fmtNum(val);
       const src = document.createElement('span');
       const isInferred = given[key] !== undefined && inferredKeys.includes(key);
       src.className = 'badge' + (given[key] !== undefined ? ' given' : '');
