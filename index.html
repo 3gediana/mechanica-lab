@@ -79,6 +79,9 @@
   /* 切换热态：琥珀字+淡琥珀底+细描边（读得出「开」但不吵） */
   .tbtn.hot { color: var(--accent-hi); background: var(--accent-dim); box-shadow: inset 0 0 0 1px rgba(217, 164, 65, 0.32); }
   .tbtn.hot:hover { background: rgba(217, 164, 65, 0.19); color: var(--accent-hi); }
+  /* UI-501：保存成功的图标钮脉冲（替代文字交换——文字交换会抹掉 svg 图标） */
+  .tbtn.ok-flash { color: var(--accent-hi); background: var(--accent-dim);
+    box-shadow: inset 0 0 0 1px rgba(217, 164, 65, 0.55); }
   /* 全站唯一实底主操作：运行 */
   .tbtn.primary, #simbar button.primary {
     color: #1a1206; background: linear-gradient(180deg, #e2af56, #d19a38); font-weight: 600;

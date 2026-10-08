@@ -1126,9 +1126,17 @@ function saveFile() {
   saveToLibrary();
   saveSceneSnap();
   const bs = $('btnSave');
-  const prev = bs.textContent;
-  bs.textContent = '已存';
-  setTimeout(() => { bs.textContent = prev; }, 900);
+  // UI-501：图标钮不能 textContent 交换「已存」（会抹掉软盘图标且复原成空）——琥珀脉冲代替
+  if (bs.querySelector('svg')) {
+    bs.classList.remove('ok-flash');
+    void bs.offsetWidth;   // 重启动画
+    bs.classList.add('ok-flash');
+    setTimeout(() => bs.classList.remove('ok-flash'), 900);
+  } else {
+    const prev = bs.textContent;
+    bs.textContent = '已存';
+    setTimeout(() => { bs.textContent = prev; }, 900);
+  }
 }
 function openFile(file) {
   const r = new FileReader();
