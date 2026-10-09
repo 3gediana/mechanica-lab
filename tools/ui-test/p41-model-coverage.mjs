@@ -46,6 +46,9 @@ const EXPECT = [
   ['elastic-rear', { has: ['sphere'], sphereN: 2 }],
   ['elastic-headon', { has: ['sphere'], sphereN: 2 }],
   ['collision-e05', { has: ['sphere'], sphereN: 2 }],
+  // R5-B5 曲面族（MOD-581~595）
+  ['curved-descent', { has: ['curvedRamp', 'sphere', 'ground'] }],
+  ['bowl', { has: ['bowl', 'sphere'] }],
   ['recoil-unequal', { has: ['ground', 'sphere'], sphereN: 2 }],
   ['conveyor-reverse', { has: ['conveyor', 'sphere'] }],
   ['binary', { has: ['celestial'], celN: 2 }],

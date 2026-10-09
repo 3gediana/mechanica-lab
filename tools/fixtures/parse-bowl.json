@@ -1,0 +1,30 @@
+{
+  "_fixture": true,
+  "_note": "本地示例解析数据（碗内曲面震荡，MOD-595 曲面族 B5），验证 bowl 球冠曲面链路；不是真实模型输出",
+  "kind": "bowl-osc",
+  "questionType": "碗内曲面震荡（曲面版单摆·回复力）",
+  "goal": "小球自碗面内缘由静止释放，沿光滑碗面往复震荡，测周期并与 T=2π√((Rs−r)/g) 对照",
+  "gravity": 9.81,
+  "entities": [
+    {
+      "type": "bowl",
+      "name": "碗形曲面",
+      "given": { "radius": 0.8, "depth": 0.35, "friction": 0 },
+      "confidence": 0.95
+    },
+    {
+      "type": "sphere",
+      "name": "震荡球",
+      "given": { "mass": 0.3, "radius": 0.08, "friction": 0 },
+      "confidence": 0.92
+    }
+  ],
+  "observations": ["小球往复震荡的周期"],
+  "unknowns": ["震荡周期 T"],
+  "assumptions": [
+    "碗面光滑（不计摩擦）",
+    "小球由碗缘内静止释放",
+    "空气阻力不计"
+  ],
+  "confidence": 0.92
+}

@@ -23,6 +23,14 @@ export function explainRun(plan, doc, series, reports = [], astro = null, rotati
   if (hasRopeLink && spheres.length === 1 && dynBodies.length === 1 && !hasRamp && !hasSpring && !hasGrav) {
     return explainPendulum(plan, doc, series);
   }
+  // 曲面族（B5）：curvedRamp/bowl 接触面场景——必须在抛体分支前（曲面+单球+地面恰好
+  // 满足抛体的「离地单球」条件，会被拿去算「射程」）。碗内震荡=曲面版单摆；
+  // 曲面滑道=能量守恒（末速只由落差决定，与形状无关）
+  const curvedEnt = doc.entities.find((e) => e.type === 'curvedRamp' || e.type === 'bowl');
+  if (curvedEnt && series.length > 10 && !hasRopeLink) {
+    if (curvedEnt.type === 'bowl' && spheres.length === 1 && dynBodies.length === 1) return explainBowl(plan, doc, series);
+    if (curvedEnt.type === 'curvedRamp' && spheres.length >= 1) return explainCurvedDescent(plan, doc, series);
+  }
   // 抛体：单球带初速 + 地面（无斜面/弹簧/引力）且无其它动态体（AB-11：子弹打木块等
   // 「球+块」场景曾误入抛体分支拿 15m/s 算「射程」——条件收窄到真单球场景）
   const projBalls = doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
@@ -260,6 +268,160 @@ function explainPendulum(plan, doc, series) {
     observation: plan.observations[0] || '单摆周期',
     theoretical: { period: Ttheory, formula: 'T = 2π√(L/g)', L, g },
     measured: { period: Tmeasured, peaks: peaks.length, angle0deg: theta0 },
+    errPct, pass,
+    summary,
+  };
+}
+
+// ---------- 横摆峰值间隔测周期（单摆/碗面共用）：中位间隔抗个别漏峰；
+// 平台坍缩：60Hz 采样 apex 邻域多帧同为极大，≤10 帧内合并取更大者 ----------
+function medianPeakPeriod(series, axis) {
+  const xs = series.map((p) => p.pos[axis]);
+  const rawPeaks = [];
+  for (let i = 1; i < xs.length - 1; i++) {
+    if (xs[i] > xs[i - 1] && xs[i] >= xs[i + 1] && xs[i] - xs[i - 1] > 1e-6) rawPeaks.push(i);
+  }
+  const peaks = [];
+  for (const i of rawPeaks) {
+    const last = peaks[peaks.length - 1];
+    if (last != null && i - last <= 10) { if (xs[i] > xs[last]) peaks[peaks.length - 1] = i; }
+    else peaks.push(i);
+  }
+  if (peaks.length < 2) return { T: null, peaks: peaks.length };
+  const span = series[series.length - 1].t - series[0].t;
+  const dt = span / (series.length - 1);
+  const gaps = peaks.slice(1).map((q, i) => q - peaks[i]).sort((a, b) => a - b);
+  return { T: gaps[Math.floor(gaps.length / 2)] * dt, peaks: peaks.length };
+}
+// 摆动主轴 = 水平两轴中方差大者（摆平面可能是 x-y 或 z-y）
+function dominantAxis(series) {
+  const varOf = (d) => {
+    const a = series.map((p) => p.pos[d]);
+    const mean = a.reduce((x, y) => x + y, 0) / a.length;
+    return a.reduce((v, x) => v + (x - mean) * (x - mean), 0);
+  };
+  return varOf(0) >= varOf(2) ? 0 : 2;
+}
+
+// ---------- 碗内曲面震荡（B5/MOD-582）：球冠碗面=曲面版单摆，微幅 T=2π√((Rs−r)/g) ----------
+function explainBowl(plan, doc, series) {
+  const bowl = doc.entities.find((e) => e.type === 'bowl');
+  const ball = doc.entities.find((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
+  if (!bowl || !ball || series.length < 10) {
+    return { supported: false, reason: '碗面震荡解释需要 碗+单球 且运行轨迹足够长', summary: telemetrySummary(series) };
+  }
+  const g = Math.abs(doc.gravity) || 9.81;
+  const R = bowl.params.radius;
+  const D = Math.min(bowl.params.depth ?? 0.35, R * 0.88);
+  const Rs = (R * R + D * D) / (2 * D);
+  const r = ball.params.radius ?? 0.12;
+  const Ttheory = 2 * Math.PI * Math.sqrt(Math.max(Rs - r, 0.01) / g);
+  const axis = dominantAxis(series);
+  const { T: Tmeasured, peaks } = medianPeakPeriod(series, axis);
+  const errPct = Tmeasured != null ? Math.abs(Tmeasured - Ttheory) / Ttheory * 100 : null;
+  const pass = errPct != null && errPct < 8;
+  // 释放幅度角（等效摆角）：大幅度周期略长于微幅公式（同一单摆口径）
+  const rho0 = Math.abs(ball.transform.pos[axis]);
+  const phi0 = Math.asin(Math.min(rho0 / Rs, 1)) * 180 / Math.PI;
+  const mu = ball.physics.friction ?? 0;
+  const summary = [
+    `碗内曲面震荡（碗口 R=${R.toFixed(3)} m、碗深 D=${D.toFixed(3)} m，球面半径 Rs=(R²+D²)/(2D)=${Rs.toFixed(3)} m）：`,
+    `等效摆长 Rs−r=${(Rs - r).toFixed(3)} m，微幅周期理论 T = 2π√((Rs−r)/g) = ${Ttheory.toFixed(3)} s。`,
+    `释放幅度约 ${phi0.toFixed(1)}°${phi0 < 25 ? '（微幅近似成立）' : '（偏大：实际周期略长于微幅公式）'}${mu < 0.05 ? '，光滑碗面（不计摩擦）' : ''}。`,
+    Tmeasured != null
+      ? `实测周期 ${Tmeasured.toFixed(3)} s（横摆峰值间隔法，${peaks} 个峰），偏差 ${errPct.toFixed(2)}%。`
+      : '运行时长不足两个完整往复，周期未测出——加长运行时间后重跑自查。',
+    pass ? `实测与曲面版单摆公式一致：回复力来自重力切向分量，周期只由碗面曲率与 g 决定，与质量无关。` : '周期偏差偏大，建议核对释放位置（应由碗缘内静止释放、无初速）。',
+  ].join('');
+  return {
+    supported: true,
+    kind: 'bowl-osc',
+    simT: series[series.length - 1].t,
+    observation: plan.observations[0] || '碗内往复周期',
+    theoretical: { period: Ttheory, formula: 'T = 2π√((Rs−r)/g)', Rs, r, g },
+    measured: { period: Tmeasured, peaks, angle0deg: +phi0.toFixed(1) },
+    errPct, pass,
+    summary,
+  };
+}
+
+// ---------- 曲面滑道下滑（B5/MOD-581）：光滑条件下机械能守恒，任意高度处 v=√(2g·Δh)——
+// 末速只由落差决定、与滑道形状无关；耗时随形状变（凹面早加速先到）——剖面数值积分对照 ----------
+function explainCurvedDescent(plan, doc, series) {
+  const cr = doc.entities.find((e) => e.type === 'curvedRamp');
+  const ball = doc.entities.find((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
+  if (!cr || !ball || series.length < 10) {
+    return { supported: false, reason: '曲面下滑解释需要 曲面滑道+球 且运行轨迹足够长', summary: telemetrySummary(series) };
+  }
+  const g = Math.abs(doc.gravity) || 9.81;
+  const L = cr.params.length, H = cr.params.height;
+  const pExp = cr.params.curveExp ?? 1.4;
+  const mu = ball.physics.friction ?? 0;
+  const profY = (u) => H * Math.pow(Math.min(Math.max(1 - u, 0), 1), pExp);
+  // 起点：初始 x 投影回剖面得 u0 与有效落差
+  const u0 = Math.min(Math.max((series[0].pos[0] + L / 2) / L, 0), 1);
+  const drop = profY(u0);
+  // 实测：球越过坡底区（x > L/2−0.08）第一次的 speed 与位置——能量口径在任意一点都成立
+  // （凸面拱顶脱离也不怕：脱离后仍只受重力，机械能照样守恒，用捕获点高度算期望速度）
+  const xEnd = L / 2 - 0.08;
+  let cap = null;
+  for (const s of series) {
+    if (s.pos[0] > xEnd) { cap = s; break; }
+  }
+  let errPct = null;
+  if (cap) {
+    const vExpect = Math.sqrt(Math.max(2 * g * (drop - (cap.pos[1] - (ball.params.radius ?? 0.1))), 0) + 1e-9);
+    errPct = vExpect > 0.15 ? Math.abs(cap.speed - vExpect) / vExpect * 100 : null;
+  }
+  const pass = errPct != null && errPct < 6;
+  // 理论耗时：光滑假设下剖面数值积分——分段匀加速闭式（线性段精确，无静止起点奇异）：
+  // v_end²=2g·Δh_cum（能量口径），t_seg=(v_end−v_prev)/a_t，a_t=g·Δh_seg/ds
+  let tTheory = null;
+  let tStraight = null;
+  if (mu < 0.05) {
+    const N = 400;
+    let acc = 0, vPrev = 0, px = -L / 2 + u0 * L, py = profY(u0);
+    for (let i = 1; i <= N; i++) {
+      const u = u0 + (1 - u0) * i / N;
+      const nx = -L / 2 + u * L, ny = profY(u);
+      const ds = Math.hypot(nx - px, ny - py);
+      const vEnd = Math.sqrt(Math.max(2 * g * (drop - ny), 1e-12));
+      const aT = g * (py - ny) / ds;
+      acc += aT > 1e-9 ? (vEnd - vPrev) / aT : ds / Math.max(vEnd, 1e-6);
+      vPrev = vEnd;
+      px = nx; py = ny;
+    }
+    tTheory = acc;
+    const hyp = Math.hypot(L, H);                  // 同底同落差直坡：a=g·H/hyp，s=hyp
+    tStraight = hyp * Math.sqrt(2 / (g * H));
+  }
+  let tMeas = null;
+  if (cap) {
+    const i0 = series.findIndex((s) => s.speed > 0.05);
+    if (i0 >= 0 && cap.t > series[i0].t) tMeas = cap.t - series[i0].t;
+  }
+  const tErrPct = tTheory != null && tMeas != null ? Math.abs(tMeas - tTheory) / tTheory * 100 : null;
+  const shape = pExp > 1 ? `凹面（曲率指数 ${pExp.toFixed(2)}：顶端陡、底端渐平，法向力大于重力法向分量）`
+    : pExp < 1 ? `凸面（曲率指数 ${pExp.toFixed(2)}：拱顶形，法向力小于重力法向分量，足够快会脱离滑道）`
+      : '直坡（曲率指数 1，与斜坡等价）';
+  const summary = [
+    `曲面滑道下滑（底边 L=${L.toFixed(3)} m、落差 H=${H.toFixed(3)} m，${shape}）：`,
+    `光滑条件下机械能守恒，末速理论 v = √(2gH) = ${Math.sqrt(2 * g * drop).toFixed(3)} m/s（落差 ${drop.toFixed(3)} m）——只由落差决定，与滑道形状无关。`,
+    cap
+      ? `实测坡底速度 ${cap.speed.toFixed(3)} m/s（能量口径按捕获点高度折算），偏差 ${errPct != null ? errPct.toFixed(2) + '%' : '过小不可比'}。`
+      : '球未到达坡底区——加长运行时间或核对释放位置。',
+    tErrPct != null
+      ? `耗时：实测 ${tMeas.toFixed(3)} s vs 剖面积分理论 ${tTheory.toFixed(3)} s（偏差 ${tErrPct.toFixed(1)}%）；同落差直坡需 ${tStraight.toFixed(3)} s——曲面${tTheory < tStraight ? '更早获得速度，到达更快' : '比直坡更缓'}。`
+      : mu >= 0.05 ? '摩擦显著（μ≥0.05），滚动/滑动混耦合不做耗时理论对照（能量口径仍成立但需扣除摩擦耗散）。' : '耗时未测出。',
+    pass ? '实测与 √(2gH) 一致：曲面滑道是能量守恒的「形状无关」演示——路径不同、高度相同、末速相同。' : '速度偏差偏大，建议核对落差/摩擦设置与释放方式（应由静止释放、无初速）。',
+  ].join('');
+  return {
+    supported: true,
+    kind: 'curved-descent',
+    simT: series[series.length - 1].t,
+    observation: plan.observations[0] || '坡底速度',
+    theoretical: { speed: +Math.sqrt(2 * g * drop).toFixed(3), formula: 'v = √(2gH)', drop, g, duration: tTheory },
+    measured: { speed: cap ? +cap.speed.toFixed(3) : null, duration: tMeas },
     errPct, pass,
     summary,
   };

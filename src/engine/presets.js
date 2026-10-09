@@ -1422,6 +1422,150 @@ export const PRESETS = {
       return doc;
     },
   },
+
+  curvedRace: {
+    id: 'curvedRace', label: '曲面滑道竞速（形状 vs 时间）',
+    build() {
+      const doc = createEmptyDoc('曲面滑道竞速：末速相同，耗时不同');
+      const seq = {};
+      const H = 1.0, drop = 0.825;
+      // 左：直坡（26.6°）；右：凹曲面 curveExp=1.6（顶端陡、底端渐平）——同落差同放
+      const ground = createEntity('ground', {
+        name: '接引地面',
+        transform: { pos: [0.2, 0, 0], rot: [0, 0, 0] },
+        params: { sx: 9, sy: 0.1, sz: 6 },
+        physics: { body: 'fixed', friction: 0.5, restitution: 0.2 },
+        render: { material: 'steelDark' },
+        source: 'preset',
+      }, seq);
+      const ramp = createEntity('ramp', {
+        name: '直坡',
+        transform: { pos: [-2.2, 0.05, 0], rot: [0, 0, 0] },
+        params: { length: 2.0, height: H, width: 0.5 },
+        physics: { body: 'fixed', friction: 0, restitution: 0.05 },
+        render: { material: 'marble' },
+        source: 'preset',
+      }, seq);
+      const cr = createEntity('curvedRamp', {
+        name: '凹曲面滑道',
+        transform: { pos: [2.2, 0.05, 0], rot: [0, 0, 0] },
+        params: { length: 2.4, height: H, width: 0.5, curveExp: 1.6 },
+        physics: { body: 'fixed', friction: 0, restitution: 0.05 },
+        render: { material: 'marble' },
+        source: 'preset',
+      }, seq);
+      // 两球落差严格一致（0.825 m）：曲面球 u0=0.1153 → (1−u)^1.6=0.825
+      const u0 = 1 - Math.pow(drop / H, 1 / 1.6);
+      const ballA = createEntity('sphere', {
+        name: '直坡球',
+        transform: { pos: [-2.85, 0.05 + 0.825 + 0.1 / Math.cos(Math.atan(0.5)) + 0.005, 0], rot: [0, 0, 0] },
+        params: { radius: 0.1 },
+        physics: {
+          body: 'dynamic', mass: 1, friction: 0, restitution: 0,
+          linvel: [0, 0, 0], angvel: [0, 0, 0],
+          linDamping: 0, angDamping: 0, gravityScale: 1,
+        },
+        render: { material: 'chrome' },
+        measured: true,
+        source: 'preset',
+      }, seq);
+      const ballB = createEntity('sphere', {
+        name: '曲面球',
+        transform: { pos: [2.2 - 1.2 + u0 * 2.4, 0.05 + drop + 0.105 + 0.005, 0], rot: [0, 0, 0] },
+        params: { radius: 0.1 },
+        physics: {
+          body: 'dynamic', mass: 1, friction: 0, restitution: 0,
+          linvel: [0, 0, 0], angvel: [0, 0, 0],
+          linDamping: 0, angDamping: 0, gravityScale: 1,
+        },
+        render: { material: 'brass' },
+        measured: true,
+        source: 'preset',
+      }, seq);
+      doc.entities.push(ground, ramp, cr, ballA, ballB);
+      doc.meta.assumptions = [
+        '验证目标：两球落差相同（0.825 m），坡底末速理论同为 √(2gH)=4.03 m/s——末速与滑道形状无关',
+        '耗时不同：凹曲面顶端陡（33°）先获得速度，先到坡底；直坡（26.6°）匀加速后到',
+        '光滑接触（双方 friction=0，滑动无滚转）；接触式真实法向力——凹面法向力大于 mg·cosθ',
+      ];
+      return doc;
+    },
+  },
+
+  bowlOsc: {
+    id: 'bowlOsc', label: '碗中小球（曲面版单摆）',
+    build() {
+      const doc = createEmptyDoc('碗内曲面震荡：回复力与周期');
+      const seq = {};
+      const R = 0.8, D = 0.35, r = 0.08;
+      const Rs = (R * R + D * D) / (2 * D);          // 1.089 m
+      const phi0 = Math.asin(0.44 / Rs);
+      const bowl = createEntity('bowl', {
+        name: '碗形曲面',
+        transform: { pos: [0, 0.02, 0], rot: [0, 0, 0] },
+        params: { radius: R, depth: D },
+        physics: { body: 'fixed', friction: 0, restitution: 0.05 },
+        render: { material: 'marble' },
+        source: 'preset',
+      }, seq);
+      const ball = createEntity('sphere', {
+        name: '震荡球',
+        transform: { pos: [(Rs - r) * Math.sin(phi0), 0.02 + Rs - (Rs - r) * Math.cos(phi0), 0], rot: [0, 0, 0] },
+        params: { radius: r },
+        physics: {
+          body: 'dynamic', mass: 0.3, friction: 0, restitution: 0,
+          linvel: [0, 0, 0], angvel: [0, 0, 0],
+          linDamping: 0, angDamping: 0, gravityScale: 1,
+        },
+        render: { material: 'chrome' },
+        measured: true,
+        source: 'preset',
+      }, seq);
+      doc.entities.push(bowl, ball);
+      doc.meta.assumptions = [
+        '验证目标：碗面=球冠（Rs=(R²+D²)/(2D)=1.089 m），微幅周期 T=2π√((Rs−r)/g)≈2.02 s——曲面版单摆',
+        '回复力=重力切向分量（光滑碗面 friction=0 滑动）；释放幅度 23.9°，周期略长于微幅公式约 1%',
+        '能量往复：最低点动能最大、最高点势能最大，守恒条与曲线图可直接对照',
+      ];
+      return doc;
+    },
+  },
+
+  waveRoad: {
+    id: 'waveRoad', label: '波浪路面（不规则地形）',
+    build() {
+      const doc = createEmptyDoc('波浪路面：波峰跳跃与法向力');
+      const seq = {};
+      const road = createEntity('waveFloor', {
+        name: '波浪路面',
+        transform: { pos: [0, 0, 0], rot: [0, 0, 0] },
+        params: { sx: 6, sz: 1.2, waveLen: 0.8, waveAmp: 0.05 },
+        physics: { body: 'fixed', friction: 0.1, restitution: 0.1 },
+        render: { material: 'marble' },
+        source: 'preset',
+      }, seq);
+      const ball = createEntity('sphere', {
+        name: '滚球',
+        transform: { pos: [-2.4, 0.05 * 1.35 + 0.12 + 0.05, 0], rot: [0, 0, 0] },
+        params: { radius: 0.12 },
+        physics: {
+          body: 'dynamic', mass: 0.8, friction: 0.05, restitution: 0.05,
+          linvel: [2.4, 0, 0], angvel: [0, 0, 0],
+          linDamping: 0, angDamping: 0.02, gravityScale: 1,
+        },
+        render: { material: 'chrome' },
+        measured: true,
+        source: 'preset',
+      }, seq);
+      doc.entities.push(road, ball);
+      doc.meta.assumptions = [
+        '验证目标：双频叠加不规则路面（横向 0.7 倍频调制），波峰曲率半径 ρ=1/(A·k²)≈0.32 m',
+        '临界脱离速度 √(gρ)≈1.78 m/s < 球速 2.4 m/s → 波峰周期性跳离（颠簸），落回后继续',
+        '法向力随坡度连续变化：波谷压紧（N>mg·cosθ）、波峰趋离（N<mg·cosθ）——轨迹速度渐变色可见快慢',
+      ];
+      return doc;
+    },
+  },
 };
 
 export function getPreset(id) {
@@ -1445,4 +1589,7 @@ export const PRESET_CAMERA = {
   classic: { pos: [2.6, 2.0, 4.2], target: [0.4, 0.8, 0] },
   threeBody: { pos: [0, 10, 18], target: [0, 0, 0] },
   binaryStar: { pos: [0, 8, 14], target: [0, 0, 0] },
+  curvedRace: { pos: [0.2, 2.2, 6.8], target: [0, 0.5, 0] },
+  bowlOsc: { pos: [1.3, 1.3, 2.8], target: [0, 0.25, 0] },
+  waveRoad: { pos: [0, 2.6, 5.4], target: [0, 0.12, 0] },
 };

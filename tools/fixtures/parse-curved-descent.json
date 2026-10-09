@@ -1,0 +1,36 @@
+{
+  "_fixture": true,
+  "_note": "本地示例解析数据（曲面滑道下滑，MOD-594 曲面族 B5），验证 curvedRamp 接触式曲面链路；不是真实模型输出",
+  "kind": "curved-descent",
+  "questionType": "曲面滑道下滑（能量守恒·形状无关）",
+  "goal": "小球沿光滑曲面滑道由静止滑下，测坡底速度并与 v=√(2gH) 对照——末速只由落差决定，与滑道形状无关",
+  "gravity": 9.81,
+  "entities": [
+    {
+      "type": "curvedRamp",
+      "name": "曲面滑道",
+      "given": { "length": 2.4, "height": 1.0, "width": 0.5, "curveExp": 1.6, "friction": 0 },
+      "confidence": 0.95
+    },
+    {
+      "type": "sphere",
+      "name": "滑球",
+      "given": { "mass": 0.5, "radius": 0.1, "friction": 0 },
+      "confidence": 0.92
+    },
+    {
+      "type": "ground",
+      "name": "接引地面",
+      "given": { "position": [4.2, 0, 0] },
+      "confidence": 0.9
+    }
+  ],
+  "observations": ["小球滑到坡底时的速度"],
+  "unknowns": ["坡底速度 v"],
+  "assumptions": [
+    "滑道光滑（不计摩擦）",
+    "小球由坡顶附近静止释放",
+    "空气阻力不计"
+  ],
+  "confidence": 0.93
+}

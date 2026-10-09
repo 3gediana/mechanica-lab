@@ -99,6 +99,137 @@ function wedgePoints(L, H, W) {
   ]);
 }
 
+// ---------- 曲面族（B5/MOD-581~583）：接触式曲面——真实法向力（凹面压紧/凸面可脱离），
+// 与 track 的中心线解析约束互补。渲染 BufferGeometry 与 Rapier trimesh 碰撞体由同一份
+// 网格数据生成（几何/物理永不两张皮），computeVertexNormals 沿曲线平滑着色。 ----------
+
+// 幂律剖面 y=H·(1-u)^p：p=1 直楔（同斜坡）、p>1 凹面（底端渐平，N>mg·cosθ）、
+// p<1 凸面（拱顶，v²>g/κ 时脱离——脱离临界本身是教学点）
+function curvedProfile(L, H, p, n) {
+  const pts = [];
+  for (let i = 0; i <= n; i++) {
+    const u = i / n;
+    pts.push([-L / 2 + u * L, H * Math.pow(1 - u, p)]);
+  }
+  return pts;
+}
+
+// 曲面坡道网格：顶面条带（共享顶点→沿曲线平滑着色）+ 两侧壁 + 底面（顶点复制→边缘锐利）
+function curvedMeshData(L, H, W, p, SEG = 16) {
+  const prof = curvedProfile(L, H, p, SEG);
+  const n = prof.length;
+  const verts = [];
+  const idx = [];
+  for (let i = 0; i < n; i++) verts.push(prof[i][0], prof[i][1], -W / 2, prof[i][0], prof[i][1], W / 2);
+  for (let i = 0; i < n - 1; i++) {
+    const a = i * 2, b = i * 2 + 1, c = (i + 1) * 2, d = (i + 1) * 2 + 1;
+    idx.push(a, b, d, a, d, c);                   // 朝 +y（下降坡法线偏 +x）
+  }
+  // 两侧壁：竖直面从 y=0 到剖面线；顶端首段即后墙（同楔体高墙）
+  let wb = verts.length / 3;
+  for (let i = 0; i < n; i++) verts.push(prof[i][0], prof[i][1], -W / 2, prof[i][0], 0, -W / 2);
+  for (let i = 0; i < n - 1; i++) {
+    if (prof[i][1] < 1e-5 && prof[i + 1][1] < 1e-5) continue;   // 底端零面积段（退化=求解器毒药）
+    const t0 = wb + i * 2, b0 = t0 + 1, t1 = t0 + 2, b1 = t0 + 3;
+    idx.push(b0, t0, t1, b0, t1, b1);             // 朝 −z
+  }
+  wb = verts.length / 3;
+  for (let i = 0; i < n; i++) verts.push(prof[i][0], prof[i][1], W / 2, prof[i][0], 0, W / 2);
+  for (let i = 0; i < n - 1; i++) {
+    if (prof[i][1] < 1e-5 && prof[i + 1][1] < 1e-5) continue;
+    const t0 = wb + i * 2, b0 = t0 + 1, t1 = t0 + 2, b1 = t0 + 3;
+    idx.push(t0, b0, b1, t0, b1, t1);             // 朝 +z（镜像绕向）
+  }
+  const bb = verts.length / 3;
+  verts.push(-L / 2, 0, -W / 2, L / 2, 0, -W / 2, -L / 2, 0, W / 2, L / 2, 0, W / 2);
+  idx.push(bb, bb + 1, bb + 3, bb, bb + 3, bb + 2);   // 朝 −y
+  return { verts: new Float32Array(verts), idx: new Uint32Array(idx) };
+}
+
+// 球冠碗面：碗底 y=0、碗缘 y=D（几何恒等式 Rs=(R²+D²)/2D）；内表面朝腔内上方，
+// 小球微幅震荡等效摆长 Rs−r → T≈2π√((Rs−r)/g)，曲面版单摆
+function bowlMeshData(R, D, K = 28, M = 7) {
+  D = Math.min(D, R * 0.88);                      // 球冠深度上限≈赤道（D>R 无解，钳制）
+  const Rs = (R * R + D * D) / (2 * D);
+  const phiRim = Math.asin(Math.min(1, R / Rs));
+  const verts = [];
+  for (let j = 0; j < M; j++) {                   // M 环带（不生成顶点环）+ 1 个顶点扇心
+    const phi = phiRim * (1 - j / M);
+    const rr = Rs * Math.sin(phi), y = Rs * (1 - Math.cos(phi));
+    for (let k = 0; k < K; k++) {
+      const th = (k / K) * Math.PI * 2;
+      verts.push(rr * Math.cos(th), y, rr * Math.sin(th));
+    }
+  }
+  const apex = verts.length / 3;                  // 碗底单顶点（y=0）：退化三角形是求解器毒药
+  verts.push(0, 0, 0);
+  const idx = [];
+  for (let j = 0; j < M - 1; j++) {
+    for (let k = 0; k < K; k++) {
+      const k1 = (k + 1) % K;
+      const a = j * K + k, b = (j + 1) * K + k, c = (j + 1) * K + k1, d = j * K + k1;
+      idx.push(a, b, c, a, c, d);                 // 内表面法线朝腔内（j+1 环更矮更靠轴）
+    }
+  }
+  for (let k = 0; k < K; k++) {                   // 底扇：环 M-1 → 顶点（绕向同带面，B5 推导）
+    const k1 = (k + 1) % K;
+    const a = (M - 1) * K + k, d = (M - 1) * K + k1;
+    idx.push(a, apex, d);
+  }
+  return { verts: new Float32Array(verts), idx: new Uint32Array(idx), Rs };
+}
+
+// 波浪路面：双频正弦叠加（纵向主波 × 横向 0.7 倍频相位差调制）——单一波纹是圆柱滚筒，
+// 叠加才有「不规则地形」感；最大坡度≈atan(2π·波幅/波长·1.35)
+function waveFloorMeshData(sx, sz, lambda, amp, NX = 96, NZ = 16) {
+  const sy = 0.12;
+  const hAt = (x, z) => amp * Math.sin((x / lambda) * Math.PI * 2)
+    * (1 + 0.35 * Math.sin((z / (lambda * 0.7)) * Math.PI * 2 + 1.3));
+  const verts = [];
+  for (let i = 0; i <= NX; i++) {
+    const x = -sx / 2 + (i / NX) * sx;
+    for (let k = 0; k <= NZ; k++) {
+      const z = -sz / 2 + (k / NZ) * sz;
+      verts.push(x, hAt(x, z), z);
+    }
+  }
+  const idx = [];
+  const gid = (i, k) => i * (NZ + 1) + k;
+  for (let i = 0; i < NX; i++) {
+    for (let k = 0; k < NZ; k++) {
+      const a = gid(i, k), b = gid(i, k + 1), c = gid(i + 1, k + 1), d = gid(i + 1, k);
+      idx.push(a, b, c, a, c, d);                 // 朝 +y
+    }
+  }
+  // 四侧裙边（顶缘 → y=−sy 底缘，顶点复制保顶缘法线 crisp）；绕向按各边朝向推导
+  const edges = [
+    { along: 'x', fixed: 0, dir: 1 },             // z=−sz/2 → 朝 −z
+    { along: 'x', fixed: NZ, dir: -1 },           // z=+sz/2 → 朝 +z
+    { along: 'z', fixed: 0, dir: -1 },            // x=−sx/2 → 朝 −x
+    { along: 'z', fixed: NX, dir: 1 },            // x=+sx/2 → 朝 +x
+  ];
+  for (const e of edges) {
+    const n = e.along === 'x' ? NX + 1 : NZ + 1;
+    const base = verts.length / 3;
+    for (let t = 0; t < n; t++) {
+      let x, z;
+      if (e.along === 'x') { x = -sx / 2 + (t / NX) * sx; z = -sz / 2 + (e.fixed / NZ) * sz; }
+      else { x = -sx / 2 + (e.fixed / NX) * sx; z = -sz / 2 + (t / NZ) * sz; }
+      verts.push(x, hAt(x, z), z, x, -sy, z);
+    }
+    for (let t = 0; t < n - 1; t++) {
+      const t0 = base + t * 2, b0 = t0 + 1, t1 = t0 + 2, b1 = t0 + 3;
+      if (e.dir > 0) idx.push(b0, t0, t1, b0, t1, b1);
+      else idx.push(t0, b0, b1, t0, b1, t1);
+    }
+  }
+  const bb = verts.length / 3;
+  verts.push(-sx / 2, -sy, -sz / 2, sx / 2, -sy, -sz / 2, -sx / 2, -sy, sz / 2, sx / 2, -sy, sz / 2);
+  idx.push(bb, bb + 1, bb + 3, bb, bb + 3, bb + 2);
+  return { verts: new Float32Array(verts), idx: new Uint32Array(idx) };
+}
+
+
 // 共享视觉件材质（MAT-2/3/4 + PER-42）：辐条/旗面/灯泡此前每实例每 rebuild 各 new 一份
 // （12 辐条转台=12 个材质），既费重建又泄漏 dispose 面——模块级共享，永不单独 dispose
 const SPOKE_MAT = new THREE.MeshStandardMaterial({ color: 0x8a6a48, roughness: 0.6, metalness: 0.1 });
@@ -393,6 +524,106 @@ export const COMPONENTS = {
     buildCollider: () => null,                     // 球走中心线解析约束，轨道自身无碰撞体
     spawnY: () => 0.02,
   },
+
+  curvedRamp: {
+    id: 'curvedRamp', label: '曲面坡道', category: '轨道和曲面',
+    desc: '幂律曲面滑道（曲率指数>1 凹面底端渐平 / <1 凸面拱顶可脱离），接触式真实法向力',
+    compat: '固定滑道；与球/块真实接触（凹面压紧、凸面足够快会脱离）；摩擦成对生效（取 min）',
+    defaults: { params: { length: 2.4, height: 1.0, width: 0.5, curveExp: 1.4 }, physics: { ...defaultPhysics('fixed', 0), friction: 0.3, restitution: 0.05 }, render: { material: 'marble' } },
+    schema: [
+      { key: 'length', label: '底边长', unit: 'm', min: 0.3, max: 12, step: 0.05 },
+      { key: 'height', label: '落差', unit: 'm', min: 0.05, max: 6, step: 0.05 },
+      { key: 'width', label: '宽', unit: 'm', min: 0.1, max: 6, step: 0.05 },
+      { key: 'curveExp', label: '曲率指数', unit: '', min: 0.3, max: 3, step: 0.05 },
+    ],
+    buildGeometry: (p) => {
+      const m = curvedMeshData(p.length, p.height, p.width, p.curveExp ?? 1.4);
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(m.verts, 3));
+      g.setIndex(new THREE.BufferAttribute(m.idx, 1));
+      g.computeVertexNormals();
+      return g;
+    },
+    buildCollider: (RAPIER, p) => {
+      const m = curvedMeshData(p.length, p.height, p.width, p.curveExp ?? 1.4);
+      // FIX_INTERNAL_EDGES：不修内边则球在 trimesh 上每帧吃鬼接触——实测能量蒸发 97%/弹跳失真（B5 实锤）
+      return RAPIER.ColliderDesc.trimesh(m.verts, m.idx, RAPIER.TriMeshFlags ? RAPIER.TriMeshFlags.FIX_INTERNAL_EDGES : undefined);
+    },
+    spawnY: () => 0.02,
+    computed: (p) => {
+      const pe = p.curveExp ?? 1.4;
+      const thTop = Math.atan(pe * p.height / p.length) * 180 / Math.PI;
+      const thBot = pe > 1 ? 0 : (pe < 1 ? 90 : thTop);   // 凹面底端切平 / 凸面底端趋竖直
+      return [
+        { key: 'slopeTopDeg', label: '顶端切线角', value: +thTop.toFixed(1), unit: '°' },
+        { key: 'slopeBotDeg', label: '底端切线角', value: +thBot.toFixed(1), unit: '°' },
+      ];
+    },
+  },
+
+  bowl: {
+    id: 'bowl', label: '碗形曲面', category: '轨道和曲面',
+    desc: '球冠内曲面碗（薄壳接触）：小球碗内往复震荡，微幅周期 T≈2π√((Rs−r)/g)，曲面版单摆',
+    compat: '固定碗面；球在腔内真实接触，能量守恒可对照；深径比钳 ≤0.88（球冠几何上限）',
+    defaults: { params: { radius: 0.8, depth: 0.35 }, physics: { ...defaultPhysics('fixed', 0), friction: 0.3, restitution: 0.05 }, render: { material: 'marble' } },
+    schema: [
+      { key: 'radius', label: '碗口半径', unit: 'm', min: 0.3, max: 2.5, step: 0.05 },
+      { key: 'depth', label: '碗深', unit: 'm', min: 0.05, max: 1.5, step: 0.05 },
+    ],
+    buildGeometry: (p) => {
+      const m = bowlMeshData(p.radius, p.depth);
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(m.verts, 3));
+      g.setIndex(new THREE.BufferAttribute(m.idx, 1));
+      g.computeVertexNormals();
+      return g;
+    },
+    buildCollider: (RAPIER, p) => {
+      const m = bowlMeshData(p.radius, p.depth);
+      // FIX_INTERNAL_EDGES：不修内边则球在 trimesh 上每帧吃鬼接触——实测能量蒸发 97%/弹跳失真（B5 实锤）
+      return RAPIER.ColliderDesc.trimesh(m.verts, m.idx, RAPIER.TriMeshFlags ? RAPIER.TriMeshFlags.FIX_INTERNAL_EDGES : undefined);
+    },
+    spawnY: () => 0.02,
+    computed: (p) => {
+      const D = Math.min(p.depth, p.radius * 0.88);
+      const Rs = (p.radius * p.radius + D * D) / (2 * D);
+      return [
+        { key: 'sphereR', label: '等效球面半径', value: +Rs.toFixed(3), unit: 'm' },
+        { key: 'smallT', label: '微幅周期参考', value: +(2 * Math.PI * Math.sqrt(Rs / 9.81)).toFixed(3), unit: 's' },
+      ];
+    },
+  },
+
+  waveFloor: {
+    id: 'waveFloor', label: '波浪路面', category: '轨道和曲面',
+    desc: '双频正弦叠加起伏路面（不规则地形）：法向力随坡度连续变化，球速快时波峰会颠簸跳离',
+    compat: '固定路面；真实接触——最大坡度≈atan(2π·波幅/波长·1.35)，与球/块摩擦成对生效',
+    defaults: { params: { sx: 6, sz: 1.6, waveLen: 0.8, waveAmp: 0.05 }, physics: { ...defaultPhysics('fixed', 0), friction: 0.3, restitution: 0.1 }, render: { material: 'marble' } },
+    schema: [
+      { key: 'sx', label: '路长', unit: 'm', min: 1, max: 20, step: 0.5 },
+      { key: 'sz', label: '路宽', unit: 'm', min: 0.4, max: 8, step: 0.2 },
+      { key: 'waveLen', label: '波长', unit: 'm', min: 0.2, max: 3, step: 0.05 },
+      { key: 'waveAmp', label: '波幅', unit: 'm', min: 0.005, max: 0.25, step: 0.005 },
+    ],
+    buildGeometry: (p) => {
+      const m = waveFloorMeshData(p.sx, p.sz, p.waveLen, p.waveAmp);
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(m.verts, 3));
+      g.setIndex(new THREE.BufferAttribute(m.idx, 1));
+      g.computeVertexNormals();
+      return g;
+    },
+    buildCollider: (RAPIER, p) => {
+      const m = waveFloorMeshData(p.sx, p.sz, p.waveLen, p.waveAmp);
+      // FIX_INTERNAL_EDGES：不修内边则球在 trimesh 上每帧吃鬼接触——实测能量蒸发 97%/弹跳失真（B5 实锤）
+      return RAPIER.ColliderDesc.trimesh(m.verts, m.idx, RAPIER.TriMeshFlags ? RAPIER.TriMeshFlags.FIX_INTERNAL_EDGES : undefined);
+    },
+    spawnY: () => 0.02,
+    computed: (p) => [
+      { key: 'maxSlopeDeg', label: '最大坡度', value: +(Math.atan(2 * Math.PI * p.waveAmp / p.waveLen * 1.35) * 180 / Math.PI).toFixed(1), unit: '°' },
+    ],
+  },
+
 
   celestial: {
     id: 'celestial', label: '天体', category: '天体',

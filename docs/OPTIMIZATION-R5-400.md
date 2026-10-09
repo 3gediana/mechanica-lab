@@ -17,6 +17,7 @@
 | B2 | 模型库波（新 fixture+explain 分支+p41 EXPECT 同步+units） | p41+单测 |
 | B3 | Agent 波（schema/prompt/本地指令/健壮性） | p36/p37/p39+单测 |
 | B4 | 效果波（juice/声音/镜头） | p33-play+视觉门样张 |
+| B5 | 曲面模型族（用户点单「不规则的曲面模型」）：curvedRamp/bowl/waveFloor 三组件+trimesh 管线(FIX_INTERNAL_EDGES)+curvedLayout+双解释器+fixtures×2+presets×3+PEDIT×3 | units 112/p41 106/p33 50/物理探针实锤(底速 3.90 vs √2gH=3.89、碗周期偏差 2.42%)/视觉门 5 张两轮 5/5 PASS |
 | 收官 | 全量 run-all + 台账勾选 + 记忆 | 38 套 ALL GREEN |
 
 ## 红线（全程有效）

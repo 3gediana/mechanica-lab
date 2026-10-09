@@ -103,3 +103,26 @@
 | MOD-580 | p41-model-coverage.mjs | EXPECT 表仅 19 条，缺 atwood/celestial/hinge/incline/momentum/momentum2d/projectile/spin/spin-real/spring 共 10 个 fixture 未进回归——补全(分别加 atwoodInfo 断言、gravitating 标志、revolute joint、ramp 几何等)；同时在表头注释统一各 explain 理论窗口(3%/5%/8%/35% 并存)的容忍理由，过松的(见 MOD-555)一并对齐 | 高 | S |
 
 **关键实测发现汇总**：567(launcher 理论值算错)、562/578(题设与 layout 硬编码摆角/振幅两张皮)、568(unknowns 与 assumptions 自相矛盾)、580(p41 缺 10 个 fixture 断言)是优先级最高的五项。
+
+## C. 曲面模型族（B5 旗舰波，2026-10-09，MOD-581~596）
+
+用户点单「不规则的曲面模型」。接触式曲面=真实法向力（凹面压紧/凸面趋离），与 track 中心线解析约束互补；渲染 BufferGeometry 与 Rapier trimesh 由同一份网格数据生成（几何/物理永不两张皮）。
+
+| 编号 | 内容 | P | 状态 |
+|---|---|---|---|
+| MOD-581 | curvedRamp 曲面坡道组件：幂律剖面 y=H·(1−u)^p（曲率指数 0.3~3：>1 凹面底端渐平 / <1 凸面拱顶 / =1 直楔），16 段挤出+共享顶点平滑法线，computed 顶/底切线角 | 高 | ✅B5 |
+| MOD-582 | bowl 碗形曲面组件：球冠薄壳 Rs=(R²+D²)/2D、深径比钳 ≤0.88，环带+碗底单顶点扇（顶点环全点重合=退化三角形，求解器毒药——B5 实锤），computed 等效球面半径/微幅周期 | 高 | ✅B5 |
+| MOD-583 | waveFloor 波浪路面组件：双频正弦叠加（横向 0.7 倍频相位调制=不规则地形），96×16 网格（波形保真 12.8 段/波长；视觉门实锤 4.8 段出锯齿棱面），computed 最大坡度 | 高 | ✅B5 |
+| MOD-584 | trimesh 碰撞管线：ColliderDesc.trimesh 第三参挂 TriMeshFlags.FIX_INTERNAL_EDGES——不修内边球在 trimesh 上吃鬼接触（实测能量蒸发 97%、下行 5×慢，B5 双实锤） | 高 | ✅B5 |
+| MOD-585 | parse-schema 接入：TYPE_MAP 中英文别名（曲面/弧面/滑道/碗/盆形/波浪面/起伏路面…）+RANGES(curveExp/depth/waveLen/waveAmp/sx/sz)+光滑语义 CONTACT 集合扩曲面三件 | 高 | ✅B5 |
+| MOD-586 | curvedLayout 布局：曲面+球+可选地面整场接管（插在抛体分支前——曲面+单球+地面长得像抛体会被拿去算射程）；碗=开口上方 0.3R 落入（凹腔被 26 向嵌入检查按被包围方向数天然判埋，贴腔起点必被自动修复阶梯抬成悬空——B5 双次实锤，嵌入核对对 bowl 置 0 豁免）；坡=u0=0.15 同高并排车道；波=落点+无初速默认 1.2m/s 推进（推断亮 uncertain）；接引地面自动补齐且顶面与坡底齐平、尊重题给位置 | 高 | ✅B5 |
+| MOD-587 | explainCurvedDescent：能量口径任意捕获点 v=√(2g·Δh)（凸面脱离也成立）+分段匀加速闭式剖面耗时积分+同落差直坡对比文案；实测底速 3.90 vs 理论 3.89（探针实锤） | 高 | ✅B5 |
+| MOD-588 | explainBowl：T=2π√((Rs−r)/g) 等效摆长，横摆峰值间隔测周期（与单摆共用新抽 medianPeakPeriod/dominantAxis 助手）；实测偏差 2.42% | 高 | ✅B5 |
+| MOD-589 | 渲染分派+探针窗口：renderBowlExplain/renderCurvedExplain 两卡；窗口 bowl 6s（≥2 周期）/curved 3.5s，motionProbe+runAndExplain 双处同步；isCurved 从 isProjectile/isMomentum 兜底摘除 | 高 | ✅B5 |
+| MOD-590 | PEDIT 表 ×3（曲面族参数 agent 修订可编辑；PEDIT[e.type] 直接迭代无守卫，漏表=解析预览崩——R41 教训复验） | 高 | ✅B5 |
+| MOD-591 | preset curvedRace 曲面滑道竞速：直坡(26.6°) vs 凹曲面(1.6) 同落差 0.825m，末速同 √(2gH)=4.03 耗时不同；场景收拢+相机位（视觉门 2 轮） | 高 | ✅B5 |
+| MOD-592 | preset bowlOsc 碗中小球：T≈2.02s 曲面版单摆，能量往复可见 | 高 | ✅B5 |
+| MOD-593 | preset waveRoad 波浪路面：波峰曲率 ρ=1/(A·k²)≈0.32m、临界脱离 √(gρ)≈1.78 < 球速 2.4 → 周期性颠簸跳离 | 中 | ✅B5 |
+| MOD-594 | fixture parse-curved-descent.json（滑道+球+接引地面）+p41 EXPECT（自查零 error/实体齐备） | 高 | ✅B5 |
+| MOD-595 | fixture parse-bowl.json（碗+球）+p41 EXPECT | 高 | ✅B5 |
+| MOD-596 | 单测 ×2（闭式能量轨迹末速/小角碗震周期——容差 1e-3 对齐 explain 出口 toFixed(3) 舍入）；units 112/112、p41 106/106、p33 50/50、check.py 过；视觉门样张 5 张两轮收敛 5/5 PASS | 高 | ✅B5 |

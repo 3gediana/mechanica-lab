@@ -275,3 +275,58 @@ test('自由落体：t=√(2h/g)，双球不同质量同时落地（伽利略）
   assert.equal(r.pass, true, JSON.stringify(r.rows));
   assert.ok(Math.abs(r.rows[0].tTheo - tFall) < 1e-3, `t 理论=${r.rows[0].tTheo} 期望 ${tFall.toFixed(3)}`);   // rows 输出口径 toFixed(3)
 });
+
+// ---------- 曲面滑道（B5/MOD-581）：闭式能量轨迹 v=√(2g·Δh)，形状无关 ----------
+test('曲面下滑：能量口径闭式轨迹末速一致', () => {
+  const L = 2.4, H = 1.0, p = 1.6, r = 0.1, g = G0;
+  const profY = (u) => H * Math.pow(1 - u, p);
+  const u0 = 0.15, drop = profY(u0);
+  const doc = mk({
+    entities: [
+      { id: 'cr', type: 'curvedRamp', physics: { body: 'fixed', friction: 0 }, params: { length: L, height: H, curveExp: p } },
+      { id: 'b', type: 'sphere', physics: { body: 'dynamic', mass: 0.5, friction: 0, linvel: [0, 0, 0] }, transform: { pos: [-L / 2 + u0 * L, drop + r, 0] }, params: { radius: r } },
+    ],
+  });
+  const series = [];
+  let t = 0, u = u0;
+  series.push({ t, pos: [-L / 2 + u * L, profY(u) + r, 0], speed: 0, vel: [0, 0, 0] });
+  const N = 600;
+  for (let i = 1; i <= N; i++) {
+    const u2 = u0 + (1 - u0) * i / N;
+    const ds = Math.hypot((u2 - u) * L, profY(u2) - profY(u));
+    const v = Math.sqrt(Math.max(2 * g * (drop - profY(u2)), 1e-9));
+    t += ds / v;
+    series.push({ t, pos: [-L / 2 + u2 * L, profY(u2) + r, 0], speed: v, vel: [v, 0, 0] });
+    u = u2;
+  }
+  const res = explainRun({ observations: ['坡底速度'] }, doc, series);
+  assert.equal(res.kind, 'curved-descent');
+  assert.ok(res.pass, `errPct=${res.errPct}`);
+  assert.ok(Math.abs(res.theoretical.speed - Math.sqrt(2 * g * drop)) < 1e-3);   // explain 出口 toFixed(3) 展示舍入
+});
+
+// ---------- 碗内震荡（B5/MOD-582）：小角闭式轨迹 T=2π√((Rs−r)/g) ----------
+test('碗面震荡：等效摆长公式周期一致', () => {
+  const R = 0.8, D = 0.35, r = 0.08, g = G0;
+  const Rs = (R * R + D * D) / (2 * D);
+  const T0 = 2 * Math.PI * Math.sqrt((Rs - r) / g);
+  const phi0 = Math.asin(0.44 / Rs);
+  const doc = mk({
+    entities: [
+      { id: 'bw', type: 'bowl', physics: { body: 'fixed', friction: 0 }, params: { radius: R, depth: D } },
+      { id: 'b', type: 'sphere', physics: { body: 'dynamic', mass: 0.3, friction: 0, linvel: [0, 0, 0] }, transform: { pos: [(Rs - r) * Math.sin(phi0), Rs - (Rs - r) * Math.cos(phi0), 0] }, params: { radius: r } },
+    ],
+  });
+  const series = [];
+  for (let t = 0; t <= 5.6; t += 1 / 60) {
+    const th = phi0 * Math.cos(2 * Math.PI * t / T0);
+    const x = (Rs - r) * Math.sin(th);
+    const y = Rs - (Rs - r) * Math.cos(th);
+    const vx = (Rs - r) * Math.cos(th) * (-phi0 * 2 * Math.PI / T0 * Math.sin(2 * Math.PI * t / T0));
+    series.push({ t, pos: [x, y, 0], speed: Math.abs(vx), vel: [vx, 0, 0] });
+  }
+  const res = explainRun({ observations: ['周期'] }, doc, series);
+  assert.equal(res.kind, 'bowl-osc');
+  assert.ok(res.pass, `errPct=${res.errPct}`);
+  assert.ok(Math.abs(res.theoretical.period - T0) < 1e-9);
+});

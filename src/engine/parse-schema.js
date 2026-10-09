@@ -5,6 +5,10 @@ const TYPE_MAP = {
   ramp: 'ramp', sphere: 'sphere', box: 'box', cylinder: 'cylinder', ground: 'ground',
   celestial: 'celestial', planet: 'celestial', star: 'celestial', pulley: 'pulley', 滑轮: 'pulley',
   conveyor: 'conveyor', belt: 'conveyor',
+  curvedRamp: 'curvedRamp', bowl: 'bowl', waveFloor: 'waveFloor',
+  曲面坡道: 'curvedRamp', 曲面: 'curvedRamp', 弧面: 'curvedRamp', 滑道: 'curvedRamp',
+  碗: 'bowl', 碗形: 'bowl', 碗面: 'bowl', 盆形: 'bowl',
+  波浪路面: 'waveFloor', 波浪面: 'waveFloor', 起伏路面: 'waveFloor', 波纹路面: 'waveFloor',
   斜面: 'ramp', 球: 'sphere', 方块: 'box', 圆柱: 'cylinder', 地面: 'ground',
   天体: 'celestial', 行星: 'celestial', 恒星: 'celestial', 卫星: 'celestial',
   传送带: 'conveyor', 输送带: 'conveyor',
@@ -32,6 +36,9 @@ const RANGES = {
   radius: [0.01, 2], mass: [0.01, 10000], friction: [0, 2], restitution: [0, 1],
   speed: [-8, 8],   // 传送带带速（负值反向输运）
   momentOfInertia: [0.001, 1e6], momentInertia: [0.001, 1e6],   // 转台类：模型两种拼写都收
+  curveExp: [0.3, 3], depth: [0.05, 1.5],       // 曲面族（B5）：曲率指数/碗深
+  waveLen: [0.2, 3], waveAmp: [0.005, 0.25],    // 波浪路面波长/波幅
+  sx: [1, 20], sz: [0.4, 8],                    // 波浪路面长宽（ground 也可复用）
 };
 
 // given 键别名归一（AG-527）：模型偶发输出 mu/μ→friction、v0→velocity、m→mass、theta→angleDeg
@@ -209,7 +216,7 @@ export function normalizeParse(raw) {
   // 「推断」徽标——不冒充题给，用户可在评审表单改回。
   const smoothText = [plan.questionType, plan.goal, plan.environment, ...plan.assumptions].join(' ');
   if (/光滑|不计(一切)?摩擦|无摩擦|忽略.{0,2}摩擦|摩擦可?忽略/.test(smoothText)) {
-    const CONTACT = new Set(['ramp', 'ground', 'sphere', 'box', 'cylinder']);
+    const CONTACT = new Set(['ramp', 'ground', 'sphere', 'box', 'cylinder', 'curvedRamp', 'bowl', 'waveFloor']);
     let injected = false;
     for (const e of plan.entities) {
       if (CONTACT.has(e.type) && e.given.friction == null) {
@@ -379,6 +386,145 @@ function rotationLayout(plan) {
   return out;
 }
 
+// ---------- 曲面布局（B5）：curvedRamp/bowl/waveFloor 任一在计划即接管 ----------
+// 三类曲面是接触面语义，球应落在曲面上；放任走抛体/通用分支会把球摆到悬空点或按楔体摆错位。
+// 只认「曲面+球+可选地面」的干净计划；混入其它结构（attach/joint/块）回退通用路径并亮原因。
+function curvedLayout(plan) {
+  const CR = plan.entities.find((e) => e.type === 'curvedRamp');
+  const BW = plan.entities.find((e) => e.type === 'bowl');
+  const WV = plan.entities.find((e) => e.type === 'waveFloor');
+  if (!CR && !BW && !WV) return [];
+  const okTypes = new Set(['curvedRamp', 'bowl', 'waveFloor', 'sphere', 'ground']);
+  if (plan.entities.some((e) => !okTypes.has(e.type)) || (plan.attaches || []).length) {
+    plan.uncertain.push('曲面场景混入曲面外结构，未按曲面专用布局建场（已回退通用摆位），请检查实体数量');
+    return [];
+  }
+  const balls = plan.entities.filter((e) => e.type === 'sphere');
+  if (!balls.length) plan.uncertain.push('曲面场景没有运动对象（球），仅建固定曲面');
+  // 摩擦成对最小值（同斜面口径）：曲面与球任一侧显式给 friction 都算
+  const fList = [...[CR, BW, WV].filter(Boolean).map((e) => e.given.friction), ...balls.map((e) => e.given.friction)]
+    .filter((v) => v != null);
+  const pairF = fList.length ? Math.min(...fList) : null;
+  const ballPhy = (e, defF) => ({
+    body: 'dynamic', mass: e.given.mass ?? 0.5,
+    friction: e.given.friction ?? pairF ?? defF,
+    restitution: e.given.restitution ?? 0,
+    linvel: e.given.velocity ? [...e.given.velocity] : [0, 0, 0],
+    angvel: [0, 0, 0], linDamping: 0, angDamping: 0.02, gravityScale: 1,
+  });
+  const surfPhy = (e, defF) => ({
+    body: 'fixed',
+    friction: e.given.friction ?? pairF ?? defF,
+    restitution: e.given.restitution ?? 0.05,
+  });
+  const out = [];
+
+  // 碗：碗底朝上放（y=0 为碗底）；球自碗口上方 0.3R 偏落入碗（幅度≈12°，微幅周期窗口内）
+  if (BW) {
+    const R = BW.given.radius ?? 0.8;
+    const D = Math.min(BW.given.depth ?? 0.35, R * 0.88);
+    const Rs = (R * R + D * D) / (2 * D);
+    out.push({
+      type: 'bowl', name: BW.name || '碗形曲面', source: 'agent',
+      params: { radius: R, depth: +D.toFixed(3) },
+      transform: { pos: [0, 0.02, 0], rot: [0, 0, 0] },
+      physics: surfPhy(BW, 0.3),
+      render: { material: 'marble' },
+    });
+    balls.forEach((e, i) => {
+      const r = e.given.radius ?? 0.12;
+      // 从碗口上方落入：凹腔天然「包住」球——26 向嵌入检查按被包围方向数计埋，贴腔起点
+      // 必判埋、自动修复会把碗阶梯抬成悬空（B5 两次实锤）。开口上方起点射线全净，落碗即振。
+      const bx = 0.3 * R;
+      const by = 0.02 + D + r * 1.6;
+      const laneZ = balls.length > 1 ? (i - (balls.length - 1) / 2) * 0.24 : 0;
+      out.push({
+        type: 'sphere', name: e.name || '震荡球', source: 'agent',
+        params: { radius: r },
+        transform: { pos: e.given.position ?? [+bx.toFixed(3), +by.toFixed(3), +laneZ.toFixed(3)], rot: [0, 0, 0] },
+        physics: ballPhy(e, 0),
+        render: { material: 'chrome' },
+        measured: true,
+      });
+    });
+    return out;
+  }
+
+  // 曲面坡道：高墙在 −x；球自 u0=0.15 剖面处静止释放（多球并排车道，同高同放——竞速口径）
+  if (CR) {
+    const L = CR.given.length ?? 2.4, H = CR.given.height ?? 1.0;
+    const pExp = CR.given.curveExp ?? 1.4;
+    const W = Math.max(CR.given.width ?? 0, balls.length > 1 ? +(balls.length * 0.75).toFixed(3) : 0.5);
+    out.push({
+      type: 'curvedRamp', name: CR.name || '曲面滑道', source: 'agent',
+      params: { length: +L.toFixed(3), height: +H.toFixed(3), width: +W.toFixed(3), curveExp: pExp },
+      transform: { pos: [0, 0.05, 0], rot: [0, 0, 0] },
+      physics: surfPhy(CR, 0.3),
+      render: { material: 'marble' },
+    });
+    balls.forEach((e, i) => {
+      const r = e.given.radius ?? 0.1;
+      const u0 = 0.15;
+      const yTop = H * Math.pow(1 - u0, pExp);
+      const laneZ = balls.length > 1 ? (i - (balls.length - 1) / 2) * 0.75 : 0;
+      out.push({
+        type: 'sphere', name: e.name || '滑球', source: 'agent',
+        params: { radius: r },
+        transform: {
+          pos: e.given.position ?? [
+            +(-L / 2 + u0 * L).toFixed(3),
+            +(0.05 + yTop + r * 1.1 + 0.008).toFixed(3),   // 1.1r+8mm 留隙：贴面判嵌入触发自动修复
+            +laneZ.toFixed(3),
+          ],
+          rot: [0, 0, 0],
+        },
+        physics: ballPhy(e, 0.3),
+        render: { material: 'chrome' },
+        measured: true,
+      });
+    });
+    // 接引地面：plan 没给就自动补（球滑出坡底有承接，能量对照才有意义）；顶面与坡底面齐平
+    const gE = plan.entities.find((e) => e.type === 'ground');
+    out.push({
+      type: 'ground', name: (gE && gE.name) || '接引地面', source: 'agent',
+      params: { sx: +(L + 8).toFixed(2), sy: 0.1, sz: 6 },
+      transform: { pos: gE && gE.given.position ? [...gE.given.position] : [+(L / 2 + 3).toFixed(2), 0, 0], rot: [0, 0, 0] },
+      physics: { body: 'fixed', friction: gE && gE.given.friction != null ? gE.given.friction : 0.4, restitution: 0.2 },
+    });
+    return out;
+  }
+
+  // 波浪路面：球从路面上方落下；未题给初速时默认 1.2 m/s 沿路推进（纯落球无演示价值，
+  // 推断亮进 uncertain 供评审改）——与「光滑语义注入」同一确定性问题推断口径
+  const sx = WV.given.sx ?? 6, sz = WV.given.sz ?? 1.6;
+  const lambda = WV.given.waveLen ?? 0.8, amp = WV.given.waveAmp ?? 0.05;
+  out.push({
+    type: 'waveFloor', name: WV.name || '波浪路面', source: 'agent',
+    params: { sx, sz, waveLen: lambda, waveAmp: amp },
+    transform: { pos: [0, 0, 0], rot: [0, 0, 0] },
+    physics: surfPhy(WV, 0.25),
+    render: { material: 'marble' },
+  });
+  balls.forEach((e, i) => {
+    const r = e.given.radius ?? 0.12;
+    const hasV = e.given.velocity && e.given.velocity.some((v) => Math.abs(v) > 1e-9);
+    if (!hasV && i === 0) plan.uncertain.push('未题给初速，波浪路面球默认 1.2 m/s 沿路推进（推断，可在评审修改）');
+    const laneZ = balls.length > 1 ? (i - (balls.length - 1) / 2) * 0.3 : 0;
+    out.push({
+      type: 'sphere', name: e.name || '滚球', source: 'agent',
+      params: { radius: r },
+      transform: { pos: e.given.position ?? [0, +(amp * 1.35 + r + 0.5).toFixed(3), +laneZ.toFixed(3)], rot: [0, 0, 0] },
+      physics: {
+        ...ballPhy(e, 0.25),
+        linvel: hasV ? [...e.given.velocity] : [1.2, 0, 0],
+      },
+      render: { material: 'chrome' },
+      measured: true,
+    });
+  });
+  return out;
+}
+
 // ---------- 建场计划：plan → 每实体的 registry overrides（位置/参数/物理） ----------
 // 布局规则：斜面置原点；球按斜面几何放到近顶端面（留球半径避让高墙）；其余放原点上方。
 // 几何语义：题目"斜面长"= 坡面长（斜边）；registry 的 length/height 是底边水平长与高，
@@ -392,6 +538,10 @@ export function planToOverrides(plan) {
     // AG-95：摆球数≠2 时不再静默建场 0 实体——回退通用布局并让用户在评审界面看见原因
     if (!plan.uncertain.some((u) => u.includes('阿特伍德'))) plan.uncertain.push('摆球数≠2，未按阿特伍德专用布局建场（已回退通用摆位），请检查实体数量');
   }
+  // 曲面布局（B5）：在抛体分支前接管——曲面+单球+地面长得像抛体（球从高处带速落地），
+  // 不先接管会被算「射程」
+  const curv = curvedLayout(plan);
+  if (curv.length) return curv;
   const ramp = plan.entities.find((e) => e.type === 'ramp');
   // 抛体布局：单球带斜向初速（无斜面）→ 球 + 地面板（抛物线落到地面）
   const projBalls = plan.entities.filter((e) => (e.type === 'sphere') && (e.given.velocity || []).some((v) => Math.abs(v) > 1e-9));

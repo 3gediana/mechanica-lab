@@ -3647,6 +3647,22 @@ const PEDIT = {
     ['radius', '半径', 'm', 0.12, [0.01, 2]],
     ['height', '高', 'm', 0.3, [0.02, 8]],
   ],
+  curvedRamp: [
+    ['curveExp', '曲率指数', '', 1.4, [0.3, 3]],
+    ['length', '底边长', 'm', 2.4, [0.3, 12]],
+    ['height', '落差', 'm', 1.0, [0.05, 6]],
+    ['width', '宽', 'm', 0.5, [0.1, 6]],
+  ],
+  bowl: [
+    ['radius', '碗口半径', 'm', 0.8, [0.3, 2.5]],
+    ['depth', '碗深', 'm', 0.35, [0.05, 1.5]],
+  ],
+  waveFloor: [
+    ['sx', '路长', 'm', 6, [1, 20]],
+    ['sz', '路宽', 'm', 1.6, [0.4, 8]],
+    ['waveLen', '波长', 'm', 0.8, [0.2, 3]],
+    ['waveAmp', '波幅', 'm', 0.05, [0.005, 0.25]],
+  ],
   ground: [],
   pulley: [],
   celestial: [
@@ -5031,7 +5047,11 @@ async function runAgentVerifyInner() {
   const ctx = agentVerifyCtx;
   // ---- 1. 静态核对：穿透（26 向射线）+ 坡面语义/题给位置/连接（纯函数） ----
   const penetrations = {};
-  for (const it of ctx.items) penetrations[it.id] = entityPoseBlocked(it.id, it.pos) || 0;
+  for (const it of ctx.items) {
+    // bowl=开放薄壳：自心 26 向射线必穿自家开口打到腔内物体，误判「碗嵌球」并把碗阶梯
+    // 抬成悬空（B5 双次实锤）。凹腔内的球由球自身嵌入核对兜底（球的射线只扫到局部碗壁）。
+    penetrations[it.id] = it.type === 'bowl' ? 0 : (entityPoseBlocked(it.id, it.pos) || 0);
+  }
   let findings = auditStatic({ ...ctx, penetrations });
   // ---- 2. 自动修复（一轮 ≤6 处）：嵌入抬升 / 坡面重算落点 / 题给位置还原 ----
   let repaired = 0;
@@ -5127,10 +5147,14 @@ async function motionProbe() {
   const isPendulum = !hasRamp && !isSpring && !isAtwood && !isHinge && !isAstro
     && doc.entities.some((e) => e.type === 'rope')
     && doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic').length === 1;
-  const isProjectile = !hasRamp && !isSpring && !isAtwood && !isHinge && !isAstro && !isPendulum && hasGround
+  // 曲面族（B5）：碗震荡 T≈2s 需 ≥2 周期（6s）；曲面下滑 3.5s 够到坡底+捕获。
+  // 须在 isProjectile 前摘走——曲面+单球+地面长得像抛体，会被拿去按滞空算窗口
+  const isBowl = !isPendulum && doc.entities.some((e) => e.type === 'bowl');
+  const isCurved = !isPendulum && (isBowl || doc.entities.some((e) => e.type === 'curvedRamp'));
+  const isProjectile = !hasRamp && !isSpring && !isAtwood && !isHinge && !isAstro && !isPendulum && !isCurved && hasGround
     && doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic').length === 1;
-  const isMomentum = !hasRamp && !isAstro && !isRotation && !isSpring && !isAtwood && !isHinge && !isProjectile && !isPendulum;
-  let needT = isProjectile ? 2.5 : (isHinge ? 5.5 : (isAtwood ? 1.6 : (isSpring ? 6.5 : (isAstro ? 11 : (isRotation ? 3.5 : (isMomentum ? 2.0 : (isPendulum ? 5 : 4)))))));
+  const isMomentum = !hasRamp && !isAstro && !isRotation && !isSpring && !isAtwood && !isHinge && !isProjectile && !isPendulum && !isCurved;
+  let needT = isProjectile ? 2.5 : (isHinge ? 5.5 : (isAtwood ? 1.6 : (isSpring ? 6.5 : (isAstro ? 11 : (isRotation ? 3.5 : (isMomentum ? 2.0 : (isPendulum ? 5 : (isBowl ? 6 : (isCurved ? 3.5 : 4)))))))));
   if (isProjectile) {
     // AG-568：抛体固定 2.5s 窗口在低重力/长滞空误判（月面斜抛滞空 6.25s → 理论对照假阳 44.4%）。
     // 窗口按真实滞空动态给：t=(vy0+√(vy0²+2g·h0))/g 再留 35% 采样余量，上限 14s
@@ -5308,7 +5332,11 @@ async function runAndExplain() {
   const isPendulum = !hasRamp && !isSpring && !isAtwood && !isHinge && !isAstro
     && doc.entities.some((e) => e.type === 'rope')
     && doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic').length === 1;
-  const isProjectile = !hasRamp && !isSpring && !isAtwood && !isHinge && !isAstro && !isPendulum
+  // 曲面族（B5）：碗震荡 T≈2s 需 ≥2 周期（6s）；曲面下滑 3.5s 够到坡底+捕获。
+  // 须在 isProjectile 前摘走——曲面+单球+地面长得像抛体，会被拿去按滞空算窗口
+  const isBowl = !isPendulum && doc.entities.some((e) => e.type === 'bowl');
+  const isCurved = !isPendulum && (isBowl || doc.entities.some((e) => e.type === 'curvedRamp'));
+  const isProjectile = !hasRamp && !isSpring && !isAtwood && !isHinge && !isAstro && !isPendulum && !isCurved
     && hasGround && doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic').length === 1;
   if (mode !== 'edit') resetSim();
 
@@ -5317,8 +5345,8 @@ async function runAndExplain() {
   const btn = $('btnRunExplain');
   btn.disabled = true;
   setBtnText('btnRunExplain', '运行并记录中…');
-  const isMomentum = !hasRamp && !isAstro && !isRotation && !isSpring && !isAtwood && !isHinge && !isProjectile && !isPendulum;
-  let needT = isProjectile ? 2.5 : (isHinge ? 5.5 : (isAtwood ? 1.6 : (isSpring ? 6.5 : (isAstro ? 11 : (isRotation ? 3.5 : (isMomentum ? 2.0 : (isPendulum ? 5 : 4)))))));
+  const isMomentum = !hasRamp && !isAstro && !isRotation && !isSpring && !isAtwood && !isHinge && !isProjectile && !isPendulum && !isCurved;
+  let needT = isProjectile ? 2.5 : (isHinge ? 5.5 : (isAtwood ? 1.6 : (isSpring ? 6.5 : (isAstro ? 11 : (isRotation ? 3.5 : (isMomentum ? 2.0 : (isPendulum ? 5 : (isBowl ? 6 : (isCurved ? 3.5 : 4)))))))));
   if (isProjectile) {
     // AG-568：抛体窗口按真实滞空动态给（同 motionProbe），月面/低重力不再假阳
     const g = Math.max(0.3, Math.abs(doc.gravity) || 9.81);
@@ -5526,6 +5554,55 @@ function renderPendulumExplain(r, box) {
   box.appendChild(p);
 }
 
+function renderBowlExplain(r, box) {
+  const grid = document.createElement('div');
+  grid.className = 'ro-grid';
+  const rows = [
+    ['球面半径 Rs=(R²+D²)/(2D)', `${r.theoretical.Rs.toFixed(3)} m`],
+    ['等效摆长 Rs−r', `${(r.theoretical.Rs - r.theoretical.r).toFixed(3)} m`],
+    ['周期（理论 2π√((Rs−r)/g)）', `${r.theoretical.period.toFixed(3)} s`],
+    ['周期（实测·峰值间隔法）', r.measured.period != null ? `${r.measured.period.toFixed(3)} s` : '采样中'],
+    ['周期偏差', r.errPct != null ? `${r.errPct.toFixed(2)}%` : '--'],
+    ['释放幅度', `${r.measured.angle0deg.toFixed(1)}°`],
+    ['判定', r.pass ? '通过（曲面版单摆公式验证）' : '未通过'],
+  ];
+  grid.innerHTML = rows.map(([k], i) =>
+    `<div class="cell" style="grid-column:1/-1"><span class="k">${k}</span><span class="v ${i === 6 ? 'acc' : 'plain'}"></span></div>`
+  ).join('');
+  [...grid.querySelectorAll('.v')].forEach((el, i) => { el.textContent = rows[i][1]; });
+  box.appendChild(grid);
+  const p = document.createElement('div');
+  p.className = 'hint';
+  p.style.marginTop = '8px';
+  p.textContent = r.summary;
+  box.appendChild(p);
+}
+
+function renderCurvedExplain(r, box) {
+  const grid = document.createElement('div');
+  grid.className = 'ro-grid';
+  const rows = [
+    ['有效落差 H', `${r.theoretical.drop.toFixed(3)} m`],
+    ['重力 g', `${r.theoretical.g} m/s²`],
+    ['坡底速度（理论 √(2gH)）', `${r.theoretical.speed.toFixed(3)} m/s`],
+    ['坡底速度（实测·能量口径）', r.measured.speed != null ? `${r.measured.speed.toFixed(3)} m/s` : '未捕获'],
+    ['速度偏差', r.errPct != null ? `${r.errPct.toFixed(2)}%` : '--'],
+    ['下滑耗时（实测/理论积分）', r.measured.duration != null && r.theoretical.duration != null
+      ? `${r.measured.duration.toFixed(3)} / ${r.theoretical.duration.toFixed(3)} s` : '--'],
+    ['判定', r.pass ? '通过（末速只由落差决定，与滑道形状无关）' : '未通过'],
+  ];
+  grid.innerHTML = rows.map(([k], i) =>
+    `<div class="cell" style="grid-column:1/-1"><span class="k">${k}</span><span class="v ${i === 6 ? 'acc' : 'plain'}"></span></div>`
+  ).join('');
+  [...grid.querySelectorAll('.v')].forEach((el, i) => { el.textContent = rows[i][1]; });
+  box.appendChild(grid);
+  const p = document.createElement('div');
+  p.className = 'hint';
+  p.style.marginTop = '8px';
+  p.textContent = r.summary;
+  box.appendChild(p);
+}
+
 function renderSpringExplain(r, box) {
   const grid = document.createElement('div');
   grid.className = 'ro-grid';
@@ -5644,6 +5721,8 @@ function renderMomentum2DExplain(r, box) {
   if (r.kind === 'rotation') { renderRotationExplain(r, box); return; }
   if (r.kind === 'spring') { renderSpringExplain(r, box); return; }
   if (r.kind === 'pendulum') { renderPendulumExplain(r, box); return; }
+  if (r.kind === 'bowl-osc') { renderBowlExplain(r, box); return; }
+  if (r.kind === 'curved-descent') { renderCurvedExplain(r, box); return; }
   if (r.kind === 'atwood') { renderAtwoodExplain(r, box); return; }
   if (r.kind === 'hinge') { renderHingeExplain(r, box); return; }
   if (r.kind === 'projectile') { renderProjectileExplain(r, box); return; }
