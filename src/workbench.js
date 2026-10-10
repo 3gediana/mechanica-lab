@@ -6011,6 +6011,29 @@ function renderMomentum2DExplain(r, box) {
   }
   if (r.kind === 'pendulum') { renderPendulumExplain(r, box); return; }
   if (r.kind === 'pendulum-compare') { renderPendulumCompareExplain(r, box); return; }
+  if (r.kind === 'conical') {
+    const grid2 = document.createElement('div');
+    grid2.className = 'ro-grid';
+    const rows = [
+      ['摆长 L / 稳态锥角 θ', `${r.theoretical.L.toFixed(3)} m / ${r.theoretical.thetaDeg.toFixed(1)}°`],
+      ['周期（理论 2π√(L·cosθ/g)）', `${r.theoretical.period.toFixed(3)} s`],
+      ['周期（实测·峰值间隔法）', `${r.measured.period.toFixed(3)} s`],
+      ['稳态水平半径（实测）', `${r.measured.rho.toFixed(3)} m`],
+      ['向心力 F=mg·tanθ', `${r.theoretical.Fc.toFixed(2)} N`],
+      ['判定', r.pass ? '通过（周期由 L·cosθ 决定,比同长单摆快）' : '未通过'],
+    ];
+    grid2.innerHTML = rows.map(([k2], i) =>
+      `<div class="cell" style="grid-column:1/-1"><span class="k">${k2}</span><span class="v ${i === 5 ? 'acc' : 'plain'}"></span></div>`
+    ).join('');
+    [...grid2.querySelectorAll('.v')].forEach((el, i) => { el.textContent = rows[i][1]; });
+    box.appendChild(grid2);
+    const p2 = document.createElement('div');
+    p2.className = 'hint';
+    p2.style.marginTop = '8px';
+    p2.textContent = r.summary;
+    box.appendChild(p2);
+    return;
+  }
   if (r.kind === 'bowl-osc') { renderBowlExplain(r, box); return; }
   if (r.kind === 'curved-descent') { renderCurvedExplain(r, box); return; }
   if (r.kind === 'atwood') { renderAtwoodExplain(r, box); return; }

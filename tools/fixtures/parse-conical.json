@@ -1,0 +1,67 @@
+{
+  "_fixture": true,
+  "_note": "本地示例解析数据（圆锥摆，MOD-503），验证稳态锥角与周期链路；不是真实模型输出",
+  "kind": "pendulum",
+  "questionType": "圆锥摆（水平匀速圆周·向心力）",
+  "goal": "绳长 1m 的小球获得切向初速做水平匀速圆周，测周期并与 T=2π√(L·cosθ/g) 对照（锥角 θ 由稳态半径反推）",
+  "gravity": 9.81,
+  "entities": [
+    {
+      "type": "box",
+      "name": "悬点支架",
+      "given": {
+        "position": [
+          0,
+          2.6,
+          0
+        ],
+        "fixed": 1,
+        "length": 0.25,
+        "height": 0.25,
+        "width": 0.25
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "sphere",
+      "name": "摆球",
+      "given": {
+        "mass": 0.5,
+        "radius": 0.12,
+        "position": [
+          0.5,
+          1.734,
+          0
+        ],
+        "velocity": [
+          0,
+          0,
+          1.6828
+        ],
+        "friction": 0
+      },
+      "confidence": 0.92
+    }
+  ],
+  "attaches": [
+    {
+      "type": "rope",
+      "from": 0,
+      "to": 1,
+      "length": 1.0
+    }
+  ],
+  "observations": [
+    "圆锥摆的周期与稳态锥角"
+  ],
+  "unknowns": [
+    "T",
+    "θ"
+  ],
+  "assumptions": [
+    "轻绳不可伸长",
+    "小球做水平匀速圆周运动（稳态锥角约30°）",
+    "空气阻力不计"
+  ],
+  "confidence": 0.92
+}

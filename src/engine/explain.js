@@ -30,6 +30,9 @@ export function explainRun(plan, doc, series, reports = [], astro = null, rotati
     return explainPendulumCompare(plan, doc, multiTrails);
   }
   if (hasRopeLink && spheres.length === 1 && dynBodies.length === 1 && !hasRamp && !hasSpring && !hasGrav) {
+    // MOD-503：带显著水平初速=圆锥摆（水平匀速圆周）;由静止释放=单摆
+    const v0 = spheres[0].physics.linvel || [0, 0, 0];
+    if (Math.hypot(v0[0], v0[2]) > 0.3 && series.length > 10) return explainConicalPendulum(plan, doc, series);
     return explainPendulum(plan, doc, series);
   }
   // 曲面族（B5）：curvedRamp/bowl 接触面场景——必须在抛体分支前（曲面+单球+地面恰好
@@ -223,6 +226,48 @@ function explainInelastic(plan, doc, reports, bodies) {
 // ---------- 单摆（MOD-501）：轻绳悬球小角摆动 T = 2π√(L/g)，与摆球质量无关 ----------
 // ---------- 双摆对照（MOD-502）：T∝√L——两摆各自测周期,比值对照 √(L1/L2) ----------
 // 数据走 multiTrails（全体动态体 1/60s 轨迹四元组 Map）——series 只录主测量体,双球周期须逐球取
+// ---------- 圆锥摆（MOD-503）：稳态锥角 θ, T=2π√(L·cosθ/g), F向=mg·tanθ ----------
+function explainConicalPendulum(plan, doc, series) {
+  const ball = doc.entities.find((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
+  const rope = doc.entities.find((e) => e.type === 'rope' && Array.isArray(e.attach) && e.attach.length === 2);
+  if (!ball || !rope) return { supported: false, reason: '圆锥摆解释需要 绳+摆球', summary: telemetrySummary(series) };
+  const anchor = doc.entities.find((e) => e.id === rope.attach.find((id) => id !== ball.id));
+  const g = Math.abs(doc.gravity) || 9.81;
+  const A = anchor.transform.pos, B = ball.transform.pos;
+  const L = Math.hypot(B[0] - A[0], B[1] - A[1], B[2] - A[2]);
+  // 稳态段(后 60%)实测:水平半径=两水平轴的均值幅度;高度均值→cosθ;周期=水平轴峰值间隔
+  const n2 = Math.floor(series.length * 0.4);
+  const tail = series.slice(n2);
+  const meanY = tail.reduce((a, p) => a + p.pos[1], 0) / tail.length;
+  const rho = Math.max(...tail.map((p) => Math.hypot(p.pos[0], p.pos[2])));
+  const rhoMean = tail.reduce((a, p) => a + Math.hypot(p.pos[0], p.pos[2]), 0) / tail.length;
+  const cosTh = Math.max(0.2, Math.min(0.98, (A[1] - meanY) / L));
+  const thetaDeg = Math.acos(cosTh) * 180 / Math.PI;
+  const Ttheory = 2 * Math.PI * Math.sqrt(L * cosTh / g);
+  const axis = tail.reduce((a, p) => a + Math.abs(p.pos[0]), 0) >= tail.reduce((a, p) => a + Math.abs(p.pos[2]), 0) ? 0 : 2;
+  const { T: Tmeasured, peaks } = medianPeakPeriod(tail.map((p, i) => ({ t: series[n2 + i].t, pos: p.pos, speed: p.speed, vel: p.vel })), axis);
+  if (Tmeasured == null) return { supported: false, reason: '圆周运动不足两个周期,加长运行', summary: telemetrySummary(series) };
+  const errPct = Math.abs(Tmeasured - Ttheory) / Ttheory * 100;
+  const pass = errPct < 8;
+  const Fc = ball.physics.mass * g * Math.tan(Math.acos(cosTh));
+  const summary = [
+    `圆锥摆（L=${L.toFixed(3)} m，稳态锥角 θ≈${thetaDeg.toFixed(1)}°，cosθ=${cosTh.toFixed(3)}）：`,
+    `理论周期 T=2π√(L·cosθ/g)=${Ttheory.toFixed(3)} s；向心力 F=mg·tanθ=${Fc.toFixed(2)} N（绳张力水平分量提供）。`,
+    `实测：稳态水平半径 ${rhoMean.toFixed(3)} m（峰值 ${rho.toFixed(3)}），周期 ${Tmeasured.toFixed(3)} s（峰值间隔法，${peaks} 峰），偏差 ${errPct.toFixed(2)}%。`,
+    pass ? '验证通过：圆锥摆周期只由竖直分量 L·cosθ 决定——比同长单摆快。' : '偏差偏大,建议核对初速是否切向（不应有竖直分量）。',
+  ].join('');
+  return {
+    supported: true,
+    kind: 'conical',
+    simT: series[series.length - 1].t,
+    observation: plan.observations[0] || '圆锥摆周期',
+    theoretical: { period: +Ttheory.toFixed(3), formula: 'T = 2π√(L·cosθ/g)', L: +L.toFixed(3), thetaDeg: +thetaDeg.toFixed(1), Fc: +Fc.toFixed(2) },
+    measured: { period: +Tmeasured.toFixed(3), rho: +rhoMean.toFixed(3), peaks },
+    errPct, pass,
+    summary,
+  };
+}
+
 function explainPendulumCompare(plan, doc, multiTrails) {
   const ropes = doc.entities.filter((e) => e.type === 'rope' && Array.isArray(e.attach) && e.attach.length === 2);
   const g = Math.abs(doc.gravity) || 9.81;
