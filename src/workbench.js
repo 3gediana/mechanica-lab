@@ -2898,7 +2898,8 @@ function updateAstroCons() {
 
 // ============ 底栏读数 + 检查器实时区 ============
 let roTimer = 0;
-const _beatAcc = { t: 0 };   // FX-524 节拍累时
+const _beatAcc = { t: 0 };
+let _pcTrailsAuto = false;   // MOD-502：双摆解释临时开的轨迹   // FX-524 节拍累时
 const _beatDots = [];        // FX-524 节拍点池(≤64)
 function _measuredMainId() {
   for (const e of doc.entities) if (e.measured) return e.id;
@@ -5312,6 +5313,11 @@ async function motionProbe() {
   const isPendulum = !hasRamp && !isSpring && !isAtwood && !isHinge && !isAstro
     && doc.entities.some((e) => e.type === 'rope')
     && doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic').length === 1;
+  // MOD-502 双摆对照：2 绳 2 球——窗口 5s（≥2 周期）+ 临时开 trails（逐球周期采样依赖）
+  const isPendulumCompare = !hasRamp && !isSpring && !isAtwood && !isHinge && !isAstro
+    && doc.entities.filter((e) => e.type === 'rope').length === 2
+    && doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic').length === 2;
+  if (isPendulumCompare && !trailsOn) { setTrails(true); _pcTrailsAuto = true; }
   // 曲面族（B5）：碗震荡 T≈2s 需 ≥2 周期（6s）；曲面下滑 3.5s 够到坡底+捕获。
   // 须在 isProjectile 前摘走——曲面+单球+地面长得像抛体，会被拿去按滞空算窗口
   const isBowl = !isPendulum && doc.entities.some((e) => e.type === 'bowl');
@@ -5319,7 +5325,7 @@ async function motionProbe() {
   const isProjectile = !hasRamp && !isSpring && !isAtwood && !isHinge && !isAstro && !isPendulum && !isCurved && hasGround
     && doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic').length === 1;
   const isMomentum = !hasRamp && !isAstro && !isRotation && !isSpring && !isAtwood && !isHinge && !isProjectile && !isPendulum && !isCurved;
-  let needT = isProjectile ? 2.5 : (isHinge ? 5.5 : (isAtwood ? 1.6 : (isSpring ? 6.5 : (isAstro ? 11 : (isRotation ? 3.5 : (isMomentum ? 2.0 : (isPendulum ? 5 : (isBowl ? 6 : (isCurved ? 3.5 : 4)))))))));
+let needT = (isProjectile ? 2.5 : (isHinge ? 5.5 : (isAtwood ? 1.6 : (isSpring ? 6.5 : (isAstro ? 11 : (isRotation ? 3.5 : (isMomentum ? 2.0 : (isPendulumCompare ? 5 : (isPendulum ? 5 : (isBowl ? 6 : (isCurved ? 3.5 : 4)))))))))));
   if (isProjectile) {
     // AG-568：抛体固定 2.5s 窗口在低重力/长滞空误判（月面斜抛滞空 6.25s → 理论对照假阳 44.4%）。
     // 窗口按真实滞空动态给：t=(vy0+√(vy0²+2g·h0))/g 再留 35% 采样余量，上限 14s
@@ -5386,7 +5392,7 @@ function verifyTheory({ series, flags }) {
   const r = explainRun(agentVerifyCtx.plan, doc, series, runtime.collisionReports,
     flags.isAstro ? astroWithDrift() : null,
     flags.isRotation ? rotationWithDrift() : null,
-    flags.isAtwood ? atwoodInfo() : null);
+    flags.isAtwood ? atwoodInfo() : null, runtime.trails);   // MOD-502：双摆对照走全体轨迹通道
   if (!r) return null;
   if (!r.supported) {
     return { sev: 'ok', cat: '理论对照', item: '题型', msg: `${r.reason || '该题型暂无确定性解释器'}（已做运动健全性检查）` };
@@ -5497,6 +5503,11 @@ async function runAndExplain() {
   const isPendulum = !hasRamp && !isSpring && !isAtwood && !isHinge && !isAstro
     && doc.entities.some((e) => e.type === 'rope')
     && doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic').length === 1;
+  // MOD-502 双摆对照：2 绳 2 球——窗口 5s（≥2 周期）+ 临时开 trails（逐球周期采样依赖）
+  const isPendulumCompare = !hasRamp && !isSpring && !isAtwood && !isHinge && !isAstro
+    && doc.entities.filter((e) => e.type === 'rope').length === 2
+    && doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic').length === 2;
+  if (isPendulumCompare && !trailsOn) { setTrails(true); _pcTrailsAuto = true; }
   // 曲面族（B5）：碗震荡 T≈2s 需 ≥2 周期（6s）；曲面下滑 3.5s 够到坡底+捕获。
   // 须在 isProjectile 前摘走——曲面+单球+地面长得像抛体，会被拿去按滞空算窗口
   const isBowl = !isPendulum && doc.entities.some((e) => e.type === 'bowl');
@@ -5511,7 +5522,7 @@ async function runAndExplain() {
   btn.disabled = true;
   setBtnText('btnRunExplain', '运行并记录中…');
   const isMomentum = !hasRamp && !isAstro && !isRotation && !isSpring && !isAtwood && !isHinge && !isProjectile && !isPendulum && !isCurved;
-  let needT = isProjectile ? 2.5 : (isHinge ? 5.5 : (isAtwood ? 1.6 : (isSpring ? 6.5 : (isAstro ? 11 : (isRotation ? 3.5 : (isMomentum ? 2.0 : (isPendulum ? 5 : (isBowl ? 6 : (isCurved ? 3.5 : 4)))))))));
+let needT = (isProjectile ? 2.5 : (isHinge ? 5.5 : (isAtwood ? 1.6 : (isSpring ? 6.5 : (isAstro ? 11 : (isRotation ? 3.5 : (isMomentum ? 2.0 : (isPendulumCompare ? 5 : (isPendulum ? 5 : (isBowl ? 6 : (isCurved ? 3.5 : 4)))))))))));
   if (isProjectile) {
     // AG-568：抛体窗口按真实滞空动态给（同 motionProbe），月面/低重力不再假阳
     const g = Math.max(0.3, Math.abs(doc.gravity) || 9.81);
@@ -5555,7 +5566,7 @@ async function runAndExplain() {
   const series = runtime.stopRecording();
   snapshotSeries(series, ball.name, agentPlan.questionType);   // DE-1：导出数据源快照（重置不丢）
   agentExplain = explainRun(agentPlan, doc, series, runtime.collisionReports,
-    isAstro ? astroWithDrift() : null, isRotation ? rotationWithDrift() : null, isAtwood ? atwoodInfo() : null);
+    isAstro ? astroWithDrift() : null, isRotation ? rotationWithDrift() : null, isAtwood ? atwoodInfo() : null, runtime.trails);   // MOD-502
   renderExplanation();
   setAgentStage(agentExplain && agentExplain.supported ? 'explained' : 'built', agentExplain && agentExplain.supported ? '解释已生成' : '暂无该题型解释器');
   $('btnCopyExplain').disabled = !(agentExplain && agentExplain.supported);
@@ -5715,6 +5726,29 @@ function renderPendulumExplain(r, box) {
   box.appendChild(grid);
   const p = document.createElement('div');
   p.className = 'hint';
+  p.textContent = r.summary;
+  box.appendChild(p);
+}
+
+function renderPendulumCompareExplain(r, box) {
+  const grid = document.createElement('div');
+  grid.className = 'ro-grid';
+  const rows = [
+    ['摆长 L₁ / L₂', `${r.theoretical.L1.toFixed(3)} / ${r.theoretical.L2.toFixed(3)} m`],
+    ['周期比（理论 √(L₁/L₂)）', `${r.theoretical.ratio.toFixed(4)}`],
+    ['周期比（实测 T₁/T₂）', `${r.measured.ratio.toFixed(4)}`],
+    ['各摆实测 T', `${r.measured.T1.toFixed(3)} s / ${r.measured.T2.toFixed(3)} s`],
+    ['比值偏差', `${r.errPct.toFixed(2)}%`],
+    ['判定', r.pass ? '通过（T∝√L：摆长减半，周期缩到 1/√2）' : '未通过'],
+  ];
+  grid.innerHTML = rows.map(([k], i) =>
+    `<div class="cell" style="grid-column:1/-1"><span class="k">${k}</span><span class="v ${i === 5 ? 'acc' : 'plain'}"></span></div>`
+  ).join('');
+  [...grid.querySelectorAll('.v')].forEach((el, i) => { el.textContent = rows[i][1]; });
+  box.appendChild(grid);
+  const p = document.createElement('div');
+  p.className = 'hint';
+  p.style.marginTop = '8px';
   p.textContent = r.summary;
   box.appendChild(p);
 }
@@ -5886,6 +5920,7 @@ function renderMomentum2DExplain(r, box) {
   if (r.kind === 'rotation') { renderRotationExplain(r, box); return; }
   if (r.kind === 'spring') { renderSpringExplain(r, box); return; }
   if (r.kind === 'pendulum') { renderPendulumExplain(r, box); return; }
+  if (r.kind === 'pendulum-compare') { renderPendulumCompareExplain(r, box); return; }
   if (r.kind === 'bowl-osc') { renderBowlExplain(r, box); return; }
   if (r.kind === 'curved-descent') { renderCurvedExplain(r, box); return; }
   if (r.kind === 'atwood') { renderAtwoodExplain(r, box); return; }

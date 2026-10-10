@@ -5,7 +5,7 @@
 const FIXED_EXIT_TOL = 0.015; // 球心越过斜面底边的判定余量 m（小余量，避免离面飞行段混入实测）
 
 // plan: normalizeParse 产物；doc: 场景文档；series: [{t,pos,speed,vel}]；reports: 碰撞报告；astro: 天体遥测
-export function explainRun(plan, doc, series, reports = [], astro = null, rotation = null, atwood = null) {
+export function explainRun(plan, doc, series, reports = [], astro = null, rotation = null, atwood = null, multiTrails = null) {
   const hasRamp = doc.entities.some((e) => e.type === 'ramp');
   const hasGrav = doc.entities.some((e) => e.physics && e.physics.gravitating);
   const hasSpring = doc.entities.some((e) => e.type === 'spring');
@@ -19,7 +19,12 @@ export function explainRun(plan, doc, series, reports = [], astro = null, rotati
   if (doc.entities.some((e) => e.type === 'conveyor') && series.length > 10) return explainConveyor(plan, doc, series);
   // 单摆（MOD-501）：轻绳悬单球——绳连接+恰好一个动态球、无斜面/弹簧/引力体（铰链复摆已在上面的
   // hasHinge 分支接管）。必须在动量分支前：绳+球会落进「两球对撞」兜底被误读
-  const hasRopeLink = doc.entities.some((e) => e.type === 'rope' && Array.isArray(e.attach) && e.attach.length === 2);
+  const ropes = doc.entities.filter((e) => e.type === 'rope' && Array.isArray(e.attach) && e.attach.length === 2);
+  const hasRopeLink = ropes.length > 0;
+  // 双摆对照（MOD-502）：两条绳+两球同角齐释 → T∝√L 验证（trails 通道逐球测周期）
+  if (ropes.length === 2 && spheres.length === 2 && dynBodies.length === 2 && !hasRamp && !hasSpring && !hasGrav && multiTrails) {
+    return explainPendulumCompare(plan, doc, multiTrails);
+  }
   if (hasRopeLink && spheres.length === 1 && dynBodies.length === 1 && !hasRamp && !hasSpring && !hasGrav) {
     return explainPendulum(plan, doc, series);
   }
@@ -212,6 +217,57 @@ function explainInelastic(plan, doc, reports, bodies) {
 }
 
 // ---------- 单摆（MOD-501）：轻绳悬球小角摆动 T = 2π√(L/g)，与摆球质量无关 ----------
+// ---------- 双摆对照（MOD-502）：T∝√L——两摆各自测周期,比值对照 √(L1/L2) ----------
+// 数据走 multiTrails（全体动态体 1/60s 轨迹四元组 Map）——series 只录主测量体,双球周期须逐球取
+function explainPendulumCompare(plan, doc, multiTrails) {
+  const ropes = doc.entities.filter((e) => e.type === 'rope' && Array.isArray(e.attach) && e.attach.length === 2);
+  const g = Math.abs(doc.gravity) || 9.81;
+  const rows = [];
+  for (const rope of ropes) {
+    const ballEnt = doc.entities.find((e) => e.id === rope.attach.find((id) => {
+      const t = doc.entities.find((x) => x.id === id);
+      return t && t.type === 'sphere' && t.physics.body === 'dynamic';
+    }));
+    const anchorId = rope.attach.find((id) => id !== (ballEnt && ballEnt.id));
+    const anchorEnt = doc.entities.find((e) => e.id === anchorId);
+    if (!ballEnt || !anchorEnt) return { supported: false, reason: '双摆解释需要每条绳都能对上 锚+球', summary: '结构不完整' };
+    const A = anchorEnt.transform.pos, B = ballEnt.transform.pos;
+    const L = Math.hypot(B[0] - A[0], B[1] - A[1], B[2] - A[2]);
+    const pts = multiTrails.get(ballEnt.id);
+    if (!pts || pts.length < 12) return { supported: false, reason: '双摆轨迹数据不足（需要开启轨迹采样运行更久）', summary: '采样不足' };
+    // trails 四元组 → 伪 series（t 按 1/60s 重构）复用峰值周期助手
+    const axis0 = Math.abs(B[0] - A[0]) >= Math.abs(B[2] - A[2]) ? 0 : 2;
+    const fake = pts.map((q, i) => ({ t: i / 60, pos: [q[0], q[1], q[2]], speed: q[3], vel: [0, 0, 0] }));
+    const { T, peaks } = medianPeakPeriod(fake, axis0);
+    rows.push({ name: ballEnt.name || '摆球', L, Ttheory: 2 * Math.PI * Math.sqrt(L / g), Tmeasured: T, peaks });
+  }
+  if (rows.length !== 2 || rows.some((r) => r.Tmeasured == null)) {
+    return { supported: false, reason: '运行时长不足（至少两个完整摆动）', summary: '周期未测全' };
+  }
+  const [r1, r2] = rows.slice().sort((a, b) => b.L - a.L);   // 长摆在前
+  const ratioTheory = Math.sqrt(r1.L / r2.L);
+  const ratioMeasured = r1.Tmeasured / r2.Tmeasured;
+  const errPct = Math.abs(ratioMeasured - ratioTheory) / ratioTheory * 100;
+  const pass = errPct < 8;
+  const summary = [
+    `双摆对照（L₁=${r1.L.toFixed(3)} m 与 L₂=${r2.L.toFixed(3)} m，同角齐释）：`,
+    `各摆理论 T=2π√(L/g)：${r1.name} ${r1.Ttheory.toFixed(3)} s / ${r2.name} ${r2.Ttheory.toFixed(3)} s。`,
+    `实测（峰值间隔法）：${r1.name} ${r1.Tmeasured.toFixed(3)} s（${r1.peaks} 峰）/ ${r2.name} ${r2.Tmeasured.toFixed(3)} s（${r2.peaks} 峰）。`,
+    `周期比 实测 ${ratioMeasured.toFixed(3)} vs 理论 √(L₁/L₂)=${ratioTheory.toFixed(3)}，偏差 ${errPct.toFixed(2)}%。`,
+    pass ? '验证通过：周期只与摆长平方根成正比——摆长减半,周期缩到 1/√2≈0.707。' : '比值偏差偏大,建议核对两摆是否同角由静止释放。',
+  ].join('');
+  return {
+    supported: true,
+    kind: 'pendulum-compare',
+    simT: null,
+    observation: plan.observations[0] || '双摆周期比',
+    theoretical: { ratio: +ratioTheory.toFixed(4), L1: r1.L, L2: r2.L, T1: +r1.Ttheory.toFixed(3), T2: +r2.Ttheory.toFixed(3) },
+    measured: { ratio: +ratioMeasured.toFixed(4), T1: +r1.Tmeasured.toFixed(3), T2: +r2.Tmeasured.toFixed(3) },
+    errPct, pass,
+    summary,
+  };
+}
+
 function explainPendulum(plan, doc, series) {
   const ball = doc.entities.find((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
   const rope = doc.entities.find((e) => e.type === 'rope' && Array.isArray(e.attach) && e.attach.length === 2);

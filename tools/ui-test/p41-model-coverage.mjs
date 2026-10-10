@@ -49,6 +49,7 @@ const EXPECT = [
   // R5-B5 曲面族（MOD-581~595）
   ['curved-descent', { has: ['curvedRamp', 'sphere', 'ground'] }],
   ['bowl', { has: ['bowl', 'sphere'] }],
+  ['pendulum-compare', { has: ['rope', 'sphere', 'box', 'ground'], ropeN: 2, sphereN: 2, n: 7 }],   // 4 题给体+2 绳+AG-542 自动承接地面
   ['recoil-unequal', { has: ['ground', 'sphere'], sphereN: 2 }],
   ['conveyor-reverse', { has: ['conveyor', 'sphere'] }],
   ['binary', { has: ['celestial'], celN: 2 }],

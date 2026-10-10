@@ -330,3 +330,34 @@ test('碗面震荡：等效摆长公式周期一致', () => {
   assert.ok(res.pass, `errPct=${res.errPct}`);
   assert.ok(Math.abs(res.theoretical.period - T0) < 1e-9);
 });
+
+// ---------- 双摆对照（MOD-502）：合成 trails 双正弦,T 比=√2 ----------
+test('双摆对照：T1/T2=√(L1/L2) 验证', () => {
+  const g = G0, L1 = 1.0, L2 = 0.5;
+  const T1 = 2 * Math.PI * Math.sqrt(L1 / g), T2 = 2 * Math.PI * Math.sqrt(L2 / g);
+  const mkTrails = (L, T) => {
+    const pts = [];
+    for (let i = 0; i < 60 * 6; i++) {   // 6s @ 60Hz
+      const th = 0.26 * Math.cos(2 * Math.PI * (i / 60) / T);
+      const x = L * Math.sin(th), y = 2.6 - L * Math.cos(th);
+      const v = Math.abs(-0.26 * 2 * Math.PI / T * Math.sin(2 * Math.PI * (i / 60) / T) * L);
+      pts.push([x, y, 0, v]);
+    }
+    return pts;
+  };
+  const doc = mk({
+    entities: [
+      { id: 'a1', type: 'box', physics: { body: 'fixed' }, transform: { pos: [-0.6, 2.6, 0] }, params: {} },
+      { id: 'b1', type: 'sphere', physics: { body: 'dynamic', mass: 0.5, linvel: [0, 0, 0] }, transform: { pos: [-0.341, 1.634, 0] }, params: { radius: 0.12 } },
+      { id: 'a2', type: 'box', physics: { body: 'fixed' }, transform: { pos: [0.6, 2.1, 0] }, params: {} },
+      { id: 'b2', type: 'sphere', physics: { body: 'dynamic', mass: 0.5, linvel: [0, 0, 0] }, transform: { pos: [0.729, 1.617, 0] }, params: { radius: 0.12 } },
+      { id: 'r1', type: 'rope', attach: ['a1', 'b1'], physics: {}, params: { length: L1 }, transform: { pos: [0, 2, 0] } },
+      { id: 'r2', type: 'rope', attach: ['a2', 'b2'], physics: {}, params: { length: L2 }, transform: { pos: [0, 2, 0] } },
+    ],
+  });
+  const trails = new Map([['b1', mkTrails(L1, T1)], ['b2', mkTrails(L2, T2)]]);
+  const res = explainRun({ observations: ['周期比'] }, doc, [], [], null, null, null, trails);
+  assert.equal(res.kind, 'pendulum-compare');
+  assert.ok(res.pass, `errPct=${res.errPct}`);
+  assert.ok(Math.abs(res.theoretical.ratio - Math.SQRT2) < 1e-3);
+});

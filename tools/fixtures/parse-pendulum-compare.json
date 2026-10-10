@@ -1,0 +1,98 @@
+{
+  "_fixture": true,
+  "_note": "本地示例解析数据（单摆摆长对照，MOD-502），验证双摆 T∝√L 对照链路；不是真实模型输出",
+  "kind": "pendulum",
+  "questionType": "单摆摆长对照实验（T∝√L 验证）",
+  "goal": "两摆长 1.0m 与 0.5m 的单摆同角齐释，测量各自周期并验证周期比 T1/T2=√(L1/L2)=√2≈1.414",
+  "gravity": 9.81,
+  "entities": [
+    {
+      "type": "box",
+      "name": "悬点甲",
+      "given": {
+        "position": [
+          -0.6,
+          2.6,
+          0
+        ],
+        "fixed": 1,
+        "length": 0.25,
+        "height": 0.25,
+        "width": 0.25
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "sphere",
+      "name": "摆球甲",
+      "given": {
+        "mass": 0.5,
+        "radius": 0.12,
+        "position": [
+          -0.3412,
+          1.6341,
+          0
+        ],
+        "friction": 0
+      },
+      "confidence": 0.92
+    },
+    {
+      "type": "box",
+      "name": "悬点乙",
+      "given": {
+        "position": [
+          0.6,
+          2.1,
+          0
+        ],
+        "fixed": 1,
+        "length": 0.25,
+        "height": 0.25,
+        "width": 0.25
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "sphere",
+      "name": "摆球乙",
+      "given": {
+        "mass": 0.5,
+        "radius": 0.12,
+        "position": [
+          0.7294,
+          1.617,
+          0
+        ],
+        "friction": 0
+      },
+      "confidence": 0.92
+    }
+  ],
+  "attaches": [
+    {
+      "type": "rope",
+      "from": 0,
+      "to": 1,
+      "length": 1.0
+    },
+    {
+      "type": "rope",
+      "from": 2,
+      "to": 3,
+      "length": 0.5
+    }
+  ],
+  "observations": [
+    "两摆各自的周期与周期比"
+  ],
+  "unknowns": [
+    "T1/T2"
+  ],
+  "assumptions": [
+    "轻绳不可伸长且质量不计",
+    "两摆同角（约15°）由静止同时释放",
+    "小角近似 sinθ≈θ 成立"
+  ],
+  "confidence": 0.92
+}
