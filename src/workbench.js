@@ -5245,7 +5245,8 @@ async function runAgentVerifyInner() {
   for (const it of ctx.items) {
     // bowl=开放薄壳：自心 26 向射线必穿自家开口打到腔内物体，误判「碗嵌球」并把碗阶梯
     // 抬成悬空（B5 双次实锤）。凹腔内的球由球自身嵌入核对兜底（球的射线只扫到局部碗壁）。
-    penetrations[it.id] = it.type === 'bowl' ? 0 : (entityPoseBlocked(it.id, it.pos) || 0);
+    // bowl=开放薄壳/绳·弹簧=连接件 mesh(悬链穿过端物体是常态,无碰撞体)——都不参与嵌入口径(MOD-504 竖直圆实锤:正下方球被绳段误判抬飞)
+    penetrations[it.id] = (it.type === 'bowl' || it.type === 'rope' || it.type === 'spring') ? 0 : (entityPoseBlocked(it.id, it.pos) || 0);
   }
   let findings = auditStatic({ ...ctx, penetrations });
   // ---- 2. 自动修复（一轮 ≤6 处）：嵌入抬升 / 坡面重算落点 / 题给位置还原 ----
@@ -5347,6 +5348,11 @@ async function motionProbe() {
     && doc.entities.filter((e) => e.type === 'rope').length === 2
     && doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic').length === 2;
   if (isPendulumCompare && !trailsOn) { setTrails(true); _pcTrailsAuto = true; }
+  // MOD-504 竖直圆周：单球+绳+大水平初速——窗口 6s（≥3 圈）
+  const _rope0 = doc.entities.find((e) => e.type === 'rope');
+  const _ball0 = doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
+  const _v0h = _ball0.length === 1 && _ball0[0].physics.linvel ? Math.hypot(_ball0[0].physics.linvel[0], _ball0[0].physics.linvel[2]) : 0;
+  const isVertCircle = !hasRamp && !isSpring && !isAtwood && !isHinge && !isAstro && _rope0 && _ball0.length === 1 && _v0h * _v0h >= 4.5 * Math.abs(doc.gravity || 9.81);
   // MOD-510 弹开双车：双球+弹簧——窗口 2.5s + 临时开 trails（双球差分测速依赖）
   const isSpringPair = isSpring && !hasRamp && !isAtwood && !isHinge && !isAstro
     && doc.entities.some((e) => e.type === 'spring')
@@ -5362,7 +5368,7 @@ async function motionProbe() {
   const isProjectile = !hasRamp && !isSpring && !isAtwood && !isHinge && !isAstro && !isPendulum && !isCurved && hasGround
     && doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic').length === 1;
   const isMomentum = !hasRamp && !isAstro && !isRotation && !isSpring && !isAtwood && !isHinge && !isProjectile && !isPendulum && !isCurved;
-  let needT = (isSpringPair ? 2.5 : (isProjectile ? 2.5 : (isHinge ? 5.5 : (isAtwood ? 1.6 : (isSpring ? 6.5 : (isAstro ? 11 : (isRotation ? 3.5 : (isMomentum ? 2.0 : (isPendulumCompare ? 5 : (isPendulum ? 5 : (isBowl ? 6 : (isCurved ? 3.5 : 4))))))))))));
+  let needT = (isVertCircle ? 6 : (isSpringPair ? 2.5 : (isProjectile ? 2.5 : (isHinge ? 5.5 : (isAtwood ? 1.6 : (isSpring ? 6.5 : (isAstro ? 11 : (isRotation ? 3.5 : (isMomentum ? 2.0 : (isPendulumCompare ? 5 : (isPendulum ? 5 : (isBowl ? 6 : (isCurved ? 3.5 : 4)))))))))))));
   if (isProjectile) {
     // AG-568：抛体固定 2.5s 窗口在低重力/长滞空误判（月面斜抛滞空 6.25s → 理论对照假阳 44.4%）。
     // 窗口按真实滞空动态给：t=(vy0+√(vy0²+2g·h0))/g 再留 35% 采样余量，上限 14s
@@ -5545,6 +5551,11 @@ async function runAndExplain() {
     && doc.entities.filter((e) => e.type === 'rope').length === 2
     && doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic').length === 2;
   if (isPendulumCompare && !trailsOn) { setTrails(true); _pcTrailsAuto = true; }
+  // MOD-504 竖直圆周：单球+绳+大水平初速——窗口 6s（≥3 圈）
+  const _rope0 = doc.entities.find((e) => e.type === 'rope');
+  const _ball0 = doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
+  const _v0h = _ball0.length === 1 && _ball0[0].physics.linvel ? Math.hypot(_ball0[0].physics.linvel[0], _ball0[0].physics.linvel[2]) : 0;
+  const isVertCircle = !hasRamp && !isSpring && !isAtwood && !isHinge && !isAstro && _rope0 && _ball0.length === 1 && _v0h * _v0h >= 4.5 * Math.abs(doc.gravity || 9.81);
   // MOD-510 弹开双车：双球+弹簧——窗口 2.5s + 临时开 trails（双球差分测速依赖）
   const isSpringPair = isSpring && !hasRamp && !isAtwood && !isHinge && !isAstro
     && doc.entities.some((e) => e.type === 'spring')
@@ -5567,7 +5578,7 @@ async function runAndExplain() {
   btn.disabled = true;
   setBtnText('btnRunExplain', '运行并记录中…');
   const isMomentum = !hasRamp && !isAstro && !isRotation && !isSpring && !isAtwood && !isHinge && !isProjectile && !isPendulum && !isCurved;
-  let needT = (isSpringPair ? 2.5 : (isProjectile ? 2.5 : (isHinge ? 5.5 : (isAtwood ? 1.6 : (isSpring ? 6.5 : (isAstro ? 11 : (isRotation ? 3.5 : (isMomentum ? 2.0 : (isPendulumCompare ? 5 : (isPendulum ? 5 : (isBowl ? 6 : (isCurved ? 3.5 : 4))))))))))));
+  let needT = (isVertCircle ? 6 : (isSpringPair ? 2.5 : (isProjectile ? 2.5 : (isHinge ? 5.5 : (isAtwood ? 1.6 : (isSpring ? 6.5 : (isAstro ? 11 : (isRotation ? 3.5 : (isMomentum ? 2.0 : (isPendulumCompare ? 5 : (isPendulum ? 5 : (isBowl ? 6 : (isCurved ? 3.5 : 4)))))))))))));
   if (isProjectile) {
     // AG-568：抛体窗口按真实滞空动态给（同 motionProbe），月面/低重力不再假阳
     const g = Math.max(0.3, Math.abs(doc.gravity) || 9.81);
@@ -6011,6 +6022,29 @@ function renderMomentum2DExplain(r, box) {
   }
   if (r.kind === 'pendulum') { renderPendulumExplain(r, box); return; }
   if (r.kind === 'pendulum-compare') { renderPendulumCompareExplain(r, box); return; }
+  if (r.kind === 'vert-circle') {
+    const gv = document.createElement('div');
+    gv.className = 'ro-grid';
+    const rows = [
+      ['顶点临界速度 √(gL)', `${r.theoretical.vTopCrit.toFixed(2)} m/s`],
+      ['顶点速度（理论 √(v0²−4gL)）', `${r.theoretical.vTop.toFixed(2)} m/s`],
+      ['顶点速度（实测·最高点）', `${r.measured.vTop.toFixed(2)} m/s`],
+      ['过顶判定', r.measured.crossedOver ? `已过顶（最高点 ${r.measured.topY.toFixed(2)} m ≈ L）` : `未过顶（最高点 ${r.measured.topY.toFixed(2)} m < L）`],
+      ['张力差 T底−T顶=6mg', `${r.theoretical.dT.toFixed(1)} N`],
+      ['判定', r.pass ? '通过（临界速度过顶,绳保持张紧）' : '未通过'],
+    ];
+    gv.innerHTML = rows.map(([k2], i) =>
+      `<div class="cell" style="grid-column:1/-1"><span class="k">${k2}</span><span class="v ${i === 5 ? 'acc' : 'plain'}"></span></div>`
+    ).join('');
+    [...gv.querySelectorAll('.v')].forEach((el, i) => { el.textContent = rows[i][1]; });
+    box.appendChild(gv);
+    const pv = document.createElement('div');
+    pv.className = 'hint';
+    pv.style.marginTop = '8px';
+    pv.textContent = r.summary;
+    box.appendChild(pv);
+    return;
+  }
   if (r.kind === 'conical') {
     const grid2 = document.createElement('div');
     grid2.className = 'ro-grid';

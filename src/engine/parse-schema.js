@@ -775,7 +775,11 @@ export function planToOverrides(plan) {
         // p41 靠 vacuous verify 绿，教学上是坏的）。带初速+显式地面的抛体场景应走单实体
         // 自动抛体布局（不要显式给 ground），否则会被此处悬浮化劫持（月面斜抛实测 +56%）
         const dropFromHigh = !e.given.velocity && e.given.position != null && e.given.position[1] > r + 0.1;
-        if (!dropFromHigh) o.physics.gravityScale = 0;
+        // 绳系球（单摆/圆锥摆/竖直圆周）永远保留重力——悬浮理想化只属于无绳对撞场景
+        // （MOD-504 实锤：竖直圆周球被悬浮化,顶点速度≈初速,能量账全毁）
+        const roped = (plan.attaches || []).some((a) => a.type === 'rope'
+          && (plan.entities[a.from]?.type === 'sphere' || plan.entities[a.to]?.type === 'sphere'));
+        if (!dropFromHigh && !roped) o.physics.gravityScale = 0;
       } else {
         // UX-R：坡面球多车道并排（球 vs 球、球 vs 圆柱赛跑）；off=r+0.01 与 ballOnRamp 同点
         const spot = slopeSpot(o.params.radius, o.params.radius + 0.01);

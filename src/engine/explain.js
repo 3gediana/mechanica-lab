@@ -30,9 +30,16 @@ export function explainRun(plan, doc, series, reports = [], astro = null, rotati
     return explainPendulumCompare(plan, doc, multiTrails);
   }
   if (hasRopeLink && spheres.length === 1 && dynBodies.length === 1 && !hasRamp && !hasSpring && !hasGrav) {
-    // MOD-503：带显著水平初速=圆锥摆（水平匀速圆周）;由静止释放=单摆
+    // MOD-503：带显著水平初速=圆锥摆（水平匀速圆周）;MOD-504：大入轨速度(v0²≥4.5gL)=竖直圆周;由静止释放=单摆
     const v0 = spheres[0].physics.linvel || [0, 0, 0];
-    if (Math.hypot(v0[0], v0[2]) > 0.3 && series.length > 10) return explainConicalPendulum(plan, doc, series);
+    const v0h = Math.hypot(v0[0], v0[2]);
+    if (v0h > 0.3 && series.length > 10) {
+      const rope0 = doc.entities.find((e) => e.type === 'rope');
+      const anchor0 = rope0 ? doc.entities.find((e) => e.id === rope0.attach.find((id) => id !== spheres[0].id)) : null;
+      const Lv = anchor0 ? Math.hypot(spheres[0].transform.pos[0] - anchor0.transform.pos[0], spheres[0].transform.pos[1] - anchor0.transform.pos[1], spheres[0].transform.pos[2] - anchor0.transform.pos[2]) : 1;
+      if (v0h * v0h >= 4.5 * (Math.abs(doc.gravity) || 9.81) * Lv) return explainVertCircle(plan, doc, series);
+      return explainConicalPendulum(plan, doc, series);
+    }
     return explainPendulum(plan, doc, series);
   }
   // 曲面族（B5）：curvedRamp/bowl 接触面场景——必须在抛体分支前（曲面+单球+地面恰好
@@ -227,6 +234,48 @@ function explainInelastic(plan, doc, reports, bodies) {
 // ---------- 双摆对照（MOD-502）：T∝√L——两摆各自测周期,比值对照 √(L1/L2) ----------
 // 数据走 multiTrails（全体动态体 1/60s 轨迹四元组 Map）——series 只录主测量体,双球周期须逐球取
 // ---------- 圆锥摆（MOD-503）：稳态锥角 θ, T=2π√(L·cosθ/g), F向=mg·tanθ ----------
+// ---------- 竖直圆周（MOD-504）：v_top=√(gL) 临界、½v0²=½v_top²+2gL、T底−T顶=6mg ----------
+function explainVertCircle(plan, doc, series) {
+  const ball = doc.entities.find((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
+  const rope = doc.entities.find((e) => e.type === 'rope');
+  if (!ball || !rope) return { supported: false, reason: '竖直圆周解释需要 绳+摆球', summary: telemetrySummary(series) };
+  const anchor = doc.entities.find((e) => e.id === rope.attach.find((id) => id !== ball.id));
+  const g = Math.abs(doc.gravity) || 9.81;
+  const A = anchor.transform.pos;
+  const L = Math.hypot(ball.transform.pos[0] - A[0], ball.transform.pos[1] - A[1], ball.transform.pos[2] - A[2]);
+  const v0 = ball.physics.linvel[0];
+  const vTopCrit = Math.sqrt(g * L);
+  const vTopTheory = Math.sqrt(Math.max(0, v0 * v0 - 4 * g * L));   // 能量:½v0²=½v_top²+2gL
+  // 实测:轨迹最高点(相对锚)与该点速度;过顶判=最高点达到锚上方 (L−r) 以内
+  let topIdx = 0;
+  for (let i = 1; i < series.length; i++) if (series[i].pos[1] > series[topIdx].pos[1]) topIdx = i;
+  const topY = series[topIdx].pos[1] - A[1];
+  const vTopMeasured = series[topIdx].speed;
+  const crossedOver = topY > L - (ball.params.radius || 0.1) - 0.06;
+  const errPct = crossedOver ? Math.abs(vTopMeasured - vTopTheory) / Math.max(vTopTheory, 0.3) * 100 : null;
+  const pass = crossedOver && errPct != null && errPct < 15;
+  const m = ball.physics.mass;
+  const summary = [
+    `竖直圆周（L=${L.toFixed(3)} m，v0=${v0.toFixed(2)} m/s，m=${m} kg）：顶点临界速度 √(gL)=${vTopCrit.toFixed(2)} m/s。`,
+    `能量法顶点速度理论 √(v0²−4gL)=${vTopTheory.toFixed(2)} m/s（v0² ${v0 * v0 > 4 * g * L ? '>' : '<'} 4gL=⇒${crossedOver ? '能' : '不能'}过顶）。`,
+    crossedOver
+      ? `实测最高点达锚上方 ${(topY - L).toFixed(3)} m（球心几乎贴顶点弧），顶点速度 ${vTopMeasured.toFixed(2)} m/s，偏差 ${errPct.toFixed(1)}%。`
+      : `实测最高点仅达锚上方 ${topY.toFixed(3)} m（未到顶点弧 L=${L.toFixed(2)} m）——绳松弛转入抛体段。`,
+    `张力差 T底−T顶=6mg=${(6 * m * g).toFixed(1)} N（最低点 T=mv0²/L+mg，顶点 T=mv_top²/L−mg）。`,
+    pass ? '验证通过：恰以临界速度过顶时绳恰好保持张紧。' : (crossedOver ? '速度偏差偏大,核对入轨速度与方向（应水平）。' : '未能过顶——入轨速度不足或方向带竖直分量。'),
+  ].join('');
+  return {
+    supported: true,
+    kind: 'vert-circle',
+    simT: series[series.length - 1].t,
+    observation: plan.observations[0] || '过顶与顶点速度',
+    theoretical: { vTopCrit: +vTopCrit.toFixed(2), vTop: +vTopTheory.toFixed(2), dT: +(6 * m * g).toFixed(1), formula: 'v_top=√(v0²−4gL); 临界 √(gL)' },
+    measured: { vTop: +vTopMeasured.toFixed(2), topY: +topY.toFixed(3), crossedOver },
+    errPct, pass,
+    summary,
+  };
+}
+
 function explainConicalPendulum(plan, doc, series) {
   const ball = doc.entities.find((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
   const rope = doc.entities.find((e) => e.type === 'rope' && Array.isArray(e.attach) && e.attach.length === 2);

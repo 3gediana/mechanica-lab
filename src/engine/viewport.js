@@ -1123,6 +1123,9 @@ export class Viewport {
       const ob = this._bindLookup ? this._bindLookup(o.userData.entityId) : null;
       const otherDynamic = ob && ob.entity && ob.entity.physics ? ob.entity.physics.body === 'dynamic' : true;
       if (!isDynamic && !otherDynamic) continue;
+      // 连接件（绳/弹簧 8 段圆柱 mesh 悬链穿过端物体是常态,无碰撞体）不作为嵌入障碍物
+      // ——竖直圆摆正下方球曾被判埋抬飞 1.2m（MOD-504 实锤）
+      if (ob && ob.entity && (ob.entity.type === 'rope' || ob.entity.type === 'spring')) continue;
       others.push(o);
     }
     return others;

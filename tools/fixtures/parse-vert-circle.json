@@ -1,0 +1,67 @@
+{
+  "_fixture": true,
+  "_note": "本地示例解析数据（竖直圆周绳系球，MOD-504），验证过顶临界与张力差链路；不是真实模型输出",
+  "kind": "pendulum",
+  "questionType": "竖直圆周（绳系球过顶临界速度）",
+  "goal": "绳长 0.5m 的小球在最低点以 v0=√(5gL)≈4.95 m/s 入轨，验证恰好过顶（顶点 v_top=√(gL)≈2.21 m/s，T底−T顶=6mg）",
+  "gravity": 9.81,
+  "entities": [
+    {
+      "type": "box",
+      "name": "悬点支架",
+      "given": {
+        "position": [
+          0,
+          1.5,
+          0
+        ],
+        "fixed": 1,
+        "length": 0.25,
+        "height": 0.25,
+        "width": 0.25
+      },
+      "confidence": 0.95
+    },
+    {
+      "type": "sphere",
+      "name": "摆球",
+      "given": {
+        "mass": 0.5,
+        "radius": 0.1,
+        "position": [
+          0,
+          1.0,
+          0
+        ],
+        "velocity": [
+          4.9523,
+          0,
+          0
+        ],
+        "friction": 0
+      },
+      "confidence": 0.92
+    }
+  ],
+  "attaches": [
+    {
+      "type": "rope",
+      "from": 0,
+      "to": 1,
+      "length": 0.5
+    }
+  ],
+  "observations": [
+    "球能否过顶及顶点速度"
+  ],
+  "unknowns": [
+    "v_top",
+    "T底−T顶"
+  ],
+  "assumptions": [
+    "轻绳不可伸长",
+    "不计空气阻力",
+    "v0=√(5gL) 为恰好过顶的临界入轨速度（L=0.5m）"
+  ],
+  "confidence": 0.92
+}
