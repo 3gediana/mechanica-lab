@@ -954,10 +954,25 @@ export class Viewport {
         this._boxSel.x1 = e.clientX;
         this._boxSel.y1 = e.clientY;
         const rb = document.getElementById('rubber');
-        rb.style.left = Math.min(this._boxSel.x0, e.clientX) + 'px';
-        rb.style.top = Math.min(this._boxSel.y0, e.clientY) + 'px';
-        rb.style.width = Math.abs(this._boxSel.x1 - this._boxSel.x0) + 'px';
-        rb.style.height = Math.abs(this._boxSel.y1 - this._boxSel.y0) + 'px';
+        const rx = Math.min(this._boxSel.x0, e.clientX), ry = Math.min(this._boxSel.y0, e.clientY);
+        const rw = Math.abs(this._boxSel.x1 - this._boxSel.x0), rh = Math.abs(this._boxSel.y1 - this._boxSel.y0);
+        rb.style.left = rx + 'px';
+        rb.style.top = ry + 'px';
+        rb.style.width = rw + 'px';
+        rb.style.height = rh + 'px';
+        // UI-613：框选实时尺寸反馈（框下缘 mono 小签;屏幕像素→世界米,与标尺同口径）
+        const tag = document.getElementById('rubberTag');
+        if (tag && rw + rh > 30) {
+          const cam = this.camera;
+          const viewW = cam.isOrthographicCamera
+            ? (cam.right - cam.left) / (cam.zoom || 1)
+            : 2 * cam.position.distanceTo(this.controls.target) * Math.tan((cam.fov || 42) * Math.PI / 360);
+          const mpp = viewW / Math.max(1, this.renderer.domElement.clientWidth);
+          tag.style.display = 'block';
+          tag.style.left = rx + 'px';
+          tag.style.top = (ry + rh + 6) + 'px';
+          tag.textContent = `${(rw * mpp).toFixed(1)} × ${(rh * mpp).toFixed(1)} m`;
+        } else if (tag) tag.style.display = 'none';
       }
       // PL-44 hover 三态（编辑态、非 ghost/框选期），70ms 节流
       const now = performance.now();
@@ -988,6 +1003,7 @@ export class Viewport {
       const sel = this._boxSel;
       this._boxSel = null;
       if (this._rubber) this._rubber.style.display = 'none';
+        const _rt = document.getElementById('rubberTag'); if (_rt) _rt.style.display = 'none';
       if (Math.abs(sel.x1 - sel.x0) + Math.abs(sel.y1 - sel.y0) < 6) return;   // 微小拖动=误触，忽略
       const ids = this._idsInScreenRect(sel);
       this.cb.onBoxSelect && this.cb.onBoxSelect(ids);
@@ -1022,6 +1038,7 @@ export class Viewport {
     this.controls.enableRotate = !on;            // 框选时左键拖拽归选框，不转视角
     this.renderer.domElement.style.cursor = on ? 'crosshair' : '';
     if (this._rubber) this._rubber.style.display = 'none';
+        const _rt = document.getElementById('rubberTag'); if (_rt) _rt.style.display = 'none';
   }
 
   pick(clientX, clientY) {

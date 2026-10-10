@@ -170,6 +170,7 @@ const AUTOSAVE_KEY = 'mechanica.autosave.v1';
               return;
             }
             runtime.setLivePose(selectedId, bind.mesh.position.toArray(), [bind.mesh.rotation.x, bind.mesh.rotation.y, bind.mesh.rotation.z]);
+            renderInspector();   // UI-535：摆姿势/缩放后检查器读数行同步（此前只写 mesh，面板显示旧值与画面不符）
           }
           return;
         }
@@ -415,7 +416,7 @@ function updateOutlineSelection() {
     if (!btn) {
       btn = document.createElement('div');
       btn.className = 'ol-group-btn';
-      btn.style.cssText = 'cursor:pointer;font-size:10px;color:var(--accent);padding:4px 6px;border:1px dashed rgba(217,164,65,.4);margin:3px;border-radius:2px';
+      btn.style.cssText = 'cursor:pointer;font-size: 11px;color:var(--accent);padding:4px 6px;border:1px dashed rgba(217,164,65,.4);margin:3px;border-radius:2px';
       btn.onclick = () => assignGroup([...selectedIds]);
       box.insertBefore(btn, box.firstChild);
     }
@@ -1012,7 +1013,7 @@ function renderLibrary() {
     card.className = 'lib-card' + (sc.id === curId ? ' on' : '') + (i === firstHit ? ' enter-hint' : '');
     const src = LIB_SOURCE_LABEL[sc.source] ? ` · ${LIB_SOURCE_LABEL[sc.source]}` : '';
     card.innerHTML = `
-      ${sc.thumb ? `<img class="thumb" alt="" loading="lazy">` : `<div class="thumb" style="display:flex;align-items:center;justify-content:center;color:var(--faint);font-size:10px">无缩略图</div>`}
+      ${sc.thumb ? `<img class="thumb" alt="" loading="lazy">` : `<div class="thumb" style="display:flex;align-items:center;justify-content:center;color:var(--faint);font-size: 11px">无缩略图</div>`}
       <div class="bd">
         <div class="nm" title="双击改名">${sc.id === curId ? '▶ ' : ''}</div>
         <div class="chips"></div>
@@ -1054,7 +1055,7 @@ function renderLibrary() {
       const inp = document.createElement('input');
       inp.placeholder = '标签名';
       libEditing = true;   // UI-606：加标签中冻结库重渲
-      inp.style.cssText = 'width:64px;background:rgba(0,0,0,.3);border:1px solid rgba(217,164,65,.55);border-radius:2px;color:var(--text);font-size:10px;padding:1px 4px';
+      inp.style.cssText = 'width:64px;background:rgba(0,0,0,.3);border:1px solid rgba(217,164,65,.55);border-radius:2px;color:var(--text);font-size: 11px;padding:1px 4px';
       inp.onkeydown = (ev) => {
         if (ev.key === 'Enter') {
           const v = inp.value.trim().slice(0, 12);
@@ -1857,7 +1858,7 @@ function renderCatalogEnvMats(box, grid) {
     card.className = 'comp-item';
     card.innerHTML = `<div class="thumbbox"><span class="gval"></span></div><span class="nm"></span>`;
     card.querySelector('.gval').textContent = g0 === 0 ? '0' : g0;
-    card.querySelector('.gval').style.cssText = 'display:flex;align-items:center;justify-content:center;height:54px;width:54px;font-family:var(--mono);font-size:15px;color:var(--accent);background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:3px';
+    card.querySelector('.gval').style.cssText = 'display:flex;align-items:center;justify-content:center;height:54px;width:54px;font-family:var(--mono);font-size: 15px;color:var(--accent);background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:3px';
     card.querySelector('.nm').textContent = label;
     card.title = `把当前场景重力设为 ${g0} m/s²（${g0 === 0 ? '完全失重演示' : '行星表面重力'}）`;
     card.onclick = () => {
@@ -1956,16 +1957,16 @@ function renderOutline() {
     const head = document.createElement('div');
     head.className = 'ol-group';
     head.dataset.group = gname;
-    head.style.cssText = 'display:flex;align-items:center;gap:6px;padding:3px 6px;margin-top:3px;background:rgba(217,164,65,.08);border-left:2px solid rgba(217,164,65,.55);cursor:pointer;font-size:11px;color:var(--accent)';
+    head.style.cssText = 'display:flex;align-items:center;gap:6px;padding:3px 6px;margin-top:3px;background:rgba(217,164,65,.08);border-left:2px solid rgba(217,164,65,.55);cursor:pointer;font-size: 12px;color:var(--accent)';
     const nm = document.createElement('span');
     nm.innerHTML = '<svg class="ic" style="width:11px;height:11px;vertical-align:-1px"><use href="#i-box-multiple"/></svg> ';   // UI-524：组头图标归队 sprite
     nm.appendChild(document.createTextNode(gname));
     const cnt = document.createElement('span');
-    cnt.style.cssText = 'font-size:9px;color:var(--faint)';
+    cnt.style.cssText = 'font-size: 10px;color:var(--faint)';
     cnt.textContent = `${members.length} 个对象`;
     const ungroupBtn = document.createElement('span');
     ungroupBtn.textContent = '解组';
-    ungroupBtn.style.cssText = 'margin-left:auto;font-size:9px;color:var(--faint);cursor:pointer;text-decoration:underline dotted';
+    ungroupBtn.style.cssText = 'margin-left:auto;font-size: 10px;color:var(--faint);cursor:pointer;text-decoration:underline dotted';
     ungroupBtn.onclick = (ev) => { ev.stopPropagation(); ungroupMembers(members.map((m) => m.id)); };
     head.append(nm, cnt, ungroupBtn);
     head.onclick = () => {           // 点组头 = 整组选中
@@ -1992,7 +1993,7 @@ function renderOutlineRow(box, e, inGroup = false) {
     row.innerHTML = `<span class="nm"></span><span class="ty"></span><span class="vis" title="显示/隐藏（仅视觉隐藏，参与物理）"></span><span class="lock" title="锁定（防误选/防拖动）"></span><span class="del" title="删除" role="button" aria-label="删除该对象" tabindex="0">×</span>`;
     const vis = row.querySelector('.vis');
     vis.textContent = e.visible === false ? '隐' : '显';
-    vis.style.cssText = 'cursor:pointer;font-size:10px;color:' + (e.visible === false ? 'var(--danger)' : 'var(--faint)') + ';min-width:16px;display:inline-block;text-align:center';   // UI-521
+    vis.style.cssText = 'cursor:pointer;font-size: 11px;color:' + (e.visible === false ? 'var(--danger)' : 'var(--faint)') + ';min-width:16px;display:inline-block;text-align:center';   // UI-521
     vis.onclick = (ev) => {
       ev.stopPropagation();
       opUpdateEntity(e.id, { visible: e.visible === false }, (e.visible === false ? '显示 ' : '隐藏 ') + e.name, { rebuild: false });
@@ -2008,7 +2009,7 @@ function renderOutlineRow(box, e, inGroup = false) {
       const input = document.createElement('input');
       input.type = 'text';
       input.value = e.name;
-      input.style.cssText = 'flex:1;min-width:0;background:rgba(255,255,255,.05);border:1px solid rgba(217,164,65,.5);color:var(--text);font-size:11px;padding:1px 4px;border-radius:var(--r-ctl)';
+      input.style.cssText = 'flex:1;min-width:0;background:rgba(255,255,255,.05);border:1px solid rgba(217,164,65,.5);color:var(--text);font-size: 12px;padding:1px 4px;border-radius:var(--r-ctl)';
       nm.replaceWith(input);
       input.focus();
       input.select();
@@ -2023,7 +2024,7 @@ function renderOutlineRow(box, e, inGroup = false) {
     };
     const lock = row.querySelector('.lock');
     lock.textContent = e.locked ? '已锁' : '锁';
-    lock.style.cssText = 'cursor:pointer;font-size:10px;color:' + (e.locked ? 'var(--accent)' : 'var(--faint)') + ';min-width:16px;display:inline-block;text-align:center';   // UI-521
+    lock.style.cssText = 'cursor:pointer;font-size: 11px;color:' + (e.locked ? 'var(--accent)' : 'var(--faint)') + ';min-width:16px;display:inline-block;text-align:center';   // UI-521
     lock.onclick = (ev) => {
       ev.stopPropagation();
       if (mode === 'run') { toast('运行态不可锁定，请先重置'); return; }
@@ -2050,7 +2051,7 @@ function renderOutlineRow(box, e, inGroup = false) {
       cb.className = 'cons-badge';
       cb.title = `约束 ${nCons} 条：${relNames.slice(0, 4).join('、') || '详见检查器'}`;
       cb.textContent = '⌁' + nCons;
-      cb.style.cssText = 'font-size:9px;color:var(--accent);margin-left:2px';
+      cb.style.cssText = 'font-size: 10px;color:var(--accent);margin-left:2px';
       row.querySelector('.ty').after(cb);
     }
     row.title = `类型 ${c.label} · 来源 ${e.source === 'agent' ? 'Agent 建场' : e.source === 'preset' ? '预置' : '手动添加'}`;
@@ -2135,14 +2136,14 @@ function renderInspector() {
   // 运行态横幅（一次说清，替代散在各输入上的 disabled 猜谜）
   if (dis) {
     const banner = document.createElement('div');
-    banner.style.cssText = 'margin:0 0 8px;padding:6px 10px;background:rgba(217,164,65,.10);border:1px solid rgba(217,164,65,.35);border-radius:var(--r-ctl);font-size:11px;color:var(--accent-hi)';   // UI-531 圆角归 token、字色提对比
+    banner.style.cssText = 'margin:0 0 8px;padding:6px 10px;background:rgba(217,164,65,.10);border:1px solid rgba(217,164,65,.35);border-radius:var(--r-ctl);font-size: 12px;color:var(--accent-hi)';   // UI-531 圆角归 token、字色提对比
     banner.textContent = '运行态只读——「重置」回编辑态后可修改参数';
     box.appendChild(banner);
     // R6-F3：P 键移除后图钉的 UI 入口（运行态横幅旁小钮,动态体才显示;物理体级操作,重置即消）
     if (e.physics.body === 'dynamic') {
       const pinBtn = document.createElement('button');
       pinBtn.textContent = runtime.pinned.has(e.id) ? '已图钉 · 点击放开' : '图钉（钉住当前位姿）';
-      pinBtn.style.cssText = 'margin:0 0 10px;padding:5px 12px;background:transparent;border:1px solid var(--line-strong);border-radius:var(--r-ctl);color:var(--text);font-size:11px;cursor:pointer;width:100%';
+      pinBtn.style.cssText = 'margin:0 0 10px;padding:5px 12px;background:transparent;border:1px solid var(--line-strong);border-radius:var(--r-ctl);color:var(--text);font-size: 12px;cursor:pointer;width:100%';
       pinBtn.onmouseenter = () => { pinBtn.style.borderColor = 'var(--accent)'; };
       pinBtn.onmouseleave = () => { pinBtn.style.borderColor = 'var(--line-strong)'; };
       pinBtn.onclick = () => {
@@ -2175,7 +2176,7 @@ function renderInspector() {
     }
     for (const [k, txt] of rows) {
       const row = document.createElement('div');
-      row.style.cssText = 'display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--line);font-size:12px';
+      row.style.cssText = 'display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--line);font-size: 13px';
       const kl = document.createElement('span'); kl.textContent = k; kl.style.color = 'var(--dim)';
       const vl = document.createElement('span'); vl.textContent = txt;
       vl.style.cssText = 'font-family:var(--mono);color:var(--accent)';
@@ -2190,7 +2191,7 @@ function renderInspector() {
     if (ba?.mesh && bb?.mesh) {
       const d = ba.mesh.position.distanceTo(bb.mesh.position);
       const row = document.createElement('div');
-      row.style.cssText = 'display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--line);font-size:12px';
+      row.style.cssText = 'display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--line);font-size: 13px';
       const k = document.createElement('span'); k.textContent = '两端点距离'; k.style.color = 'var(--dim)';
       const v = document.createElement('span'); v.textContent = d.toFixed(3) + ' m';
       v.style.cssText = 'font-family:var(--mono);color:var(--accent)';
@@ -2205,7 +2206,7 @@ function renderInspector() {
   head.innerHTML = `
     <div class="frow"><label>名称</label><input type="text" data-k="name" value=""></div>
     <div class="frow"><label>可见</label><input type="checkbox" data-k="visible" style="flex:0"></div>
-    <div class="frow"><label>类型</label><span style="font-size:12px;color:var(--text)"></span>
+    <div class="frow"><label>类型</label><span style="font-size: 13px;color:var(--text)"></span>
       <span class="badge src-${e.source}" style="margin-left:auto">${e.source === 'agent' ? 'Agent' : (e.source === 'preset' ? '预置' : '用户')}</span></div>
     <div class="hint"></div>`;
   head.querySelector('.hint').textContent = c.desc;
@@ -2235,7 +2236,7 @@ function renderInspector() {
   const vscaled = Math.abs(vs[0] - 1) > 1e-6 || Math.abs(vs[1] - 1) > 1e-6 || Math.abs(vs[2] - 1) > 1e-6;
   const vsRow = document.createElement('div');
   vsRow.className = 'frow';
-  vsRow.innerHTML = `<label>视觉缩放</label><span class="v" style="font-family:var(--mono);font-size:11px;color:var(--dim)">×${vs[0]} · 仅视觉</span>`;
+  vsRow.innerHTML = `<label>视觉缩放</label><span class="v" style="font-family:var(--mono);font-size: 12px;color:var(--dim)">×${vs[0]} · 仅视觉</span>`;
   vsRow.title = '缩放 gizmo 只改显示大小（0.25–4 倍）；碰撞体/质量/转动惯量不变。要改物理尺寸请编辑下方尺寸参数';
   grpT.appendChild(vsRow);
   box.appendChild(grpT);
@@ -2253,7 +2254,7 @@ function renderInspector() {
       row.className = 'frow';
       row.innerHTML = `<label>${cv.label}</label><span class="ro-inline"></span><span class="u">${cv.unit}</span>`;
       row.querySelector('.ro-inline').textContent = cv.value;
-      row.querySelector('.ro-inline').style.cssText = 'flex:1;text-align:right;font-family:var(--mono);font-size:12px;color:var(--accent)';
+      row.querySelector('.ro-inline').style.cssText = 'flex:1;text-align:right;font-family:var(--mono);font-size: 13px;color:var(--accent)';
       grpP.appendChild(row);
     }
   }
@@ -2361,7 +2362,7 @@ function renderInspector() {
       row.className = 'frow';
       const tgt = getEntity(doc, j.target);
       const jlabel = j.type === 'revolute' ? '转轴' : (j.type === 'prismatic' ? '滑槽' : j.type);
-      row.innerHTML = `<label>${jlabel}</label><span style="flex:1;font-size:11px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span><button class="danger" style="flex:0 0 auto;appearance:none;background:none;border:1px solid var(--line);border-radius:var(--r-ctl);color:var(--dim);font-size:10px;padding:2px 8px;cursor:pointer">删除</button>`;
+      row.innerHTML = `<label>${jlabel}</label><span style="flex:1;font-size: 12px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span><button class="danger" style="flex:0 0 auto;appearance:none;background:none;border:1px solid var(--line);border-radius:var(--r-ctl);color:var(--dim);font-size: 11px;padding:2px 8px;cursor:pointer">删除</button>`;
       row.children[1].textContent = '→ ' + (tgt ? tgt.name : j.target);
       row.children[1].title = `axis=[${(j.axis || []).map((x) => +x.toFixed(2))}]`;
       row.querySelector('button').onclick = () => {
@@ -2379,8 +2380,15 @@ function renderInspector() {
   const grpM = grp('外观');
   const mrow = document.createElement('div');
   mrow.className = 'frow';
-  mrow.innerHTML = `<label>材质</label><select data-k="mat"></select>`;
+  mrow.innerHTML = `<label>材质</label><span class="mat-dot" style="width:14px;height:14px;border-radius:50%;flex:none;border:1px solid var(--line-strong);background-size:cover;background-position:center"></span><select data-k="mat"></select>`;
   const msel = mrow.querySelector('select');
+  const mdot = mrow.querySelector('.mat-dot');
+  const syncMatDot = () => {   // UI-536：材质色点（离屏渲的材质球缩略,未就绪时留空点）
+    const pv = swatchPreviews && swatchPreviews[e.render.material];
+    mdot.style.backgroundImage = pv ? `url(${pv})` : 'none';
+  };
+  syncMatDot();
+  msel.addEventListener('change', () => { e.render.material = msel.value; syncMatDot(); });
   for (const o of registry.MATERIAL_OPTIONS) {
     const op = document.createElement('option');
     op.value = o.key; op.textContent = o.label;
@@ -3076,6 +3084,13 @@ let gridStep = 1;
 function updateScaleReadout() {
   const el = $('scaleReadout');
   if (!el) return;
+  // UI-611：ghost 放置期改显吸附状态——档位+是否已吸附,比网格刻度更有用(结束自动回网格读数)
+  const gs = viewport.ghostState();
+  if (gs.visible) {
+    const LBL = { grid: '网格 0.5m', surface: '表面', endpoint: '端点', center: '质心', off: '关闭' };
+    setTxt(el, `吸附：${LBL[gs.snapMode] || gs.snapMode}${gs.snapped ? ' · 已吸附' : ''}`);
+    return;
+  }
   // UI-604：网格隐藏时读数改说真话（网格/轴都被 setGridVisible 关掉）
   if (viewport._grid && !viewport._grid.visible) { setTxt(el, '网格已隐藏'); return; }
   const cam = viewport.camera;
@@ -3717,7 +3732,7 @@ function bindAgentPanel() {
   {
     const req = $('agentTextReq');
     const cnt = document.createElement('div');
-    cnt.style.cssText = 'text-align:right;font-size:9px;color:var(--faint);margin-top:2px;font-family:var(--mono)';
+    cnt.style.cssText = 'text-align:right;font-size: 10px;color:var(--faint);margin-top:2px;font-family:var(--mono)';
     const syncCnt = () => {
       const n = req.value.length;
       cnt.textContent = `${n}/4000`;
@@ -4406,7 +4421,7 @@ function buildChangePreview() {
   list.innerHTML = '';
   agentChanges.forEach((c, i) => {
     const row = document.createElement('label');
-    row.style.cssText = 'display:flex;align-items:flex-start;gap:6px;padding:3px 2px;cursor:pointer;font-size:11px;color:var(--dim)';
+    row.style.cssText = 'display:flex;align-items:flex-start;gap:6px;padding:3px 2px;cursor:pointer;font-size: 12px;color:var(--dim)';
     const cb = document.createElement('input');
     cb.type = 'checkbox';
     cb.checked = !c.skipped;
@@ -4426,7 +4441,7 @@ function buildChangePreview() {
     const mkToggle = (txt, on) => {
       const b = document.createElement('button');
       b.textContent = txt;
-      b.style.cssText = 'font-size:10px;padding:1px 8px';
+      b.style.cssText = 'font-size: 11px;padding:1px 8px';
       b.onclick = () => { for (const c of agentChanges) c.skipped = !on; buildChangePreview(); };
       return b;
     };
@@ -4461,17 +4476,17 @@ function renderParseResult(warnings = []) {
   if (plan.goal) {
     const g = document.createElement('div');
     g.className = 'k';
-    g.style.cssText = 'font-size:10px;color:var(--faint)';
+    g.style.cssText = 'font-size: 11px;color:var(--faint)';
     g.textContent = '目标';
     const gv = document.createElement('div');
-    gv.style.cssText = 'font-size:11px;color:var(--dim);margin:2px 0 8px';
+    gv.style.cssText = 'font-size: 12px;color:var(--dim);margin:2px 0 8px';
     gv.textContent = plan.goal;
     meta.append(g, gv);
   }
   // 重力（可编辑）
   const grow = document.createElement('div');
   grow.className = 'frow';
-  grow.innerHTML = `<label style="flex:0 0 auto;font-size:10px;color:var(--dim)">重力</label>
+  grow.innerHTML = `<label style="flex:0 0 auto;font-size: 11px;color:var(--dim)">重力</label>
     <input type="number" step="0.1" min="0" max="50" style="flex:1"><span class="u">m/s²</span>
     <span class="badge" style="margin-left:6px"></span>`;
   const gInput = grow.querySelector('input');
@@ -4495,10 +4510,10 @@ function renderParseResult(warnings = []) {
   if (plan.environment) {
     const erow = document.createElement('div');
     erow.className = 'k';
-    erow.style.cssText = 'font-size:10px;color:var(--faint)';
+    erow.style.cssText = 'font-size: 11px;color:var(--faint)';
     erow.textContent = '环境条件';
     const ev = document.createElement('div');
-    ev.style.cssText = 'font-size:11px;color:var(--dim);margin:2px 0 8px';
+    ev.style.cssText = 'font-size: 12px;color:var(--dim);margin:2px 0 8px';
     ev.textContent = plan.environment;
     meta.append(erow, ev);
   }
@@ -4528,7 +4543,7 @@ function renderParseResult(warnings = []) {
     nm.textContent = e.name;
     const ty = document.createElement('span');
     ty.className = 'ty';
-    ty.style.cssText = 'font-family:var(--mono);font-size:10px;color:var(--dim)';
+    ty.style.cssText = 'font-family:var(--mono);font-size: 11px;color:var(--dim)';
     ty.textContent = registry.getComponent(e.type).label;
     const conf = document.createElement('span');
     conf.className = 'conf';
@@ -4598,7 +4613,7 @@ function renderParseResult(warnings = []) {
 
 function mrow(k) {
   const d = document.createElement('div');
-  d.innerHTML = `<div class="k"></div><div class="v" style="font-family:var(--mono);font-size:12px;color:var(--accent)"></div>`;
+  d.innerHTML = `<div class="k"></div><div class="v" style="font-family:var(--mono);font-size: 13px;color:var(--accent)"></div>`;
   d.querySelector('.k').textContent = k;
   return d;
 }
@@ -4607,7 +4622,7 @@ function appendList(parent, title, items) {
   if (!items || !items.length) return;
   const t = document.createElement('div');
   t.className = 'k';
-  t.style.cssText = 'font-size:10px;color:var(--faint);margin-top:8px';
+  t.style.cssText = 'font-size: 11px;color:var(--faint);margin-top:8px';
   t.textContent = title;
   const ol = document.createElement('ol');
   ol.className = 'plist';
@@ -5779,7 +5794,7 @@ function renderMomentum2DExplain(r, box) {
   // 假设核对
   const t = document.createElement('div');
   t.className = 'k';
-  t.style.cssText = 'font-size:10px;color:var(--faint);margin-top:8px';
+  t.style.cssText = 'font-size: 11px;color:var(--faint);margin-top:8px';
   t.textContent = '假设核对';
   const ul = document.createElement('ul');
   ul.className = 'plist';
