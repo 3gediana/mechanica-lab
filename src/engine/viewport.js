@@ -348,6 +348,7 @@ export class Viewport {
     return {
       visible: !!this._ghost && this._ghostFollow,
       snapMode: this._ghostSnapMode || 'grid',
+      follow: !!this._ghostFollow,
       snapped: !!this._ghostSnapHit,
       marker: this._snapMarker ? this._snapMarker.visible : false,
       overlap: !!this._ghostOverlap,

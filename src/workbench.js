@@ -3133,12 +3133,22 @@ let gridStep = 1;
 function updateScaleReadout() {
   const el = $('scaleReadout');
   if (!el) return;
-  // UI-611：ghost 放置期改显吸附状态——档位+是否已吸附,比网格刻度更有用(结束自动回网格读数)
-  const gs = viewport.ghostState();
-  if (gs.visible) {
-    const LBL = { grid: '网格 0.5m', surface: '表面', endpoint: '端点', center: '质心', off: '关闭' };
-    setTxt(el, `吸附：${LBL[gs.snapMode] || gs.snapMode}${gs.snapped ? ' · 已吸附' : ''}`);
-    return;
+  // UI-611：ghost 跟随期的吸附状态条——独立小签(画布左下角),不占用 scaleReadout
+  // (替换式曾让 p10 标尺断言误吃——标尺与吸附是并行的两件事,共存而非顶替)
+  {
+    const gs = viewport.ghostState();
+    let tag = document.getElementById('snapTag');
+    if (gs.visible && gs.follow) {
+      if (!tag) {
+        tag = document.createElement('div');
+        tag.id = 'snapTag';
+        tag.style.cssText = 'position:fixed;left:12px;bottom:calc(var(--simbar-h) + 12px);z-index:40;font-family:var(--mono);font-size:11px;color:var(--accent-hi);background:rgba(18,20,24,.88);border:1px solid var(--line);border-radius:6px;padding:2px 10px;pointer-events:none;white-space:nowrap';
+        document.body.appendChild(tag);
+      }
+      const LBL = { grid: '网格 0.5m', surface: '表面', endpoint: '端点', center: '质心', off: '关闭' };
+      tag.style.display = 'block';
+      tag.textContent = `吸附：${LBL[gs.snapMode] || gs.snapMode}${gs.snapped ? ' · 已吸附' : ''}`;
+    } else if (tag) tag.style.display = 'none';
   }
   // UI-604：网格隐藏时读数改说真话（网格/轴都被 setGridVisible 关掉）
   if (viewport._grid && !viewport._grid.visible) { setTxt(el, '网格已隐藏'); return; }
@@ -4507,13 +4517,10 @@ function buildChangePreview() {
       const wrap = document.createElement('span');
       wrap.style.cssText = 'display:inline-flex;flex-wrap:wrap;gap:2px 8px;margin-left:4px';
       for (const d of c.diffs) {
+        // 单 span 完整文本「k ov → v」:可选中复制+测试断言可匹配(p18 实锤,拆碎 span 破坏文本完整性)
         const seg = document.createElement('span');
-        seg.style.cssText = 'font-family:var(--mono);font-size: 11px';
-        const kEl = document.createElement('span'); kEl.textContent = d.k; kEl.style.color = 'var(--faint)';
-        const oEl = document.createElement('span'); oEl.textContent = String(d.ov); oEl.style.cssText = 'text-decoration:line-through;color:var(--faint)';
-        const aEl = document.createElement('span'); aEl.textContent = '→'; aEl.style.color = 'var(--faint)';
-        const nEl = document.createElement('span'); nEl.textContent = String(d.v); nEl.style.color = 'var(--accent-hi)';
-        seg.append(kEl, document.createTextNode(' '), oEl, document.createTextNode(' '), aEl, document.createTextNode(' '), nEl);
+        seg.style.cssText = 'font-family:var(--mono);font-size: 11px;color:var(--dim)';
+        seg.textContent = `${d.k} ${d.ov}→${d.v}`;
         wrap.appendChild(seg);
       }
       row.append(cb, txt, wrap);
@@ -4662,7 +4669,7 @@ function renderParseResult(warnings = []) {
     if (e.confidence != null) conf.style.color = e.confidence < 0.7 ? 'var(--danger)' : (e.confidence < 0.85 ? 'var(--accent)' : 'var(--faint)');
     head.append(nm, ty, conf);
     // AG-547：多实体评审折叠——16 实体×4 字段超长难扫;头行点击 toggle,非首实体默认收起
-    if (plan.entities.length > 1) {
+    if (plan.entities.length > 4) {   // >4 才折叠:2~3 实体全展开更好改(p1 实锤),16 实体才需要收起扫读
       head.style.cursor = 'pointer';
       head.title = '点击展开/收起该实体的可编辑字段';
       const caret = document.createElement('span');
