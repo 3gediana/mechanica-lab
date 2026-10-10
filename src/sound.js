@@ -101,7 +101,12 @@ export class SoundEngine {
     }
     const panner = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
     if (panner) {
-      panner.pan.value = Math.max(-0.85, Math.min(0.85, pan));
+      // FX-543：pan 平滑——同对上一声 pan 突变>0.3 时用 0.1s 时间常数滑向目标(声像跳变刺耳)
+      const pTarget = Math.max(-0.85, Math.min(0.85, pan));
+      const prev = this._panPrev != null ? this._panPrev : pTarget;
+      if (Math.abs(pTarget - prev) > 0.3) panner.pan.setTargetAtTime(pTarget, t0, 0.1);
+      else panner.pan.value = pTarget;
+      this._panPrev = pTarget;
       tail.connect(panner);
       panner.connect(dest);
     } else {
@@ -169,7 +174,7 @@ export class SoundEngine {
   // 碰撞入参：{ j(冲量 kg·m/s), matA, matB, pair(实体对键,可选), pan(-1..1), att(距离衰减 0..1),
   //   mass(两体几何平均质量 kg,可选 FX-545 音高随质量) }
   // 返回 true = 实际发声（限流通过）
-  impact({ j, matA, matB, pair, pan = 0, att = 1, mass = 1 }) {
+  impact({ j, matA, matB, pair, pan = 0, att = 1, mass = 1, slowFactor = 1 }) {   // slowFactor=FX-547 慢动作音高因子
     if (this.muted || !this.ctx || this.ctx.state !== 'running' || j < J_MIN) { this.dropped++; return false; }
     const now = this._clock();
     if (now - this._lastGlobal < GLOBAL_MIN_GAP) { this.dropped++; return false; }
@@ -185,7 +190,7 @@ export class SoundEngine {
     const t0 = this.ctx.currentTime;
     // ±6% 随机音高：同型碰撞不成机枪音；FX-545 质量因子：轻 10 倍升/重 10 倍降（钳 ±8%）
     const massFactor = Math.max(0.92, Math.min(1.08, Math.pow(1 / Math.max(0.05, mass), 0.12)));
-    const detune = (0.94 + Math.random() * 0.12) * massFactor;
+    const detune = (0.94 + Math.random() * 0.12) * massFactor * slowFactor;   // FX-547：慢动作音高同步下移(0.25x→-5 半音口径由调用方算)
     // FX-548 距离低通：att 1=近场 12kHz 不滤，0=远场 2.2kHz 发闷
     const lpFreq = att >= 0.98 ? 0 : 2200 + att * 9800;
     this._scheduleVoice(this.ctx, this.master, this._noiseBuf, timbre, gain, t0, detune, pan, lpFreq);
@@ -212,6 +217,65 @@ export class SoundEngine {
   }
 
   // 状态音（run/pause/reset）：安静的瓷音短 tick，同禁裸哔哔口径（模态短包络）
+  // FX-539：滚动摩擦持续音——纯滚动体共 1 个共享声部(带通白噪 250Hz+lowpass 800),
+  // gain 随总滚动速度封顶 0.12;停滚 0.2s 淡出。workbench 每帧调 rollLoop(speedSum)
+  rollLoop(speedSum = 0) {
+    if (!this.ctx || this.ctx.state !== 'running') return false;
+    if (this.muted) speedSum = 0;
+    const target = Math.min(0.12, speedSum * 0.045);
+    if (target > 0.004) {
+      if (!this._rollSrc) {
+        const src = this.ctx.createBufferSource();
+        src.buffer = this._noiseBuf;
+        src.loop = true;
+        const bp = this.ctx.createBiquadFilter();
+        bp.type = 'bandpass'; bp.frequency.value = 250; bp.Q.value = 0.8;
+        const lp = this.ctx.createBiquadFilter();
+        lp.type = 'lowpass'; lp.frequency.value = 800;
+        const g = this.ctx.createGain();
+        g.gain.value = 0;
+        src.connect(bp); bp.connect(lp); lp.connect(g); g.connect(this.master);
+        src.start();
+        this._rollSrc = src; this._rollGain = g;
+      }
+      this._rollTarget = target;
+      this._rollLastT = performance.now();
+    } else {
+      this._rollTarget = 0;
+    }
+    if (this._rollGain) {
+      const now = performance.now();
+      const faded = now - (this._rollLastT || 0) > 200 ? 0 : (this._rollTarget || 0);   // 停滚 0.2s 淡出
+      const cur = this._rollGain.gain.value;
+      const next = cur + (faded - cur) * 0.12;
+      this._rollGain.gain.setTargetAtTime(next, this.ctx.currentTime, 0.05);
+      if (faded === 0 && cur < 0.003 && this._rollSrc) {   // 完全静默后拆源(不留常驻节点)
+        try { this._rollSrc.stop(); } catch (e) { /* 已停 */ }
+        this._rollSrc = null; this._rollGain = null;
+      }
+    }
+    return true;
+  }
+
+  // FX-541：绳绷紧音——松弛绳突然张紧(张力首超阈值)的「绷」:1200Hz 高 Q 单模态,
+  // attack 1ms decay 0.08s,gain 随 T/(mg) 封顶 0.08;每绳独立 0.4s 冷却(workbench 传入)
+  tautTone(strength = 1) {
+    if (this.muted || !this.ctx || this.ctx.state !== 'running') return false;
+    const t0 = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(1180, t0);
+    osc.frequency.exponentialRampToValueAtTime(1240, t0 + 0.08);
+    const g = this.ctx.createGain();
+    const peak = Math.min(0.08, 0.02 + 0.06 * Math.min(1, strength));
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(peak, t0 + 0.001);
+    g.gain.exponentialRampToValueAtTime(0.0006, t0 + 0.08);
+    osc.connect(g); g.connect(this.master);
+    osc.start(t0); osc.stop(t0 + 0.1);
+    return true;
+  }
+
   ui(kind) {
     if (this.muted || !this.ctx || this.ctx.state !== 'running') return false;
     const base = { play: 720, pause: 500, reset: 600 }[kind];

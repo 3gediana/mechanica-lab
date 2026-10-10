@@ -2909,6 +2909,7 @@ let _seenReports = 0;
 let _liveEls = null;      // PL-51：liveGrid 读数元素缓存（原每项每轮 querySelector）
 const _livePrev = {};       // FX-553：上一拍数值（变化率检测）
 const _liveFlash = {};      // FX-553：脉冲计时器句柄
+const _ropeTautT = new Map();   // FX-541：每绳绷紧音冷却时间戳
 function liveEls() {
   if (_liveEls) return _liveEls;
   const grid = document.getElementById('liveGrid');
@@ -3585,6 +3586,12 @@ function tick() {
         if (!runtime.telemetryInto(e.attach[0], t)) { POOL_TEL.retract(); continue; }
         const acc = runtime.accels.get(e.attach[0]);
         const T = acc ? t.mass * Math.hypot(acc[0], acc[1] + gMag, acc[2]) : 0;
+        // FX-541：绳绷紧音——张力首超 0.8mg 发短「绷」(每绳 0.4s 冷却,松弛绳落体张紧可闻)
+        if (sound && t.mass > 0 && T > 0.8 * t.mass * gMag) {
+          const now = performance.now();
+          const last = _ropeTautT.get(e.id) || 0;
+          if (now - last > 400) { _ropeTautT.set(e.id, now); sound.tautTone(T / (t.mass * gMag) - 0.8); }
+        } else if (T < 0.3 * t.mass * gMag) _ropeTautT.set(e.id, 0);   // 松弛回落才允许下次触发
         const it = POOL_TENS.next();
         const pa = ba.mesh.position, pb = bb.mesh.position;
         it.aPos[0] = pa.x; it.aPos[1] = pa.y; it.aPos[2] = pa.z;
@@ -3688,6 +3695,7 @@ function tick() {
           pan: (s.pos[0] - target.x) / span,
           att: 1 / (1 + Math.hypot(s.pos[0] - target.x, s.pos[1] - target.y, s.pos[2] - target.z) / (span * 1.2)),
           mass,
+          slowFactor: Math.pow(2, -5 * Math.max(0, 1 - effectiveTimeScale())),   // FX-547：0.25x→-5 半音、0.1x→-7,1x 不变
         });
         if (juice) {
           juice.spawnImpact(s.pos, strength, timbre);
@@ -3698,6 +3706,20 @@ function tick() {
       }
       runtime.impactSounds.length = 0;
     }
+  }
+  // FX-539：滚动持续音——纯滚动体(|v|≈ωr)速度和喂共享声部(每帧,~0.1ms 遍历)
+  if (sound && mode === 'run' && !paused) {
+    let rollSum = 0;
+    for (const [, b] of runtime.binds) {
+      const e = b.entity;
+      if (!b.body || e.physics.body !== 'dynamic' || !e.params || !e.params.radius) continue;
+      const v = b.body.linvel(), w = b.body.angvel();
+      const sp = Math.hypot(v.x, v.y, v.z);
+      if (sp < 0.3) continue;
+      const wr = Math.hypot(w.x, w.y, w.z) * e.params.radius;
+      if (Math.abs(sp - wr) / Math.max(sp, wr) < 0.08) rollSum += sp;   // 纯滚动
+    }
+    sound.rollLoop(rollSum);
   }
   const _tOv = performance.now();
   const shook = juice ? juice.applyShake(viewport.camera, _tOv / 1000) : false;
