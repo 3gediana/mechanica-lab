@@ -268,6 +268,43 @@ function explainPendulumCompare(plan, doc, multiTrails) {
   };
 }
 
+// ---------- 胡克静态伸长（MOD-507）：高阻尼砝码稳定后 x=mg/k ----------
+function explainHookeStatic(plan, doc, series, ball, spring) {
+  const g = Math.abs(doc.gravity) || 9.81;
+  const m = ball.physics.mass, k = spring.params.stiffness;
+  const xTheory = m * g / k;
+  const r = ball.params.radius ?? 0.12;
+  const y0 = ball.transform.pos[1];   // 初始球心（弹簧原长安装位）
+  // 锚点(固定端)——弹簧 attach 另一端
+  const otherId = spring.attach.find((id) => id !== ball.id);
+  const anchor = doc.entities.find((e) => e.id === otherId);
+  const yA = anchor ? anchor.transform.pos[1] : y0 + (spring.params.restLength ?? 1);
+  // 末 25% 时间的球心均值 → 伸长 = 锚点到球心距离 − 原长
+  const n = series.length;
+  if (n < 40) return { supported: false, reason: '静态伸长需要更长观测（砝码稳定）', summary: telemetrySummary(series) };
+  const tail = series.slice(Math.floor(n * 0.75));
+  const yMean = tail.reduce((a, p) => a + p.pos[1], 0) / tail.length;
+  const lenFinal = yA - yMean;                       // 平衡弹簧长(锚→球心,砝码视作质点)
+  const xMeasured = lenFinal - (spring.params.restLength ?? 1);
+  const errPct = Math.abs(xMeasured - xTheory) / xTheory * 100;
+  const pass = errPct < 5;
+  const summary = [
+    `胡克定律静态伸长（k=${k} N/m，砝码 m=${m} kg，g=${g} m/s²）：平衡时弹力=重力，理论伸长 x=mg/k=${xTheory.toFixed(3)} m。`,
+    `实测（末段均值，弹簧长 ${lenFinal.toFixed(3)} m − 原长 ${(spring.params.restLength ?? 1).toFixed(2)} m）伸长 ${xMeasured.toFixed(3)} m，偏差 ${errPct.toFixed(2)}%。`,
+    pass ? '验证通过：静止砝码的弹簧伸长直接给出劲度系数 k=mg/x——测力计原理。' : '偏差偏大,建议延长观测让砝码充分稳定后重跑。',
+  ].join('');
+  return {
+    supported: true,
+    kind: 'hooke-static',
+    simT: series[n - 1].t,
+    observation: plan.observations[0] || '静伸长',
+    theoretical: { x: +xTheory.toFixed(4), formula: 'x = mg/k', k, m, g },
+    measured: { x: +xMeasured.toFixed(4), springLen: +lenFinal.toFixed(4) },
+    errPct, pass,
+    summary,
+  };
+}
+
 function explainPendulum(plan, doc, series) {
   const ball = doc.entities.find((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
   const rope = doc.entities.find((e) => e.type === 'rope' && Array.isArray(e.attach) && e.attach.length === 2);
@@ -581,6 +618,8 @@ function explainSpring(plan, doc, series) {
   if (!spring || !ball) return { supported: false, reason: '弹簧解释需要弹簧+振子小球', summary: telemetrySummary(series) };
   const m = ball.physics.mass;
   const k = spring.params.stiffness;
+  // MOD-507 胡克静态：高阻尼(damping≥1.5)挂砝码→快速稳定,末段位移均值对照 mg/k(不是周期问题)
+  if ((spring.params.damping || 0) >= 1.5) return explainHookeStatic(plan, doc, series, ball, spring);
   const Ttheory = 2 * Math.PI * Math.sqrt(m / k);
 
   // 实测周期：振子沿主导振动轴的序列峰间隔（AB-5：竖直弹簧振子 pos[0] 近似不动，

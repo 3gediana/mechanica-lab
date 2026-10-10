@@ -5919,6 +5919,28 @@ function renderMomentum2DExplain(r, box) {
   if (r.kind === 'astro') { renderAstroExplain(r, box); return; }
   if (r.kind === 'rotation') { renderRotationExplain(r, box); return; }
   if (r.kind === 'spring') { renderSpringExplain(r, box); return; }
+  if (r.kind === 'hooke-static') {
+    const grid2 = document.createElement('div');
+    grid2.className = 'ro-grid';
+    const rows2 = [
+      ['劲度 k / 砝码 m', `${r.theoretical.k} N/m / ${r.theoretical.m} kg`],
+      ['理论伸长（x=mg/k）', `${r.theoretical.x.toFixed(3)} m`],
+      ['实测伸长（末段均值）', `${r.measured.x.toFixed(3)} m`],
+      ['偏差', `${r.errPct.toFixed(2)}%`],
+      ['判定', r.pass ? '通过（k=mg/x——弹簧测力计原理）' : '未通过'],
+    ];
+    grid2.innerHTML = rows2.map(([k2], i) =>
+      `<div class="cell" style="grid-column:1/-1"><span class="k">${k2}</span><span class="v ${i === 4 ? 'acc' : 'plain'}"></span></div>`
+    ).join('');
+    [...grid2.querySelectorAll('.v')].forEach((el, i) => { el.textContent = rows2[i][1]; });
+    box.appendChild(grid2);
+    const p2 = document.createElement('div');
+    p2.className = 'hint';
+    p2.style.marginTop = '8px';
+    p2.textContent = r.summary;
+    box.appendChild(p2);
+    return;
+  }
   if (r.kind === 'pendulum') { renderPendulumExplain(r, box); return; }
   if (r.kind === 'pendulum-compare') { renderPendulumCompareExplain(r, box); return; }
   if (r.kind === 'bowl-osc') { renderBowlExplain(r, box); return; }

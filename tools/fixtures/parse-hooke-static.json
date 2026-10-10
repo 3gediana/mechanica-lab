@@ -1,0 +1,33 @@
+{
+  "_fixture": true,
+  "_note": "本地示例解析数据（胡克定律静态伸长，MOD-507），验证竖直弹簧静平衡链路；不是真实模型输出",
+  "kind": "spring",
+  "questionType": "胡克定律静态伸长（F=kx 反证）",
+  "goal": "劲度系数 k=20 N/m 的轻弹簧上端固定，下挂 2kg 砝码静止后测静伸长，验证 x=mg/k=0.981 m",
+  "gravity": 9.81,
+  "entities": [
+    {
+      "type": "box",
+      "name": "悬点支架",
+      "given": { "position": [0, 3.4, 0], "fixed": 1, "length": 0.25, "height": 0.25, "width": 0.25 },
+      "confidence": 0.95
+    },
+    {
+      "type": "sphere",
+      "name": "砝码",
+      "given": { "mass": 2, "radius": 0.12, "position": [0, 2.4, 0], "friction": 0 },
+      "confidence": 0.92
+    }
+  ],
+  "attaches": [
+    { "type": "spring", "from": 0, "to": 1, "stiffness": 20, "restLength": 1.0, "damping": 2.0 }
+  ],
+  "observations": ["砝码静止后的弹簧伸长量"],
+  "unknowns": ["静伸长 x"],
+  "assumptions": [
+    "轻弹簧质量不计",
+    "砝码由弹簧原长处静止释放，阻尼使其快速稳定",
+    "平衡时弹簧弹力与重力相等：kx=mg"
+  ],
+  "confidence": 0.93
+}

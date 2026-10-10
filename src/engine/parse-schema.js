@@ -366,8 +366,43 @@ function springLayout(plan) {
   const out = [];
   const sphere = plan.entities.find((e) => e.type === 'sphere');
   const m = sphere ? (sphere.given.mass ?? 1) : 1;
-  const k = (plan.attaches.find((a) => a.type === 'spring') || {}).stiffness ?? 20;
-  const rest = (plan.attaches.find((a) => a.type === 'spring') || {}).restLength ?? 0.8;
+  const at = plan.attaches.find((a) => a.type === 'spring') || {};
+  const k = at.stiffness ?? 20;
+  const rest = at.restLength ?? 0.8;
+  const damping = at.damping ?? 0;   // MOD-507：attach 阻尼透传（胡克静态靠它收敛）
+  // AG-537/MOD-507 竖直分支：锚在球正上方(题给位置 y 差 ≥ rest×0.8)或题面「竖直/悬挂」→
+  // 真竖直布局(重力保留,球挂锚下原长处),不再错建水平无重力理想化
+  const vertText = [plan.questionType, plan.goal, plan.environment, ...plan.keyPoints].join('');
+  const anchorE = plan.entities.find((e) => e.type === 'box' || e.type === 'ground');
+  const anchorPos = anchorE ? (anchorE.given.position ?? null) : null;
+  const ballPos = sphere ? (sphere.given.position ?? null) : null;
+  const isVertical = /竖直|悬挂|竖直悬挂|吊|挂/.test(vertText)
+    || (anchorPos && ballPos && anchorPos[1] - ballPos[1] >= rest * 0.8 && Math.abs(anchorPos[0] - ballPos[0]) < 0.3);
+  if (isVertical) {
+    const aP = anchorPos ?? [0, 3.4, 0];
+    const y0 = ballPos ? ballPos[1] : (aP[1] - rest);
+    out.push({
+      type: 'box', name: (anchorE && anchorE.name) || '悬点支架', source: 'agent',
+      params: { sx: 0.25, sy: 0.25, sz: 0.25 },
+      transform: { pos: [...aP], rot: [0, 0, 0] },
+      physics: { body: 'fixed', friction: 0.8 },
+      render: { material: 'steelDark' },
+    });
+    out.push({
+      type: 'sphere', name: sphere ? sphere.name || '砝码' : '砝码', source: 'agent',
+      params: { radius: sphere ? (sphere.given.radius ?? 0.12) : 0.12 },
+      transform: { pos: [aP[0], y0, aP[2] || 0], rot: [0, 0, 0] },
+      physics: {
+        body: 'dynamic', mass: m, friction: 0, restitution: 0,
+        linvel: sphere && sphere.given.velocity ? [...sphere.given.velocity] : [0, 0, 0],
+        angvel: [0, 0, 0], linDamping: 0, angDamping: 0, gravityScale: 1,
+      },
+      render: { material: 'chrome' },
+      measured: true,
+    });
+    plan.assumptions = [...plan.assumptions, '竖直弹簧布局：重力保留，弹簧沿竖直方向（题设悬挂语义）'].slice(0, 8);
+    return out;
+  }
   const stretch = 0.4;                                       // 初始拉伸（静止释放 → 简谐振动）
   const wallPos = [-2.0, 0.6, 0];
   out.push({
