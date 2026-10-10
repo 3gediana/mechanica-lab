@@ -4374,13 +4374,14 @@ function buildChangePreview() {
         for (const [k, v] of Object.entries(newS)) {
           if (k === 'linvel' || k === 'angvel') continue;   // 向量太长，摘要略
           const ov = oldS[k];
-          if (ov !== undefined && ov !== v && typeof v !== 'object') diffs.push(`${k} ${ov}→${v}`);
+          if (ov !== undefined && ov !== v && typeof v !== 'object') diffs.push({ k, ov, v });   // AG-548：结构化,渲染层给样式
         }
       }
       agentChanges.push({
         type: 'entity', idx, reuseId,
         label: `更新已有 ${o.type}「${e.name || o.type}」`,
-        detail: diffs.length ? diffs.slice(0, 4).join('，') : '位置/参数按题给重设',
+        detail: diffs.length ? '' : '位置/参数按题给重设',
+        diffs: diffs.slice(0, 4),   // AG-548：diff 段数组（渲染旧值删除线/新值琥珀）
         skipped: false,
       });
     } else {
@@ -4391,7 +4392,7 @@ function buildChangePreview() {
     const jn = agentPlan.joint.type === 'revolute' ? '铰链转轴' : '径向滑槽';
     agentChanges.push({
       type: 'joint', idx: null,
-      label: `建立${jn}约束（实体 ${agentPlan.joint.from}→${agentPlan.joint.to}）`,
+      label: `建立${jn}约束（${(agentPlan.entities[agentPlan.joint.from] || {}).name || `实体${agentPlan.joint.from}`} → ${(agentPlan.entities[agentPlan.joint.to] || {}).name || `实体${agentPlan.joint.to}`}）`,
       detail: '所依赖实体被拒绝时自动跳过', skipped: false,
     });
   }
@@ -4405,7 +4406,11 @@ function buildChangePreview() {
       label: hit.length
         ? `删除已有 ${hit.length === 1 ? `「${hit[0].name}」` : `${hit.length} 个匹配「${rm}」的对象`}`
         : `删除「${rm}」（当前场景无匹配）`,
-      detail: hit.length ? '' : '未找到匹配对象，将跳过',
+      // AG-532：未命中时列场景现有对象候选（前 3）辅助人工改词——「红色的球」类描述不命中时不再只给一句空话
+      detail: hit.length ? '' : (() => {
+        const cands = (doc.entities || []).slice(0, 8).map((x) => x.name).filter(Boolean).slice(0, 3);
+        return cands.length ? `未找到匹配，将跳过。场景现有：${cands.join('、')}` : '未找到匹配对象，将跳过';
+      })(),
       skipped: hit.length === 0,
     });
   }
@@ -4413,7 +4418,12 @@ function buildChangePreview() {
   for (const at of (agentPlan.attaches || [])) {
     agentChanges.push({
       type: 'attach', idx: aSeq++,
-      label: `连接${at.type === 'rope' ? '绳' : '弹簧'}（实体 ${at.from}→${at.to}，k=${at.stiffness ?? '—'}）`,
+      label: `连接${at.type === 'rope' ? '绳' : '弹簧'}（`
+        + ((agentPlan.entities[at.from] || {}).name || ('实体' + at.from)) + ' → '
+        + ((agentPlan.entities[at.to] || {}).name || '（布局自动补墙）')
+        + (at.type === 'spring'
+          ? ('，k=' + (at.stiffness ?? '—') + ' N/m，原长 ' + (at.restLength ?? '—') + ' m')
+          : ('，绳长 ' + (at.length ?? '—') + ' m')) + '）',
       detail: '所依赖实体被拒绝时自动跳过', skipped: false,
     });
   }
@@ -4429,8 +4439,25 @@ function buildChangePreview() {
     const syncDim = () => { row.style.opacity = cb.checked ? '1' : '.45'; };
     cb.onchange = () => { agentChanges[i].skipped = !cb.checked; syncDim(); };
     const txt = document.createElement('span');
-    txt.textContent = c.label + (c.detail ? `（${c.detail}）` : '');
-    row.append(cb, txt);
+    txt.textContent = c.label;
+    if (c.diffs && c.diffs.length) {   // AG-548：旧值删除线灰、新值琥珀（全 textContent 零注入）
+      const wrap = document.createElement('span');
+      wrap.style.cssText = 'display:inline-flex;flex-wrap:wrap;gap:2px 8px;margin-left:4px';
+      for (const d of c.diffs) {
+        const seg = document.createElement('span');
+        seg.style.cssText = 'font-family:var(--mono);font-size: 11px';
+        const kEl = document.createElement('span'); kEl.textContent = d.k; kEl.style.color = 'var(--faint)';
+        const oEl = document.createElement('span'); oEl.textContent = String(d.ov); oEl.style.cssText = 'text-decoration:line-through;color:var(--faint)';
+        const aEl = document.createElement('span'); aEl.textContent = '→'; aEl.style.color = 'var(--faint)';
+        const nEl = document.createElement('span'); nEl.textContent = String(d.v); nEl.style.color = 'var(--accent-hi)';
+        seg.append(kEl, document.createTextNode(' '), oEl, document.createTextNode(' '), aEl, document.createTextNode(' '), nEl);
+        wrap.appendChild(seg);
+      }
+      row.append(cb, txt, wrap);
+    } else {
+      if (c.detail) txt.textContent += `（${c.detail}）`;
+      row.append(cb, txt);
+    }
     syncDim();
     list.appendChild(row);
   });
@@ -4505,6 +4532,26 @@ function renderParseResult(warnings = []) {
   };
   grow.querySelector('.badge').textContent = plan.gravityDefault ? '默认' : '题给';
   grow.querySelector('.badge').className = 'badge' + (plan.gravityDefault ? '' : ' given');
+  // AG-529：国内教材大量题按 g=10 出题——gravityDefault(9.81)时给一键切换,理论对照不再系统性偏 ~2%
+  if (plan.gravityDefault) {
+    const g10 = document.createElement('button');
+    g10.textContent = '按 g=10';
+    g10.title = '题目按 g=10 m/s² 出题时一键切换（国内教材常用值），也可直接在输入框改任意值';
+    g10.style.cssText = 'flex:none;padding:1px 8px;font-size: 11px;background:transparent;border:1px solid var(--line-strong);border-radius:var(--r-ctl);color:var(--dim);cursor:pointer';
+    g10.onmouseenter = () => { g10.style.borderColor = 'var(--accent)'; g10.style.color = 'var(--accent-hi)'; };
+    g10.onmouseleave = () => { g10.style.borderColor = 'var(--line-strong)'; g10.style.color = 'var(--dim)'; };
+    g10.onclick = () => {
+      const v = Number(gInput.value) === 10 ? 9.81 : 10;
+      gInput.value = v;
+      recordCorrection('gravity', plan.gravity, v);
+      plan.gravity = v;
+      plan.gravityDefault = false;
+      grow.querySelector('.badge').textContent = '题给';
+      grow.querySelector('.badge').className = 'badge given';
+      toast(`重力按 g=${v} m/s²（理论对照将用此值）`);
+    };
+    grow.appendChild(g10);
+  }
   meta.appendChild(grow);
   // 环境条件（Goal 七：环境条件字段，非空才显示）
   if (plan.environment) {
@@ -4551,6 +4598,26 @@ function renderParseResult(warnings = []) {
     // UI-552：单实体置信度复用总体同款色阶，弱项可扫读
     if (e.confidence != null) conf.style.color = e.confidence < 0.7 ? 'var(--danger)' : (e.confidence < 0.85 ? 'var(--accent)' : 'var(--faint)');
     head.append(nm, ty, conf);
+    // AG-547：多实体评审折叠——16 实体×4 字段超长难扫;头行点击 toggle,非首实体默认收起
+    if (plan.entities.length > 1) {
+      head.style.cursor = 'pointer';
+      head.title = '点击展开/收起该实体的可编辑字段';
+      const caret = document.createElement('span');
+      caret.textContent = '▸';
+      caret.style.cssText = 'color:var(--faint);font-size: 10px;transition:transform .15s;flex:none';
+      head.appendChild(caret);
+      const collapsed = i !== 0;
+      let open = !collapsed;
+      const syncFold = () => {
+        grid.style.display = open ? '' : 'none';
+        caret.style.transform = open ? 'rotate(90deg)' : 'rotate(0deg)';
+      };
+      head.onclick = (ev) => {
+        if (ev.target.closest('input,select,button')) return;   // 表单控件点击不折叠
+        open = !open; syncFold();
+      };
+      requestAnimationFrame(syncFold);
+    }
     row.appendChild(head);
     const grid = document.createElement('div');
     grid.className = 'pgrid';
