@@ -1,0 +1,63 @@
+{
+  "_fixture": true,
+  "_note": "本地示例解析数据（弹簧弹开双车，MOD-510），验证动量守恒+能量转换链路；不是真实模型输出",
+  "kind": "",
+  "questionType": "弹簧弹开双车（动量守恒+能量转换）",
+  "goal": "m1=1kg 与 m2=2kg 两车间的弹簧（k=30 N/m，原长 2.0m，安装距 1.2m 即压缩 0.8m）释放弹开，验证总动量为零、v1:v2=2:1、弹性势能全部转为动能",
+  "gravity": 9.81,
+  "entities": [
+    {
+      "type": "sphere",
+      "name": "小车甲",
+      "given": {
+        "mass": 1,
+        "radius": 0.15,
+        "position": [
+          -0.6,
+          0.15,
+          0
+        ],
+        "friction": 0
+      },
+      "confidence": 0.93
+    },
+    {
+      "type": "sphere",
+      "name": "小车乙",
+      "given": {
+        "mass": 2,
+        "radius": 0.15,
+        "position": [
+          0.6,
+          0.15,
+          0
+        ],
+        "friction": 0
+      },
+      "confidence": 0.93
+    }
+  ],
+  "attaches": [
+    {
+      "type": "spring",
+      "from": 0,
+      "to": 1,
+      "stiffness": 30,
+      "restLength": 2.0,
+      "damping": 0
+    }
+  ],
+  "observations": [
+    "弹开后的速度比与总动量"
+  ],
+  "unknowns": [
+    "v1/v2",
+    "p总"
+  ],
+  "assumptions": [
+    "水平面光滑（不计摩擦）",
+    "弹簧质量不计",
+    "释放前两车静止"
+  ],
+  "confidence": 0.92
+}

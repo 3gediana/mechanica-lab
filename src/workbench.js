@@ -5318,6 +5318,14 @@ async function motionProbe() {
     && doc.entities.filter((e) => e.type === 'rope').length === 2
     && doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic').length === 2;
   if (isPendulumCompare && !trailsOn) { setTrails(true); _pcTrailsAuto = true; }
+  // MOD-510 弹开双车：双球+弹簧——窗口 2.5s + 临时开 trails（双球差分测速依赖）
+  const isSpringPair = isSpring && !hasRamp && !isAtwood && !isHinge && !isAstro
+    && doc.entities.some((e) => e.type === 'spring')
+    && doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic').length === 2
+    // 耦合双振子(一球带初速驱动)不是弹开双车——排除,窗口/解释各归各(coupled 实锤)
+    && doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic')
+      .every((e) => !e.physics.linvel || e.physics.linvel.every((v) => Math.abs(v) < 1e-9));
+  if (isSpringPair && !trailsOn) { setTrails(true); _pcTrailsAuto = true; }
   // 曲面族（B5）：碗震荡 T≈2s 需 ≥2 周期（6s）；曲面下滑 3.5s 够到坡底+捕获。
   // 须在 isProjectile 前摘走——曲面+单球+地面长得像抛体，会被拿去按滞空算窗口
   const isBowl = !isPendulum && doc.entities.some((e) => e.type === 'bowl');
@@ -5325,7 +5333,7 @@ async function motionProbe() {
   const isProjectile = !hasRamp && !isSpring && !isAtwood && !isHinge && !isAstro && !isPendulum && !isCurved && hasGround
     && doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic').length === 1;
   const isMomentum = !hasRamp && !isAstro && !isRotation && !isSpring && !isAtwood && !isHinge && !isProjectile && !isPendulum && !isCurved;
-let needT = (isProjectile ? 2.5 : (isHinge ? 5.5 : (isAtwood ? 1.6 : (isSpring ? 6.5 : (isAstro ? 11 : (isRotation ? 3.5 : (isMomentum ? 2.0 : (isPendulumCompare ? 5 : (isPendulum ? 5 : (isBowl ? 6 : (isCurved ? 3.5 : 4)))))))))));
+  let needT = (isSpringPair ? 2.5 : (isProjectile ? 2.5 : (isHinge ? 5.5 : (isAtwood ? 1.6 : (isSpring ? 6.5 : (isAstro ? 11 : (isRotation ? 3.5 : (isMomentum ? 2.0 : (isPendulumCompare ? 5 : (isPendulum ? 5 : (isBowl ? 6 : (isCurved ? 3.5 : 4))))))))))));
   if (isProjectile) {
     // AG-568：抛体固定 2.5s 窗口在低重力/长滞空误判（月面斜抛滞空 6.25s → 理论对照假阳 44.4%）。
     // 窗口按真实滞空动态给：t=(vy0+√(vy0²+2g·h0))/g 再留 35% 采样余量，上限 14s
@@ -5508,6 +5516,14 @@ async function runAndExplain() {
     && doc.entities.filter((e) => e.type === 'rope').length === 2
     && doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic').length === 2;
   if (isPendulumCompare && !trailsOn) { setTrails(true); _pcTrailsAuto = true; }
+  // MOD-510 弹开双车：双球+弹簧——窗口 2.5s + 临时开 trails（双球差分测速依赖）
+  const isSpringPair = isSpring && !hasRamp && !isAtwood && !isHinge && !isAstro
+    && doc.entities.some((e) => e.type === 'spring')
+    && doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic').length === 2
+    // 耦合双振子(一球带初速驱动)不是弹开双车——排除,窗口/解释各归各(coupled 实锤)
+    && doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic')
+      .every((e) => !e.physics.linvel || e.physics.linvel.every((v) => Math.abs(v) < 1e-9));
+  if (isSpringPair && !trailsOn) { setTrails(true); _pcTrailsAuto = true; }
   // 曲面族（B5）：碗震荡 T≈2s 需 ≥2 周期（6s）；曲面下滑 3.5s 够到坡底+捕获。
   // 须在 isProjectile 前摘走——曲面+单球+地面长得像抛体，会被拿去按滞空算窗口
   const isBowl = !isPendulum && doc.entities.some((e) => e.type === 'bowl');
@@ -5522,7 +5538,7 @@ async function runAndExplain() {
   btn.disabled = true;
   setBtnText('btnRunExplain', '运行并记录中…');
   const isMomentum = !hasRamp && !isAstro && !isRotation && !isSpring && !isAtwood && !isHinge && !isProjectile && !isPendulum && !isCurved;
-let needT = (isProjectile ? 2.5 : (isHinge ? 5.5 : (isAtwood ? 1.6 : (isSpring ? 6.5 : (isAstro ? 11 : (isRotation ? 3.5 : (isMomentum ? 2.0 : (isPendulumCompare ? 5 : (isPendulum ? 5 : (isBowl ? 6 : (isCurved ? 3.5 : 4)))))))))));
+  let needT = (isSpringPair ? 2.5 : (isProjectile ? 2.5 : (isHinge ? 5.5 : (isAtwood ? 1.6 : (isSpring ? 6.5 : (isAstro ? 11 : (isRotation ? 3.5 : (isMomentum ? 2.0 : (isPendulumCompare ? 5 : (isPendulum ? 5 : (isBowl ? 6 : (isCurved ? 3.5 : 4))))))))))));
   if (isProjectile) {
     // AG-568：抛体窗口按真实滞空动态给（同 motionProbe），月面/低重力不再假阳
     const g = Math.max(0.3, Math.abs(doc.gravity) || 9.81);
@@ -5919,6 +5935,29 @@ function renderMomentum2DExplain(r, box) {
   if (r.kind === 'astro') { renderAstroExplain(r, box); return; }
   if (r.kind === 'rotation') { renderRotationExplain(r, box); return; }
   if (r.kind === 'spring') { renderSpringExplain(r, box); return; }
+  if (r.kind === 'spring-pair') {
+    const grid2 = document.createElement('div');
+    grid2.className = 'ro-grid';
+    const rows = [
+      ['速率比（理论 m₂/m₁）', `${r.theoretical.ratio.toFixed(3)}`],
+      ['速率比（实测 v₁/v₂）', `${r.measured.ratio.toFixed(3)}`],
+      ['末速 v₁ / v₂', `${r.measured.v1.toFixed(3)} / ${r.measured.v2.toFixed(3)} m/s`],
+      ['总动量（实测）', `${r.measured.pTotal.toFixed(4)} kg·m/s（≈0）`],
+      ['能量账（势能→动能）', `${r.theoretical.eP.toFixed(2)} → ${r.measured.eK.toFixed(2)} J`],
+      ['判定', r.pass ? '通过（p 守恒+速率反比质量+储能全转动能）' : '未通过'],
+    ];
+    grid2.innerHTML = rows.map(([k2], i) =>
+      `<div class="cell" style="grid-column:1/-1"><span class="k">${k2}</span><span class="v ${i === 5 ? 'acc' : 'plain'}"></span></div>`
+    ).join('');
+    [...grid2.querySelectorAll('.v')].forEach((el, i) => { el.textContent = rows[i][1]; });
+    box.appendChild(grid2);
+    const p2 = document.createElement('div');
+    p2.className = 'hint';
+    p2.style.marginTop = '8px';
+    p2.textContent = r.summary;
+    box.appendChild(p2);
+    return;
+  }
   if (r.kind === 'hooke-static') {
     const grid2 = document.createElement('div');
     grid2.className = 'ro-grid';

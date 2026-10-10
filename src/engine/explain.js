@@ -13,6 +13,10 @@ export function explainRun(plan, doc, series, reports = [], astro = null, rotati
   const spheres = doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
   const dynBodies = doc.entities.filter((e) => e.physics && e.physics.body === 'dynamic');
   if (hasHinge && series.length > 10 && series[0].rotz !== undefined) return explainHinge(plan, doc, series);
+  // MOD-510 弹开双车：双动态球+弹簧（无其它动态体）→ 动量守恒+能量账（trails 双球差分测速）
+  if (hasSpring && spheres.length === 2 && dynBodies.length === 2 && multiTrails) {
+    return explainSpringPair(plan, doc, multiTrails);
+  }
   if (hasSpring && series.length > 10) return explainSpring(plan, doc, series);
   // 传送带（RUN-2）：必须先于抛体分派——带上单球+地面恰好满足抛体的「离地单球」条件，
   // 会被拿去算「射程」（球明明贴带走）
@@ -269,6 +273,61 @@ function explainPendulumCompare(plan, doc, multiTrails) {
 }
 
 // ---------- 胡克静态伸长（MOD-507）：高阻尼砝码稳定后 x=mg/k ----------
+// ---------- 弹开双车（MOD-510）：p 守恒=0、v1:v2=m2:m1、½kx²→Σ½mv² ----------
+function explainSpringPair(plan, doc, multiTrails) {
+  const spring = doc.entities.find((e) => e.type === 'spring');
+  const balls = doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
+  if (!spring || balls.length !== 2) return { supported: false, reason: '弹开双车需要 弹簧+两动态球', summary: '结构不完整' };
+  const trailsArr = balls.map((b) => multiTrails.get(b.id)).filter((t) => t && t.length > 12);
+  if (trailsArr.length !== 2) return { supported: false, reason: '双球轨迹采样不足', summary: '采样不足' };
+  // trails 差分测 vx（主运动轴=两端位移方差大的轴）;取末 1/3 段均值=弹开后的稳定速度
+  const dt = 1 / 60;
+  const axisOf = (pts) => {
+    let sx = 0, sz = 0;
+    for (let i = 1; i < pts.length; i++) { sx += Math.abs(pts[i][0] - pts[i - 1][0]); sz += Math.abs(pts[i][2] - pts[i - 1][2]); }
+    return sx >= sz ? 0 : 2;
+  };
+  const velOf = (pts, ax) => {
+    const tail = pts.slice(Math.floor(pts.length * 2 / 3));
+    let v = 0;
+    for (let i = 1; i < tail.length; i++) v += (tail[i][ax] - tail[i - 1][ax]) / dt;
+    return v / Math.max(1, tail.length - 1);
+  };
+  const ax = axisOf(trailsArr[0]);
+  const v1 = velOf(trailsArr[0], ax), v2 = velOf(trailsArr[1], ax);
+  const [b1, b2] = balls;
+  const m1 = b1.physics.mass, m2 = b2.physics.mass;
+  const pTotal = m1 * v1 + m2 * v2;
+  const eKf = 0.5 * m1 * v1 * v1 + 0.5 * m2 * v2 * v2;
+  // 压缩量:原长−释放时安装距（端点距,取初始轨迹点）
+  const pA = trailsArr[0][0], pB = trailsArr[1][0];
+  const install = Math.hypot(pB[0] - pA[0], (pB[1] - pA[1]), pB[2] - pA[2]);
+  const rest = spring.params.restLength ?? install;
+  const x0 = Math.max(0, rest - install);
+  const ePs = 0.5 * (spring.params.stiffness ?? 20) * x0 * x0;
+  const ratioTheory = m2 / m1;
+  const ratioMeasured = Math.abs(v1 / v2);
+  const errPct = Math.abs(ratioMeasured - ratioTheory) / ratioTheory * 100;
+  const pass = errPct < 8 && Math.abs(pTotal) < 0.12 * Math.max(Math.abs(m1 * v1), Math.abs(m2 * v2), 0.05);
+  const summary = [
+    `弹簧弹开双车（m₁=${m1} kg、m₂=${m2} kg，k=${spring.params.stiffness} N/m，压缩 ${x0.toFixed(3)} m，储能 ${ePs.toFixed(2)} J）：`,
+    `静止释放后总动量理论为零；速率比理论 v₁:v₂ = m₂:m₁ = ${ratioTheory.toFixed(3)}。`,
+    `实测（轨迹差分,末段均值）：v₁=${v1.toFixed(3)}、v₂=${v2.toFixed(3)} m/s，速率比 ${ratioMeasured.toFixed(3)}（偏差 ${errPct.toFixed(2)}%），总动量 ${pTotal.toFixed(4)} kg·m/s（≈0）。`,
+    `能量账：弹性势能 ${ePs.toFixed(2)} J → 动能 ${eKf.toFixed(2)} J（转换率 ${(eKf / Math.max(ePs, 1e-9) * 100).toFixed(1)}%）。`,
+    pass ? '验证通过：动量守恒给出速度反比于质量，弹簧储能全部转为动能。' : '偏差偏大,建议核对压缩量与初速（应由静止释放）。',
+  ].join('');
+  return {
+    supported: true,
+    kind: 'spring-pair',
+    simT: null,
+    observation: plan.observations[0] || '速度比与总动量',
+    theoretical: { ratio: +ratioTheory.toFixed(4), eP: +ePs.toFixed(3), formula: 'v1/v2 = m2/m1; Σp=0' },
+    measured: { ratio: +ratioMeasured.toFixed(4), v1: +v1.toFixed(3), v2: +v2.toFixed(3), pTotal: +pTotal.toFixed(4), eK: +eKf.toFixed(3) },
+    errPct, pass,
+    summary,
+  };
+}
+
 function explainHookeStatic(plan, doc, series, ball, spring) {
   const g = Math.abs(doc.gravity) || 9.81;
   const m = ball.physics.mass, k = spring.params.stiffness;

@@ -49,6 +49,7 @@ const EXPECT = [
   // R5-B5 曲面族（MOD-581~595）
   ['curved-descent', { has: ['curvedRamp', 'sphere', 'ground'] }],
   ['bowl', { has: ['bowl', 'sphere'] }],
+  ['spring-launch-pair', { has: ['spring', 'sphere', 'ground'], springN: 1, sphereN: 2, n: 4 }],   // 2 球+弹簧+自动承接地面(贴地=光滑桌面语义)
   ['hooke-static', { has: ['spring', 'sphere', 'box'], springN: 1, n: 3 }],
   ['pendulum-compare', { has: ['rope', 'sphere', 'box', 'ground'], ropeN: 2, sphereN: 2, n: 7 }],   // 4 题给体+2 绳+AG-542 自动承接地面
   ['recoil-unequal', { has: ['ground', 'sphere'], sphereN: 2 }],
