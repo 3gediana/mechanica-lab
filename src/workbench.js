@@ -2906,6 +2906,8 @@ function _measuredMainId() {
 }
 let _seenReports = 0;
 let _liveEls = null;      // PL-51：liveGrid 读数元素缓存（原每项每轮 querySelector）
+const _livePrev = {};       // FX-553：上一拍数值（变化率检测）
+const _liveFlash = {};      // FX-553：脉冲计时器句柄
 function liveEls() {
   if (_liveEls) return _liveEls;
   const grid = document.getElementById('liveGrid');
@@ -2931,7 +2933,20 @@ function updateReadouts() {
     if (roSel) roSel.title = selTxt;   // UI-542：截断时悬停读全文
     const { grid, map } = liveEls();
     if (grid) {
-      const set = (k, v) => { const el = map.get(k); if (el) setTxt(el, v); };
+      // FX-553：数值流动高亮——变化率超阈值的行 150ms 琥珀脉冲（读数「活」了,静止=常态、突变=亮）
+      const set = (k, v) => {
+        const el = map.get(k);
+        if (!el) return;
+        setTxt(el, v);
+        const pv = _livePrev[k];
+        const nv = Number(v);
+        if (pv != null && Number.isFinite(nv) && Math.abs(nv - pv) > Math.max(Math.abs(pv) * 0.05, 0.02)) {
+          el.style.color = 'var(--accent-hi)';
+          clearTimeout(_liveFlash[k]);
+          _liveFlash[k] = setTimeout(() => { if (el.isConnected) el.style.color = ''; }, 150);
+        }
+        if (Number.isFinite(nv)) _livePrev[k] = nv;
+      };
       if (t) {
         set('speed', t.speed.toFixed(3));
         set('height', t.height.toFixed(3));
@@ -3052,6 +3067,27 @@ function drawCurves() {
       i++;
     }
     trace((j) => curveData.ke[j], '#7dc87d');    // 系统KE：绿实线
+  }
+  // FX-554：实时游标——当前时刻竖线+系统KE 末端圆点+最新值文本（扫一眼就知道「现在」在哪）
+  {
+    const xNow = ((curveData.t[n - 1] - t0) / span) * (W - 8) + 4;
+    ctx.strokeStyle = 'rgba(231, 189, 104, 0.55)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(xNow, 2); ctx.lineTo(xNow, H - 2);
+    ctx.stroke();
+    const keNow = curveData.ke[n - 1];
+    const yNow = H - 6 - (Math.abs(keNow) / vmax) * (H - 12);
+    ctx.fillStyle = '#e7bd68';
+    ctx.beginPath();
+    ctx.arc(xNow, yNow, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.font = '10px ui-monospace, SFMono-Regular, Menlo, monospace';
+    ctx.textAlign = xNow > W - 64 ? 'right' : 'left';
+    const label = curveMode === 'energy'
+      ? `E=${(curveData.ke[n - 1] + curveData.pe[n - 1]).toFixed(2)}J`
+      : `KE=${keNow.toFixed(2)}J`;
+    ctx.fillText(label, xNow + (xNow > W - 64 ? -5 : 5), Math.max(12, yNow - 6));
   }
 }
 
