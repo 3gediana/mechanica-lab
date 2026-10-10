@@ -297,7 +297,9 @@ function hingeLayout(plan) {
   if (!anchor || !rod) return out;
   const aPos = anchor.given.position ?? [0, 2.5, 0];
   const L = rod.given.length ?? 1.0;
-  const swing = 0.4;   // 离竖直垂下的初始偏角（小角度，T=2π√(2L/3g) 适用）
+  // AG-543：「从水平位置释放」类题按题面选档（水平=π/2）；缺省小角 0.4（T=2π√(2L/3g) 适用口径）
+  const horizText = [plan.questionType, plan.goal, plan.environment, ...plan.keyPoints].join('');
+  const swing = /水平|水平位置|由水平|水平方向.{0,4}释放/.test(horizText) ? Math.PI / 2 : 0.4;
   out.push({
     type: 'box', name: anchor.name || '铰链基座', source: 'agent',
     params: { sx: 0.2, sy: 0.2, sz: 0.2 },
@@ -341,13 +343,16 @@ function atwoodLayout(plan) {
   balls.forEach((e, i) => {
     const m = e.given.mass ?? 1;
     const x = (i === 0 ? -1 : 1) * (R + 0.05);
+    // AG-538：尊重题给 position(「m1 从高 h 处释放」类题的保真)与 velocity;仅未给时用默认 1.0/0
+    const givenP = Array.isArray(e.given.position) ? e.given.position : null;
+    const py = givenP ? Math.min(givenP[1], plPos[1] - R - 0.15) : 1.0;
     out.push({
       type: 'sphere', name: e.name || ('球 ' + (i + 1)), source: 'agent',
       params: { radius: 0.12 },
-      transform: { pos: [x, 1.0, 0], rot: [0, 0, 0] },
+      transform: { pos: [givenP ? givenP[0] : x, py, givenP ? (givenP[2] || 0) : 0], rot: [0, 0, 0] },
       physics: {
         body: 'dynamic', mass: m, friction: 0, restitution: 0,
-        linvel: [0, 0, 0], angvel: [0, 0, 0],
+        linvel: e.given.velocity ? [...e.given.velocity] : [0, 0, 0], angvel: [0, 0, 0],
         linDamping: 0, angDamping: 0, gravityScale: 1, onPulley: '__PULLEY__',
       },
       render: { material: i === 0 ? 'chrome' : 'brass' },
@@ -404,7 +409,9 @@ function rotationLayout(plan) {
     ? Math.min(500, Math.max(0.05, 2 * Igiven / (R * R)))
     : (tableE.given.mass ?? 8);
   const omega0 = (tableE.given.angvel ?? [0, 3, 0])[1];
-  const r0 = 0.7;
+  // AG-544：滑块题给位置(相对转轴的半径)优先——切向速度按 r0 重算,不再恒 0.7
+  const sp = sliderE.given.position;
+  const r0 = (sp && (Math.abs(sp[0]) > 1e-6 || Math.abs(sp[2]) > 1e-6)) ? Math.min(2.2, Math.hypot(sp[0], sp[2])) : 0.7;
   const ms = sliderE.given.mass ?? 1.5;
   const isPulley = tableE.type === 'pulley';
   out.push(isPulley ? {
@@ -863,6 +870,26 @@ export function planToOverrides(plan) {
         plan.assumptions = [...plan.assumptions, `按圆轨道语义推断绕转体入轨速度 v=${vc.toFixed(2)}（xz 切向，客户端推断）`].slice(0, 8);
       } else {
         sat.physics.linvel = [vt[0] / vtl * speed, 0, vt[2] / vtl * speed].map((x) => +x.toFixed(4));
+      }
+    }
+  }
+  // AG-542：「从高处由静止释放」单球无地面——自动补承接地面（球不再永坠无落点可测）。
+  // 尺寸按最高球高度估算,摩擦 0 不污染测量;plan 显式给了 ground 的场景不越权
+  if (!plan.entities.some((x) => x.type === 'ground') && !out.some((o) => o.type === 'ground')
+    && !out.some((o) => o.type === 'ramp' || o.type === 'pulley' || o.type === 'conveyor' || o.type === 'curvedRamp' || o.type === 'bowl' || o.type === 'waveFloor')) {
+    const droppers = out.filter((o) => o.type === 'sphere' && o.physics && o.physics.body === 'dynamic'
+      && (o.physics.gravityScale ?? 1) === 1 && !o.physics.onPulley
+      && (!o.physics.linvel || o.physics.linvel.every((x) => Math.abs(x) < 1e-9)));
+    if (droppers.length) {
+      const topY = Math.max(...droppers.map((o) => o.transform.pos[1]));
+      if (topY > 1.2) {
+        out.push({
+          type: 'ground', name: '承接地面', source: 'agent',
+          params: { sx: Math.min(30, +(topY * 4).toFixed(1)), sy: 0.1, sz: Math.min(20, +(topY * 2).toFixed(1)) },
+          transform: { pos: [0, 0, 0], rot: [0, 0, 0] },
+          physics: { body: 'fixed', friction: 0, restitution: 0.15 },
+        });
+        plan.assumptions = [...plan.assumptions, `自动补承接地面（题面高处释放，客户端推断）`].slice(0, 8);
       }
     }
   }
