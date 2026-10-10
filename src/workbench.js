@@ -5353,6 +5353,9 @@ async function motionProbe() {
   const _ball0 = doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
   const _v0h = _ball0.length === 1 && _ball0[0].physics.linvel ? Math.hypot(_ball0[0].physics.linvel[0], _ball0[0].physics.linvel[2]) : 0;
   const isVertCircle = !hasRamp && !isSpring && !isAtwood && !isHinge && !isAstro && _rope0 && _ball0.length === 1 && _v0h * _v0h >= 4.5 * Math.abs(doc.gravity || 9.81);
+  // MOD-505 水平圆周：绳系单球+小水平初速+贴地（有 ground）——窗口 7.5s（≥2 周期）
+  const isHorizCircle = !hasRamp && !isSpring && !isAtwood && !isHinge && !isAstro && _rope0 && _ball0.length === 1
+    && _v0h > 0.3 && _v0h * _v0h < 4.5 * Math.abs(doc.gravity || 9.81) && doc.entities.some((e) => e.type === 'ground');
   // MOD-510 弹开双车：双球+弹簧——窗口 2.5s + 临时开 trails（双球差分测速依赖）
   const isSpringPair = isSpring && !hasRamp && !isAtwood && !isHinge && !isAstro
     && doc.entities.some((e) => e.type === 'spring')
@@ -5368,7 +5371,7 @@ async function motionProbe() {
   const isProjectile = !hasRamp && !isSpring && !isAtwood && !isHinge && !isAstro && !isPendulum && !isCurved && hasGround
     && doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic').length === 1;
   const isMomentum = !hasRamp && !isAstro && !isRotation && !isSpring && !isAtwood && !isHinge && !isProjectile && !isPendulum && !isCurved;
-  let needT = (isVertCircle ? 6 : (isSpringPair ? 2.5 : (isProjectile ? 2.5 : (isHinge ? 5.5 : (isAtwood ? 1.6 : (isSpring ? 6.5 : (isAstro ? 11 : (isRotation ? 3.5 : (isMomentum ? 2.0 : (isPendulumCompare ? 5 : (isPendulum ? 5 : (isBowl ? 6 : (isCurved ? 3.5 : 4)))))))))))));
+  let needT = (isHorizCircle ? 7.5 : (isVertCircle ? 6 : (isSpringPair ? 2.5 : (isProjectile ? 2.5 : (isHinge ? 5.5 : (isAtwood ? 1.6 : (isSpring ? 6.5 : (isAstro ? 11 : (isRotation ? 3.5 : (isMomentum ? 2.0 : (isPendulumCompare ? 5 : (isPendulum ? 5 : (isBowl ? 6 : (isCurved ? 3.5 : 4))))))))))))));
   if (isProjectile) {
     // AG-568：抛体固定 2.5s 窗口在低重力/长滞空误判（月面斜抛滞空 6.25s → 理论对照假阳 44.4%）。
     // 窗口按真实滞空动态给：t=(vy0+√(vy0²+2g·h0))/g 再留 35% 采样余量，上限 14s
@@ -5556,6 +5559,9 @@ async function runAndExplain() {
   const _ball0 = doc.entities.filter((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
   const _v0h = _ball0.length === 1 && _ball0[0].physics.linvel ? Math.hypot(_ball0[0].physics.linvel[0], _ball0[0].physics.linvel[2]) : 0;
   const isVertCircle = !hasRamp && !isSpring && !isAtwood && !isHinge && !isAstro && _rope0 && _ball0.length === 1 && _v0h * _v0h >= 4.5 * Math.abs(doc.gravity || 9.81);
+  // MOD-505 水平圆周：绳系单球+小水平初速+贴地（有 ground）——窗口 7.5s（≥2 周期）
+  const isHorizCircle = !hasRamp && !isSpring && !isAtwood && !isHinge && !isAstro && _rope0 && _ball0.length === 1
+    && _v0h > 0.3 && _v0h * _v0h < 4.5 * Math.abs(doc.gravity || 9.81) && doc.entities.some((e) => e.type === 'ground');
   // MOD-510 弹开双车：双球+弹簧——窗口 2.5s + 临时开 trails（双球差分测速依赖）
   const isSpringPair = isSpring && !hasRamp && !isAtwood && !isHinge && !isAstro
     && doc.entities.some((e) => e.type === 'spring')
@@ -5578,7 +5584,7 @@ async function runAndExplain() {
   btn.disabled = true;
   setBtnText('btnRunExplain', '运行并记录中…');
   const isMomentum = !hasRamp && !isAstro && !isRotation && !isSpring && !isAtwood && !isHinge && !isProjectile && !isPendulum && !isCurved;
-  let needT = (isVertCircle ? 6 : (isSpringPair ? 2.5 : (isProjectile ? 2.5 : (isHinge ? 5.5 : (isAtwood ? 1.6 : (isSpring ? 6.5 : (isAstro ? 11 : (isRotation ? 3.5 : (isMomentum ? 2.0 : (isPendulumCompare ? 5 : (isPendulum ? 5 : (isBowl ? 6 : (isCurved ? 3.5 : 4)))))))))))));
+  let needT = (isHorizCircle ? 7.5 : (isVertCircle ? 6 : (isSpringPair ? 2.5 : (isProjectile ? 2.5 : (isHinge ? 5.5 : (isAtwood ? 1.6 : (isSpring ? 6.5 : (isAstro ? 11 : (isRotation ? 3.5 : (isMomentum ? 2.0 : (isPendulumCompare ? 5 : (isPendulum ? 5 : (isBowl ? 6 : (isCurved ? 3.5 : 4))))))))))))));
   if (isProjectile) {
     // AG-568：抛体窗口按真实滞空动态给（同 motionProbe），月面/低重力不再假阳
     const g = Math.max(0.3, Math.abs(doc.gravity) || 9.81);
@@ -6022,6 +6028,29 @@ function renderMomentum2DExplain(r, box) {
   }
   if (r.kind === 'pendulum') { renderPendulumExplain(r, box); return; }
   if (r.kind === 'pendulum-compare') { renderPendulumCompareExplain(r, box); return; }
+  if (r.kind === 'horiz-circle') {
+    const gh = document.createElement('div');
+    gh.className = 'ro-grid';
+    const rows = [
+      ['半径 r / 初速 v', `${r.measured.rho.toFixed(3)} m / ${r.measured.v.toFixed(2)} m/s`],
+      ['周期（理论 2πr/v）', `${r.theoretical.period.toFixed(3)} s`],
+      ['周期（实测·峰值间隔法）', `${r.measured.period.toFixed(3)} s`],
+      ['周期偏差', `${r.errPct.toFixed(2)}%`],
+      ['向心力 F=mv²/r', `${r.theoretical.F.toFixed(2)} N`],
+      ['判定', r.pass ? '通过（绳张力维持向心加速度 a=v²/r）' : '未通过'],
+    ];
+    gh.innerHTML = rows.map(([k2], i) =>
+      `<div class="cell" style="grid-column:1/-1"><span class="k">${k2}</span><span class="v ${i === 5 ? 'acc' : 'plain'}"></span></div>`
+    ).join('');
+    [...gh.querySelectorAll('.v')].forEach((el, i) => { el.textContent = rows[i][1]; });
+    box.appendChild(gh);
+    const ph = document.createElement('div');
+    ph.className = 'hint';
+    ph.style.marginTop = '8px';
+    ph.textContent = r.summary;
+    box.appendChild(ph);
+    return;
+  }
   if (r.kind === 'vert-circle') {
     const gv = document.createElement('div');
     gv.className = 'ro-grid';

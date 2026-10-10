@@ -38,6 +38,11 @@ export function explainRun(plan, doc, series, reports = [], astro = null, rotati
       const anchor0 = rope0 ? doc.entities.find((e) => e.id === rope0.attach.find((id) => id !== spheres[0].id)) : null;
       const Lv = anchor0 ? Math.hypot(spheres[0].transform.pos[0] - anchor0.transform.pos[0], spheres[0].transform.pos[1] - anchor0.transform.pos[1], spheres[0].transform.pos[2] - anchor0.transform.pos[2]) : 1;
       if (v0h * v0h >= 4.5 * (Math.abs(doc.gravity) || 9.81) * Lv) return explainVertCircle(plan, doc, series);
+      // MOD-505：球贴地（球心≈半径高度,绳近水平）= 光滑面水平圆周；悬空=圆锥摆
+      const groundE0 = doc.entities.find((e) => e.type === 'ground');
+      const ballY0 = spheres[0].transform.pos[1];
+      const anchoredHigh0 = anchor0 && (anchor0.transform.pos[1] - ballY0) > 0.3;
+      if (groundE0 && !anchoredHigh0) return explainHorizCircle(plan, doc, series);
       return explainConicalPendulum(plan, doc, series);
     }
     return explainPendulum(plan, doc, series);
@@ -235,6 +240,46 @@ function explainInelastic(plan, doc, reports, bodies) {
 // 数据走 multiTrails（全体动态体 1/60s 轨迹四元组 Map）——series 只录主测量体,双球周期须逐球取
 // ---------- 圆锥摆（MOD-503）：稳态锥角 θ, T=2π√(L·cosθ/g), F向=mg·tanθ ----------
 // ---------- 竖直圆周（MOD-504）：v_top=√(gL) 临界、½v0²=½v_top²+2gL、T底−T顶=6mg ----------
+// ---------- 水平圆周（MOD-505）：光滑面绳系球 T=2πr/v、F=mv²/r ----------
+function explainHorizCircle(plan, doc, series) {
+  const ball = doc.entities.find((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
+  const rope = doc.entities.find((e) => e.type === 'rope');
+  if (!ball || !rope) return { supported: false, reason: '水平圆周解释需要 绳+球+水平面', summary: telemetrySummary(series) };
+  const anchor = doc.entities.find((e) => e.id === rope.attach.find((id) => id !== ball.id));
+  const m = ball.physics.mass;
+  const v0 = Math.hypot(ball.physics.linvel[0], ball.physics.linvel[2]);
+  const A = anchor.transform.pos, B = ball.transform.pos;
+  const r0 = Math.hypot(B[0] - A[0], B[2] - A[2]);
+  const Ttheory = 2 * Math.PI * r0 / v0;
+  const Ftheory = m * v0 * v0 / r0;
+  // 实测:稳态段（后 60%）半径均值 + 水平轴峰值间隔=周期;速度=半径×2π/T
+  const n2 = Math.floor(series.length * 0.4);
+  const tail = series.slice(n2);
+  const rhoMean = tail.reduce((a, p) => a + Math.hypot(p.pos[0] - A[0], p.pos[2] - A[2]), 0) / tail.length;
+  const axis = tail.reduce((a, p) => a + Math.abs(p.pos[0] - A[0]), 0) >= tail.reduce((a, p) => a + Math.abs(p.pos[2] - A[2]), 0) ? 0 : 2;
+  const { T: Tmeasured, peaks } = medianPeakPeriod(tail.map((p, i) => ({ t: series[n2 + i].t, pos: p.pos, speed: p.speed, vel: p.vel })), axis);
+  if (Tmeasured == null) return { supported: false, reason: '圆周不足两个周期,加长运行', summary: telemetrySummary(series) };
+  const vMeasured = 2 * Math.PI * rhoMean / Tmeasured;
+  const errPct = Math.abs(Tmeasured - Ttheory) / Ttheory * 100;
+  const pass = errPct < 8;
+  const summary = [
+    `水平圆周（m=${m} kg，r=${r0.toFixed(3)} m，v0=${v0.toFixed(2)} m/s，光滑面）：`,
+    `理论周期 T=2πr/v=${Ttheory.toFixed(3)} s；向心力 F=mv²/r=${Ftheory.toFixed(2)} N（绳张力提供）。`,
+    `实测：稳态半径 ${rhoMean.toFixed(3)} m，周期 ${Tmeasured.toFixed(3)} s（峰值间隔法，${peaks} 峰），偏差 ${errPct.toFixed(2)}%；推算线速度 ${vMeasured.toFixed(2)} m/s。`,
+    pass ? '验证通过：匀速圆周的向心加速度 a=v²/r 由绳张力维持,速度大小不变。' : '偏差偏大,建议核对初速方向（应切向）与水平面是否光滑。',
+  ].join('');
+  return {
+    supported: true,
+    kind: 'horiz-circle',
+    simT: series[series.length - 1].t,
+    observation: plan.observations[0] || '周期与向心力',
+    theoretical: { period: +Ttheory.toFixed(3), F: +Ftheory.toFixed(2), formula: 'T=2πr/v; F=mv²/r' },
+    measured: { period: +Tmeasured.toFixed(3), rho: +rhoMean.toFixed(3), v: +vMeasured.toFixed(2) },
+    errPct, pass,
+    summary,
+  };
+}
+
 function explainVertCircle(plan, doc, series) {
   const ball = doc.entities.find((e) => e.type === 'sphere' && e.physics.body === 'dynamic');
   const rope = doc.entities.find((e) => e.type === 'rope');
