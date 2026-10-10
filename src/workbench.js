@@ -813,6 +813,7 @@ function stepOnce() {
 }
 function resetSim(silent = false) {
   mode = 'edit'; paused = false;
+  _beatDots.length = 0; _beatAcc.t = 0;   // FX-524：节拍点随重置清空
   viewport.setGizmoEnabled(true);
   $('stage').classList.remove('running');
   rebuildAll();                    // 全量重建 = 回到文档初始态
@@ -1618,6 +1619,11 @@ function onKey(e) {
     e.preventDefault();
     if (e.shiftKey) { if (mode === 'run' && !paused) toggleSlowmo(); }
     else mode === 'run' ? pauseToggle() : play();
+    // FX-557：键盘触发与鼠标点击同款按钮反馈（100ms 脉冲——盲操作也能看见状态切了）
+    {
+      const btn = mode === 'run' && !paused ? $('btnPause') : $('btnPlay');
+      if (btn) { btn.classList.add('ok-flash'); setTimeout(() => btn.classList.remove('ok-flash'), 100); }
+    }
   }
   else if (e.key === '-' || e.key === '_') { e.preventDefault(); speedStep(-1); }
   else if (e.key === '=' || e.key === '+') { e.preventDefault(); speedStep(1); }
@@ -2892,6 +2898,12 @@ function updateAstroCons() {
 
 // ============ 底栏读数 + 检查器实时区 ============
 let roTimer = 0;
+const _beatAcc = { t: 0 };   // FX-524 节拍累时
+const _beatDots = [];        // FX-524 节拍点池(≤64)
+function _measuredMainId() {
+  for (const e of doc.entities) if (e.measured) return e.id;
+  return null;
+}
 let _seenReports = 0;
 let _liveEls = null;      // PL-51：liveGrid 读数元素缓存（原每项每轮 querySelector）
 function liveEls() {
@@ -3585,6 +3597,20 @@ function tick() {
     viewport.updateJointViz(POOL_JOINT.list);
   }
   if (trailsOn) viewport.updateTrails(runtime.trails);
+  // FX-524：等时节拍点——主测量体每 0.5s 模拟时落一枚点(疏=快密=慢)
+  if (trailsOn) {
+    const mb = runtime.binds.get(_measuredMainId());
+    if (mb && mb.body) {
+      const p = mb.body.translation();
+      _beatAcc.t += rawDt;
+      if (_beatAcc.t >= 0.5) {
+        _beatAcc.t = 0;
+        _beatDots.push([p.x, p.y, p.z]);
+        if (_beatDots.length > 64) _beatDots.shift();
+      }
+    }
+    viewport.updateBeatDots(_beatDots);
+  } else { _beatAcc.t = 0; viewport.updateBeatDots(null); }
   // 声音（层 1）+ 碰撞 juice（层 3）：撞击冲量 → 三音色合成 + 粒子/震屏/升级环。
   // 听点 = 相机 target（pan 按横偏、衰减按距离）；强度与音色两路共用一次冲量换算。
   {

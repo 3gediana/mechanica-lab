@@ -26,6 +26,7 @@ export class Viewport {
     this.snap = false;
     this.arrowsOn = false;
     this._arrows = [];
+    this._arrowSmooth = [];   // FX-517：速度箭头平滑态（方向/长度/速度）
     this._normViz = [];
     this.trailsVisible = false;
     this._trailLines = [];
@@ -53,10 +54,13 @@ export class Viewport {
   // PL-42：平滑缩放收敛（workbench tick 每帧调用；外部改相机位置安全——OrbitControls
   // 每次 update 从 camera.position 重算 offset）
   tickZoom() {
+    // FX-534：缩放终点缓出——距目标越近收得越慢(0.12+0.25·近距比),回弹感替代机械匀速
     if (this._zoomTarget == null) return;
     const cam = this.camera, t = this.controls.target;
     const cur = cam.position.distanceTo(t);
-    const next = cur + (this._zoomTarget - cur) * 0.2;
+    // FX-534：自适应缓出——距目标越近收得越慢（0.12 基速 + 0.25·近距比），回弹感替代匀速
+    const near = Math.min(1, Math.abs(this._zoomTarget - cur) / Math.max(this._zoomTarget, 1e-6));
+    const next = cur + (this._zoomTarget - cur) * (0.12 + 0.25 * near);
     const k = (Math.abs(this._zoomTarget - next) < 0.004 * this._zoomTarget) ? this._zoomTarget / cur : next / cur;
     if (Number.isFinite(k) && k > 0) {
       cam.position.sub(t).multiplyScalar(k).add(t);
@@ -741,19 +745,55 @@ export class Viewport {
     while (this._arrows.length < items.length) {
       const a = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 1, ACCENT, 0.09, 0.055);
       this.scene.add(a);
+      this._arrowSmooth.push({ dir: new THREE.Vector3(1, 0, 0), len: 1, speed: 0 });   // FX-517 平滑态
       this._arrows.push(a);
     }
     this._arrows.forEach((a, i) => {
       if (i >= items.length) { a.visible = false; return; }
       const v = items[i].vel;
       const speed = Math.hypot(v[0], v[1], v[2]);
-      if (speed < 0.01) { a.visible = false; return; }
+      const sm = this._arrowSmooth[i];
+      if (speed < 0.01 && (!sm || sm.speed < 0.01)) { a.visible = false; if (sm) sm.speed = 0; return; }
       a.visible = true;
       const p = items[i].pos;
       a.position.set(p[0], p[1], p[2]);
-      a.setDirection(_sv3.set(v[0] / speed, v[1] / speed, v[2] / speed));
-      a.setLength(Math.min(0.15 + speed * 0.22, 1.8), 0.09, 0.055);
+      // FX-517：方向/长度指数平滑（lerp 0.35）——碰撞帧速度突变不再毛刺跳变
+      const k = 0.35;
+      const target = _sv3.set(speed > 1e-9 ? v[0] / speed : 1, speed > 1e-9 ? v[1] / speed : 0, speed > 1e-9 ? v[2] / speed : 0);
+      sm.dir.lerp(target, k).normalize();
+      const tLen = Math.min(0.15 + speed * 0.22, 1.8);
+      sm.len += (tLen - sm.len) * k;
+      sm.speed += (speed - sm.speed) * k;
+      a.setDirection(sm.dir);
+      a.setLength(sm.len, 0.09, 0.055);
+      // FX-522：箭头速度映射色（与轨迹同源:慢蓝→快琥珀→极快红,8 m/s 满标）
+      const t = Math.min(sm.speed / 8, 1);
+      const c1 = [0x5b, 0x8d, 0xd9], c2 = [0xd9, 0xa4, 0x41], c3 = [0xc9, 0x6a, 0x5a];
+      const mix = (A, B, u) => A.map((x, j) => Math.round(x + (B[j] - x) * u));
+      const rgb = t < 0.5 ? mix(c1, c2, t * 2) : mix(c2, c3, (t - 0.5) * 2);
+      a.setColor(new THREE.Color(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255));
     });
+  }
+
+  // FX-524：轨迹等时节拍点——每 0.5s 模拟时落一枚 0.02m 小点（疏=快密=慢,肉眼可读速度节奏）
+  updateBeatDots(dots) {
+    if (!this._beatDots) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(64 * 3), 3));
+      geo.setDrawRange(0, 0);
+      const mat = new THREE.PointsMaterial({ color: 0xe7bd68, size: 0.02, sizeAttenuation: true, transparent: true, opacity: 0.8, fog: false });
+      this._beatDots = new THREE.Points(geo, mat);
+      this._beatDots.frustumCulled = false;
+      this.scene.add(this._beatDots);
+    }
+    const show = this.trailsVisible && dots && dots.length;
+    this._beatDots.visible = !!show;
+    if (!show) return;
+    const attr = this._beatDots.geometry.attributes.position;
+    const n = Math.min(dots.length, 64);
+    for (let i = 0; i < n; i++) attr.setXYZ(i, dots[i][0], dots[i][1], dots[i][2]);
+    attr.needsUpdate = true;
+    this._beatDots.geometry.setDrawRange(0, n);
   }
 
   arrowStats() {
