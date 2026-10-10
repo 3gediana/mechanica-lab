@@ -24,6 +24,9 @@ const TYPE_MAP = {
 
 // kind 中文/近义归一（AG-99）：模型偶发输出中文 kind，布局分派全靠英文枚举，不归一直接走通用路径丢关节
 const KIND_MAP = {
+  // AG-526 负清单：模型偶发把题型词当 kind 输出（碰撞/动量/平抛/传送带）——归 '' 走通用路径,
+  // 不然 kind 字段带着无效值进布局分派永远不命中
+  碰撞: '', 动量: '', 平抛: '', 传送带: '', 受力分析: '',
   转台: 'rotation', 转动: 'rotation', 角动量: 'rotation', 圆盘: 'rotation', 转盘: 'rotation',
   铰链: 'hinge', 复摆: 'hinge', 单摆: 'hinge',
   弹簧: 'spring', 振子: 'spring', 简谐: 'spring',
@@ -76,6 +79,7 @@ export function normalizeParse(raw) {
   if (!raw || typeof raw !== 'object') return { ok: false, errors: ['解析结果不是对象'] };
   const entities = [];
   const droppedNotes = [];
+  let plan_entities_truncate_note = 0;   // AG-524 超限丢弃计数
   let vec2Padded = 0;                                       // 二维向量补零升维计数（AG-97）
   for (const e of (Array.isArray(raw.entities) ? raw.entities : [])) {
     const type = TYPE_MAP[e.type];
@@ -85,22 +89,28 @@ export function normalizeParse(raw) {
     for (const [k0, v] of Object.entries(e.given || {})) {
       // AG-527 given 键别名归一（mu→friction / v0→velocity / m→mass / theta→angleDeg…）
       const k = GIVEN_KEY_ALIAS[k0] || k0;
+      // AG-520：向量量级上限——|v|≤200 m/s、|p|≤500 m、|ω|≤500 rad/s。
+      // 只查有限性不查量级时,|v|=5000 直进场景炸取景/炸求解器（超量级=模型幻觉,报错丢弃比建出来好）
+      const vecOk = (arr, cap) => arr.every(Number.isFinite) && Math.hypot(...arr) <= cap;
       if (k === 'velocity') {
         const arr = Array.isArray(v) ? v.map((x) => Number(x)) : null;
-        if (arr && arr.length === 3 && arr.every(Number.isFinite)) given.velocity = arr;
-        else if (arr && arr.length === 2 && arr.every(Number.isFinite)) { given.velocity = [arr[0], arr[1], 0]; vec2Padded++; }
+        if (arr && arr.length === 3 && vecOk(arr, 200)) given.velocity = arr;
+        else if (arr && arr.length === 2 && vecOk([arr[0], arr[1], 0], 200)) { given.velocity = [arr[0], arr[1], 0]; vec2Padded++; }
+        else if (arr && arr.length === 3) errors.push(`${e.name || type}.velocity 量级超限（${Math.hypot(...arr).toFixed(0)} m/s > 200），已忽略——请核对单位`);
         continue;
       }
       if (k === 'position') {
         const arr = Array.isArray(v) ? v.map((x) => Number(x)) : null;
-        if (arr && arr.length === 3 && arr.every(Number.isFinite)) given.position = arr;
-        else if (arr && arr.length === 2 && arr.every(Number.isFinite)) { given.position = [arr[0], arr[1], 0]; vec2Padded++; }
+        if (arr && arr.length === 3 && vecOk(arr, 500)) given.position = arr;
+        else if (arr && arr.length === 2 && vecOk([arr[0], arr[1], 0], 500)) { given.position = [arr[0], arr[1], 0]; vec2Padded++; }
+        else if (arr && arr.length === 3) errors.push(`${e.name || type}.position 量级超限（${Math.hypot(...arr).toFixed(0)} m > 500），已忽略——请核对单位`);
         continue;
       }
       if (k === 'angvel') {
         const arr = Array.isArray(v) ? v.map((x) => Number(x)) : null;
-        if (arr && arr.length === 3 && arr.every(Number.isFinite)) given.angvel = arr;
-        else if (arr && arr.length === 2 && arr.every(Number.isFinite)) { given.angvel = [arr[0], arr[1], 0]; vec2Padded++; }
+        if (arr && arr.length === 3 && vecOk(arr, 500)) given.angvel = arr;
+        else if (arr && arr.length === 2 && vecOk([arr[0], arr[1], 0], 500)) { given.angvel = [arr[0], arr[1], 0]; vec2Padded++; }
+        else if (arr && arr.length === 3) errors.push(`${e.name || type}.angvel 量级超限，已忽略——请核对单位`);
         continue;
       }
       if (k === 'fixed') {
@@ -121,6 +131,20 @@ export function normalizeParse(raw) {
     entities.push({ type, name: String(e.name || type).slice(0, 24), confidence: clamp01(e.confidence), given });
   }
   if (!entities.length) return { ok: false, errors: [...errors, '没有可用的实体'] };
+  // AG-525：重名实体加后缀（同名使 removals/按名匹配歧义）
+  {
+    const names = new Map();
+    let renamed = 0;
+    for (const ent of entities) {
+      if (names.has(ent.name)) {
+        const n = names.get(ent.name) + 1;
+        names.set(ent.name, n);
+        ent.name = `${ent.name}(${n})`;
+        renamed++;
+      } else names.set(ent.name, 1);
+    }
+    if (renamed) droppedNotes.push(`${renamed} 个重名实体已加序号后缀（消除按名匹配歧义）`);
+  }
 
   // 重力防御：解析的是一道"物理题"，必须发生在重力场里。真实模型偶尔把未提重力的题
   // 解析成 gravity=0（失重）——建场后物体不运动，教学演示直接报废。0 视为无效值
@@ -132,8 +156,11 @@ export function normalizeParse(raw) {
   }
 
   // attaches/joint 索引越界在 normalize 层拦截（AG-112）：不拖到建场才静默失败
-  const attList = (Array.isArray(raw.attaches) ? raw.attaches : []).map((a) => ({
-    type: a.type === 'rope' ? 'rope' : 'spring',
+  // AG-521：attach 类型别名归一（'string'/'绳'/'链' 被静默错挂成 spring）
+  const ATTACH_TYPE_MAP = { rope: 'rope', 绳: 'rope', 细绳: 'rope', string: 'rope', 链: 'rope', 轻绳: 'rope', spring: 'spring', 弹簧: 'spring' };
+  const attList0 = (Array.isArray(raw.attaches) ? raw.attaches : []).map((a) => ({
+    type: ATTACH_TYPE_MAP[a.type] || (a.type === 'rope' ? 'rope' : 'spring'),
+    _rawType: a.type,
     from: Math.max(0, Number(a.from) | 0),
     to: Math.max(0, Number(a.to) | 0),
     length: num(a.length, [0.05, 20]),
@@ -141,20 +168,43 @@ export function normalizeParse(raw) {
     restLength: num(a.restLength, [0.1, 10]),
     damping: num(a.damping, [0, 50]),
   }));
-  for (const a of attList) {
+  // AG-524：实体上限 16（prompt 纪律的客户端兜底，超限丢弃并亮 uncertain）
+  if (entities.length > 16) {
+    const dropped = entities.length - 16;
+    plan_entities_truncate_note = dropped;
+    entities.length = 16;
+  }
+  // AG-523：同端对去重（弹簧+绳同端对=重复连接,求解器双倍约束）
+  const seenPair = new Set();
+  for (const a of attList0) {
     // 索引语义针对「布局后实体列表」：springLayout 会补墙、projectile 会补地面（各 +1），
     // 故 normalize 层只挡明显荒谬的越界（>= 原始实体数+2）；精确边界由建场时的 created[] 映射守卫
-    if (a.from === a.to || a.from >= entities.length + 2 || a.to >= entities.length + 2) {
+    // AG-533：负数/非整数索引报错丢弃而非钳 0（钳 0 会错连第 0 实体）
+    const badIdx = !Number.isInteger(a.from) || !Number.isInteger(a.to) || a.from < 0 || a.to < 0;
+    const key = Math.min(a.from, a.to) + '-' + Math.max(a.from, a.to);
+    const oob = a.from >= entities.length + 2 || a.to >= entities.length + 2;
+    if (a.from === a.to || badIdx || oob) {
       a.drop = true;
-      errors.push(`attaches ${a.type} ${a.from}→${a.to} 实体索引越界（原始 ${entities.length} 个实体），已丢弃`);
+      errors.push(`attaches ${a._rawType || a.type} ${a.from}→${a.to} 实体索引${oob && !badIdx ? '越界' : '无效'}（原始 ${entities.length} 个实体），已丢弃`);
+    } else if (seenPair.has(key)) {
+      a.drop = true;
+      errors.push(`attaches ${a.type} ${a.from}→${a.to} 与既有连接同端对（重复约束），已丢弃后者`);
+    } else {
+      seenPair.add(key);
     }
   }
-  const attaches = attList.filter((a) => !a.drop).slice(0, 6);
+  const attaches = attList0.filter((a) => !a.drop).slice(0, 6);
   let joint = null;
   if (raw.joint && typeof raw.joint === 'object') {
-    const jf = Math.max(0, Number(raw.joint.from) | 0);
-    const jt = Math.max(0, Number(raw.joint.to) | 0);
-    if (jf >= entities.length + 2 || jt >= entities.length + 2) {
+    // AG-522：from==to 拒绝（attaches 有查而 joint 漏）+ 索引负/非整数拒绝（AG-533 同口径）
+    const jf0 = Number(raw.joint.from), jt0 = Number(raw.joint.to);
+    const jf = Math.max(0, jf0 | 0);
+    const jt = Math.max(0, jt0 | 0);
+    if (jf0 === jt0 && jf === jt && Number.isInteger(jf0)) {
+      errors.push(`joint from==to（${jf}），自连接无效，已丢弃`);
+    } else if (!Number.isInteger(jf0) || !Number.isInteger(jt0) || jf0 < 0 || jt0 < 0) {
+      errors.push(`joint from/to 非法索引（${raw.joint.from}→${raw.joint.to}），已丢弃`);
+    } else if (jf >= entities.length + 2 || jt >= entities.length + 2) {
       errors.push(`joint from/to 实体索引越界（${raw.joint.from}→${raw.joint.to}，原始 ${entities.length} 个实体），已丢弃`);
     } else {
       joint = {
@@ -183,7 +233,8 @@ export function normalizeParse(raw) {
     goal: str(raw.goal, ''),
     gravity: num(gravityRaw, [0.01, 50]),
     G: num(raw.G, [1e-14, 1e6]),            // 场景引力常数（天体题给；null=保持 doc 现值）
-    kind: KIND_MAP[str(raw.kind, '')] || str(raw.kind, ''),   // rotation = 角动量/转台类（需要自动 joint 布局）
+    // AG-526：负清单词(碰撞/动量/平抛…)映射 '' 走通用路径——须用 has 检查,'' 是 falsy 会掉进 || fallback
+    kind: (Object.prototype.hasOwnProperty.call(KIND_MAP, str(raw.kind, '')) ? KIND_MAP[str(raw.kind, '')] : str(raw.kind, '')),
     removals,                                        // 要删除的既有对象（混合搭建「去掉某物」语义）
     attaches,
     joint,
@@ -203,6 +254,7 @@ export function normalizeParse(raw) {
     if (!plan.uncertain.some((u) => u.includes('不支持'))) plan.uncertain.push(note);
   }
   if (vec2Padded) plan.uncertain.push(`二维向量已按 [x,y,0] 补零升维（velocity/position/angvel 共 ${vec2Padded} 处）`);
+  if (plan_entities_truncate_note) plan.uncertain.push(`实体超 16 上限，${plan_entities_truncate_note} 个已丢弃（优先保留与观察量相关的实体）`);   // AG-524
   // 越界/非数值 gravity 的显式提示（AG-10）：不再静默落默认
   if (gravityRaw != null && plan.gravity === null) {
     errors.push(`gravity 值无效（${gravityRaw}），已按默认 9.81 处理`);
@@ -214,7 +266,7 @@ export function normalizeParse(raw) {
   // （斜面 0.4/球 0.3），球滚动而非滑动，能量/动量解释全部对不上理论。此处按题面语义
   // 注入 friction=0（仅接触相关实体、仅模型未显式给出时），标 inferred 供 UI 显示
   // 「推断」徽标——不冒充题给，用户可在评审表单改回。
-  const smoothText = [plan.questionType, plan.goal, plan.environment, ...plan.assumptions].join(' ');
+  const smoothText = [plan.questionType, plan.goal, plan.environment, ...plan.keyPoints, ...plan.assumptions].join(' ');   // AG-530：keyPoints 里的「光滑」也要注入
   if (/光滑|不计(一切)?摩擦|无摩擦|忽略.{0,2}摩擦|摩擦可?忽略/.test(smoothText)) {
     const CONTACT = new Set(['ramp', 'ground', 'sphere', 'box', 'cylinder', 'curvedRamp', 'bowl', 'waveFloor']);
     let injected = false;
@@ -599,7 +651,14 @@ export function planToOverrides(plan) {
     (x.type === 'sphere' || x.type === 'cylinder' || x.type === 'box')
     && x.given.position == null);
   const laneMap = new Map(rampObjs.map((x, i) => [x, i]));
-  const laneZ = (e) => +((laneMap.get(e) ?? 0) - (rampObjs.length - 1) / 2) * 0.75;
+  // AG-539：车道间距自适应——大半径球/圆柱(相邻半径和+0.1 > 0.75)不再侧碰
+  const laneGap = (() => {
+    const rs = rampObjs.map((x) => (x.given.radius ?? 0.15));
+    let g = 0.75;
+    for (let i = 1; i < rs.length; i++) g = Math.max(g, rs[i - 1] + rs[i] + 0.1);
+    return g;
+  })();
+  const laneZ = (e) => +((laneMap.get(e) ?? 0) - (rampObjs.length - 1) / 2) * laneGap;
   const slopeSpot = (r, off = 0.3) => {
     const xl = -rampGeom.base / 2 + off;
     const surf = rampGeom.height * (1 - (xl + rampGeom.base / 2) / rampGeom.base);
@@ -656,8 +715,11 @@ export function planToOverrides(plan) {
         const beltX = (beltE.given.position ?? [0, 0, 0])[0];
         const beltLen = beltE.given.length ?? 2.4;
         o.physics.friction = e.given.friction ?? 0.3;   // 物-带 μ 由带侧 params.friction 驱动；此处常规取值
+        // AG-541：多物体沿带长 2r 间距错开（此前全叠带左端同一点相互嵌入）
+        const beltObjs = plan.entities.filter((x) => (x.type === 'sphere' || x.type === 'box') && x.given.position == null);
+        const slot = beltObjs.indexOf(e);
         o.transform = {
-          pos: e.given.position ?? [+(beltX - beltLen / 2 + 0.35).toFixed(3), +(beltTop + r + 0.01).toFixed(3), 0],
+          pos: [+(beltX - beltLen / 2 + 0.35 + slot * (2 * r + 0.06)).toFixed(3), +(beltTop + r + 0.01).toFixed(3), 0],
           rot: [0, 0, 0],
         };
       } else if (!rampGeom) {

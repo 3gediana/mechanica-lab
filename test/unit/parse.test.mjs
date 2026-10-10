@@ -360,3 +360,36 @@ test('R5-AG-528：celestial 质量域放宽（真实行星量级放行，普通�
   assert.equal(earth.given.mass, 5.97e24, 'celestial mass=' + earth.given.mass);
   assert.equal(ball.given.mass, undefined, '普通体 2e4 kg 应拒（>1e4）');
 });
+
+// ---------- R6-F2:AG-520 向量量级上限 / AG-523 同端对去重 / AG-526 kind 负清单 ----------
+test('R6-AG-520：velocity 量级超限被丢弃并报错（|v|>200）', () => {
+  const raw = { questionType: '抛体', entities: [
+    { type: 'sphere', given: { mass: 1, velocity: [3000, 4000, 0] } }] };
+  const n = normalizeParse(raw);
+  assert.equal(n.ok, true);
+  assert.equal(n.plan.entities[0].given.velocity, undefined);
+  assert.ok(n.errors.some((e) => e.includes('量级超限')));
+});
+test('R6-AG-523：同端对重复 attach 去重并报错', () => {
+  const raw = { questionType: '连接体', entities: [
+    { type: 'sphere', given: { mass: 1 } }, { type: 'sphere', given: { mass: 2 } }],
+    attaches: [{ type: 'spring', from: 0, to: 1, stiffness: 20 }, { type: 'rope', from: 1, to: 0, length: 1 }] };
+  const n = normalizeParse(raw);
+  assert.equal(n.plan.attaches.length, 1);
+  assert.ok(n.errors.some((e) => e.includes('同端对')));
+});
+test('R6-AG-526：kind 负清单词归空走通用路径', () => {
+  const raw = { questionType: '碰撞', kind: '碰撞', entities: [
+    { type: 'sphere', given: { mass: 1 } }, { type: 'sphere', given: { mass: 2 } }] };
+  const n = normalizeParse(raw);
+  assert.equal(n.plan.kind, '');
+});
+test('R6-AG-525：重名实体加序号后缀', () => {
+  const raw = { questionType: '多球', entities: [
+    { type: 'sphere', name: '小球', given: { mass: 1 } },
+    { type: 'sphere', name: '小球', given: { mass: 2 } }] };
+  const n = normalizeParse(raw);
+  const names = n.plan.entities.map((e) => e.name);
+  assert.equal(new Set(names).size, 2);
+  assert.ok(names.some((x) => /\(\d\)/.test(x)));
+});

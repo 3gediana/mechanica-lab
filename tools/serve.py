@@ -38,21 +38,24 @@ PARSE_PROMPT = """你是大学物理题解析器。看图中的物理题，输�
  "confidence": 0到1
 }
 规则补充：
-- kind 填 "rotation" 时给 joint（转台体索引 from、滑块体索引 to、径向滑槽参数）。
+- kind 填 "rotation" 时给 joint：from=转台索引、to=滑块索引；axis 是单位向量（径向滑槽用 [1,0,0]）；limits 单位 m（默认 [0.15,1.05]）；anchor 相对体心（默认 [0,0,0]）。
 - 转台初始角速度写在其 given.angvel = [0, ω, 0]。
 - 复摆/铰链摆（kind 填 hinge）：摆杆写 box（given.length=杆长），悬点/锚点写 box 或 ground（given.position=锚点坐标）。
-- 抛体题：单个 sphere，given.velocity=[vx,vy,0]，可给 given.position 为抛出点。
+- 抛体题：单个 sphere，given.velocity=[vx,vy,0]；抛出点写 given.position（缺省 [0,0.6,0]，沙盘自动补地面），离地高度明显时务必写 position 的 y。
 - 混合搭建里用户要求"删除/去掉/拿走"某对象：把对象名或类型写进 removals（如 ["小球"]），不要假装它不存在。
-输出纪律：所有数值必须是 JSON 数字（不要字符串、不要带单位）；实体不超过 16 个，无关实体一律不列。
+输出纪律（不要在思考过程里起草完整 JSON，直接给最终结果）：所有数值必须是 JSON 数字（不要字符串、不要带单位）；实体不超过 16 个，无关实体一律不列；确需舍弃实体时保留与 observations 直接相关的，被舍弃的写进 unknowns 说明。
+示例二（弹簧题，注意 attaches）：{"questionType":"弹簧振子","kind":"spring","goal":"求周期","gravity":null,"entities":[{"type":"box","name":"墙","given":{"fixed":1,"position":[-1,0.3,0]},"confidence":0.95},{"type":"sphere","name":"小球","given":{"mass":1},"confidence":0.9}],"attaches":[{"type":"spring","from":0,"to":1,"stiffness":20,"restLength":0.8}],"observations":["周期"],"anchorPoints":[],"keyPoints":[],"environment":"光滑水平面","unknowns":[],"uncertain":[],"joint":null,"assumptions":[],"confidence":0.9}
+示例三（天体圆轨道题）：{"questionType":"卫星圆轨道","kind":"astro","goal":"求轨道周期","gravity":null,"entities":[{"type":"celestial","name":"地球","given":{"mass":5.97e24,"position":[0,0,0]},"confidence":0.95},{"type":"celestial","name":"卫星","given":{"mass":100,"position":[4e7,0,0],"velocity":[0,0,3074]},"confidence":0.9}],"observations":["周期"],"anchorPoints":[],"keyPoints":[],"environment":"","unknowns":[],"uncertain":[],"joint":null,"assumptions":[],"confidence":0.9,"G":6.67e-11}
+示例四（传送带题）：{"questionType":"传送带轻放","kind":"","goal":"求共速时间","gravity":null,"entities":[{"type":"conveyor","name":"传送带","given":{"length":4,"speed":2,"friction":0.4},"confidence":0.95},{"type":"box","name":"工件","given":{"mass":2,"velocity":[0,0,0]},"confidence":0.9}],"observations":["共速时刻"],"anchorPoints":[],"keyPoints":[],"environment":"","unknowns":[],"uncertain":[],"joint":null,"assumptions":[],"confidence":0.9}
 示例（斜面题的输出形状，内容以题为准）：
 {"questionType":"斜面下滑","kind":"","goal":"求底端速度","gravity":null,"entities":[{"type":"ramp","name":"斜面","given":{"angleDeg":30,"length":2},"confidence":0.95},{"type":"sphere","name":"小球","given":{"mass":1},"confidence":0.9}],"observations":["底端速度"],"anchorPoints":[],"keyPoints":[],"environment":"不计摩擦","unknowns":[],"uncertain":[],"joint":null,"assumptions":[],"confidence":0.9}
 规则：
 - type 必须从八个值中选：斜面/楔子/坡道=ramp，球/铁球/球体=sphere，方块/物块/砝码/重物/墙/挡板=box，圆柱=cylinder，地面/桌面/平台/台面/高台=ground，定滑轮/滑轮=pulley，恒星/行星/卫星/天体=celestial，传送带/输送带=conveyor。无关实体不要列。墙/挡板类 box 记得 given.fixed=1。
 - 定滑轮/阿特伍德题：kind 填 atwood，滑轮 type=pulley（given 带 radius 和 position），两物体 type 用 sphere 或 box（given 带各自的 mass；若题目给初速度写 velocity）。
 - 天体/引力题（恒星/行星/卫星绕转）：kind 填 astro，恒星/行星/卫星 type 一律填 celestial（不要填 sphere），中心天体和绕转体 given 都带 mass。轨道半径是位置不是尺寸：不要写进 radius（radius 是渲染尺寸，省略即可）；把绕转体位置写进 position（相对中心天体，如卫星在 x 方向 4 米处填 [4,0,0]，中心填 [0,0,0]）。速度写 velocity 三分量，方向与位置连线垂直（圆轨道切向）。题给场景引力常数时输出顶层 "G" 字段（数值），未给则省略。
-- given 只写题目文字或图中明确给出的数值；没给的键不要写。
+- given 只写题目文字或图中明确给出的数值；没给的键不要写；图片模糊或数值读不准时，该存疑项写进 uncertain 并适当降低 confidence（不要静默猜值）。
 - 题目说"不计摩擦"时 friction 写 0 并在 assumptions 说明；"由静止释放"时 velocity 不写（默认零）。
-- 题目未明确给重力加速度时 gravity 填 null（不要猜 0 或 10）；gravity 禁止填 0（除非题目明确是失重/零重力环境）。
+- 题目未明确给重力加速度时 gravity 填 null（不要猜 0 或 10）；题面明示「取 g=10 m/s²」等给值时 gravity 输出该值（仍禁止把题目所求答案的数值当 g）；gravity 禁止填 0（除非题目明确是失重/零重力环境）。
 - 「滑下斜面后在水平面继续运动」类组合题：必须补一个 ground 实体承接水平段（斜面底端在斜面 +x 侧）。
 - 斜面上的方块/圆柱省略 given.position——沙盘会自动贴坡放置（圆柱自动躺平可纯滚动）；多个物体在斜面上并排对比时都不写 position，沙盘自动分车道。
 - 方块/圆柱/球的 given.position 是自由落位（按题给坐标放置），写 position 表示你确定它在哪里。
@@ -121,11 +124,11 @@ def _extract_json(text):
     raise json.JSONDecodeError("no extractable JSON", text[:60], 0)
 
 
-def call_step_messages(messages):
-    """共用请求+提取链：图片通道与文字通道唯一差异是 messages。"""
+def call_step_messages(messages, temperature=0.2):
+    """共用请求+提取链：图片/文字通道 temperature=0.2，patch 修订通道显式传 0.05（AG-509：确定性重写）。"""
     body = json.dumps({
         "model": STEP_MODEL,
-        "temperature": 0.2,
+        "temperature": temperature,
         "max_tokens": 8192,
         "messages": messages,
     }).encode("utf-8")
@@ -178,9 +181,10 @@ def call_step(data_url):
 
 def call_step_text(text):
     """文字要求通道（混合搭建）：题目文字或搭建要求，同一 schema 输出。"""
+    # AG-510：文字通道独立导语（「看图」导语与纯文字输入语义矛盾）
     return call_step_messages([{
         "role": "user",
-        "content": PARSE_PROMPT + "\n\n题目/搭建要求（文字输入）：\n" + text,
+        "content": PARSE_PROMPT.replace("你是大学物理题解析器。看图中的物理题", "你是大学物理题解析器。根据以下文字描述的物理题") + "\n\n题目/搭建要求（文字输入）：\n" + text,
     }])
 
 
@@ -226,7 +230,7 @@ def call_step_patch(text, plan, verify):
     budget = 12000 - len(tail)
     if len(head) > budget:
         head = head[:budget]
-    return call_step_messages([{"role": "user", "content": head + tail}])
+    return call_step_messages([{"role": "user", "content": head + tail}], temperature=0.05)
 
 
 class H(http.server.SimpleHTTPRequestHandler):
