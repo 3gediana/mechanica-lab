@@ -89,7 +89,7 @@ try {
       } else if (theme === '学生玩') {
         const preset = ['ballChain', 'collLab', 'newtonCradle', 'momentum'][pass % 4];
         await loadPreset(page, preset);
-        await page.keyboard.press('KeyB');            // 子弹时间开
+        await page.click('#btnBpt');                  // 子弹时间开（R6-F3：B 键移除改 UI）
         await page.click('#btnPlay');
         await nap(page, 1500);
         // targeted 抓抛（真鼠标，两连抛）
@@ -127,7 +127,7 @@ try {
         await page.keyboard.press('.');
         await nap(page, 3500);                        // 观察窗
         await shot(page, `pass${pass}-play`);
-        await page.keyboard.press('KeyB');
+        await page.click('#btnBpt');
         await page.keyboard.press('KeyR');
       } else {
         // 边界折腾：相机/视图/视口/新建搭建/往返
@@ -187,7 +187,7 @@ try {
           await page.click('#linkClassic');
           await page.waitForURL(/classic\.html/);
           await page.waitForFunction(() => { const c = document.querySelector('#console'); return c && c.classList.contains('on'); }, null, { timeout: 15000 });
-          await page.keyboard.press('KeyG');
+          // R6-F3：KeyG 无绑定(死键),移除
           await nap(page, 6000);
           await page.keyboard.press('KeyF');
           await nap(page, 4000);

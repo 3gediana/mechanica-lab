@@ -1374,6 +1374,21 @@ function bindUI() {
   $('btnViewFront').onclick = viewPulse($('btnViewFront'), () => viewport.setViewPreset('front'));
   $('btnViewSide').onclick = viewPulse($('btnViewSide'), () => viewport.setViewPreset('side'));
   $('btnFocus').onclick = () => viewport.focusOn(selectedId ? runtime.binds.get(selectedId).mesh : null);
+  // R6-F3：Home 键移除后全景取景的 UI 入口（双击=全部实体入画；单击聚焦不变）
+  $('btnFocus').ondblclick = () => { viewport.focusScene(); toast('全景取景'); };
+  // R6-F3：B 键移除后子弹时间的 UI 入口（simbar 开关钮）
+  {
+    const bb = $('btnBpt');
+    if (bb) {
+      const syncBpt = () => bb.classList.toggle('hot', autoBPT);
+      bb.onclick = () => {
+        autoBPT = !autoBPT;
+        syncBpt();
+        toast(autoBPT ? '自动子弹时间开：强碰撞自动 0.25x 慢放' : '自动子弹时间关');
+      };
+      syncBpt();
+    }
+  }
 
   $('btnPlay').onclick = play;
   $('btnPause').onclick = pauseToggle;
@@ -1615,21 +1630,10 @@ function onKey(e) {
       viewport.ghostRotate((e.code === 'BracketRight' ? 1 : -1) * (e.shiftKey ? 90 : 15));
     }
   }
-  else if (e.key === '1' || e.key === '2' || e.key === '3') setSpeed({ 1: 0.5, 2: 1, 3: 2 }[e.key]);   // FB-23：文明6 风格倍率档
-  else if (e.code === 'KeyW') setGizmoMode('translate');
-  else if (e.code === 'KeyE') setGizmoMode('rotate');
-  else if (e.code === 'KeyF') viewport.focusOn(selectedId ? runtime.binds.get(selectedId).mesh : null);
-  else if (e.code === 'Home') { viewport.focusScene(); toast('全景取景'); }
+  // R6-F3 快捷键收缩：删除 1/2/3 倍率档(selSpeed 下拉与 -/= 已覆盖)、W/E(gizmo 模式按钮
+  // 已有)、F(聚焦按钮+双击实体已有)、Home(改为 btnFocus 双击)、B(子弹时间改 simbar 开关
+  // 钮)、P(图钉改检查器运行态按钮)。功能全保留——只收敛隐蔽快捷键,发现性走 UI。
   else if (e.code === 'KeyR') resetSim();
-  else if (e.code === 'KeyB') {
-    autoBPT = !autoBPT;
-    toast(autoBPT ? '自动子弹时间开：强碰撞自动 0.25x 慢放' : '自动子弹时间关');
-  }
-  else if (e.code === 'KeyP' && mode === 'run' && selectedId) {
-    // 运行态图钉（PL-12）：钉住/放开动态体（物理体级操作，重置即消）
-    const pin = runtime.togglePin(selectedId);
-    toast(pin ? '已钉住（重置后恢复）' : '已放开图钉');
-  }
   else if (e.code === 'Delete' || e.code === 'Backspace') {
     if (mode === 'run' && selectedId) {
       // 运行态删除（PL-12）：只拆运行时，重置回初始文档；有关联约束的体拒绝
@@ -2134,6 +2138,23 @@ function renderInspector() {
     banner.style.cssText = 'margin:0 0 8px;padding:6px 10px;background:rgba(217,164,65,.10);border:1px solid rgba(217,164,65,.35);border-radius:var(--r-ctl);font-size:11px;color:var(--accent-hi)';   // UI-531 圆角归 token、字色提对比
     banner.textContent = '运行态只读——「重置」回编辑态后可修改参数';
     box.appendChild(banner);
+    // R6-F3：P 键移除后图钉的 UI 入口（运行态横幅旁小钮,动态体才显示;物理体级操作,重置即消）
+    if (e.physics.body === 'dynamic') {
+      const pinBtn = document.createElement('button');
+      pinBtn.textContent = runtime.pinned.has(e.id) ? '已图钉 · 点击放开' : '图钉（钉住当前位姿）';
+      pinBtn.style.cssText = 'margin:0 0 10px;padding:5px 12px;background:transparent;border:1px solid var(--line-strong);border-radius:var(--r-ctl);color:var(--text);font-size:11px;cursor:pointer;width:100%';
+      pinBtn.onmouseenter = () => { pinBtn.style.borderColor = 'var(--accent)'; };
+      pinBtn.onmouseleave = () => { pinBtn.style.borderColor = 'var(--line-strong)'; };
+      pinBtn.onclick = () => {
+        const pin = runtime.togglePin(e.id);
+        pinBtn.textContent = pin ? '已图钉 · 点击放开' : '图钉（钉住当前位姿）';
+        pinBtn.style.color = pin ? 'var(--accent-hi)' : 'var(--text)';
+        pinBtn.style.borderColor = pin ? 'var(--accent)' : 'var(--line-strong)';
+        toast(pin ? '已钉住（重置后恢复）' : '已放开图钉');
+      };
+      if (runtime.pinned.has(e.id)) { pinBtn.style.color = 'var(--accent-hi)'; pinBtn.style.borderColor = 'var(--accent)'; }
+      box.appendChild(pinBtn);
+    }
   }
 
   // 传感器读数（速度/计时/力）：运行态实时显示
