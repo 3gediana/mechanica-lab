@@ -3,6 +3,31 @@
 // 步进：固定步长 1/120s + 每帧步数上限，超限丢弃积压（防掉帧后追赶螺旋、防物理死循环）。
 import * as THREE from 'three';
 import { submergedVolume } from './buoyancy.js';
+
+// 视觉缩放→碰撞参数同步（B4 用户实锤「没碰到就弹开」根因：transform.scale 只改视觉网格，
+// 碰撞体仍按原参数构建——缩小的球碰撞箱比视觉大→视觉未接触就弹开；放大的球→视觉穿插才弹）。
+// 球取三轴均值；盒类按轴分量；圆柱半径取 (kx+kz)/2、高取 ky；曲面/复合类返回 null（仅视觉）。
+// 质量不随缩放变（文档 mass 口径不变，等效密度变化）。纯函数，单测直测。
+export function scaleShapeParams(typeId, params, scale) {
+  if (!Array.isArray(scale)) return null;
+  const [kx, ky, kz] = scale;
+  if (![kx, ky, kz].every((k) => Number.isFinite(k) && k > 0)) return null;
+  if (kx === 1 && ky === 1 && kz === 1) return null;
+  const p = { ...params };
+  if (typeId === 'sphere') { p.radius = +(p.radius * ((kx + ky + kz) / 3)).toFixed(4); return p; }
+  if (typeId === 'cylinder') {
+    p.radius = +(p.radius * ((kx + kz) / 2)).toFixed(4);
+    p.height = +(p.height * ky).toFixed(4);
+    return p;
+  }
+  if ('sx' in p || 'sy' in p || 'sz' in p) {
+    if ('sx' in p) p.sx = +(p.sx * kx).toFixed(4);
+    if ('sy' in p) p.sy = +(p.sy * ky).toFixed(4);
+    if ('sz' in p) p.sz = +(p.sz * kz).toFixed(4);
+    return p;
+  }
+  return null;
+}
 import { TRACK_POINTS, TRACK_META } from '../track-curve.js';
 
 export const FIXED_H = 1 / 120;
@@ -172,7 +197,9 @@ export class Runtime {
           body.setEnabledRotations(false, true, false, true);
         }
       }
-      const colDesc = c.buildCollider(RAPIER, e.params);
+      // B4：视觉缩放同步碰撞参数（scaleShapeParams；null=原参数/曲面类仅视觉）
+      const colParams = scaleShapeParams(e.type, e.params, e.transform.scale) || e.params;
+      const colDesc = c.buildCollider(RAPIER, colParams);
       if (colDesc) {                                 // track 等解析约束组件无碰撞体
         colDesc.setFriction(e.physics.friction).setRestitution(e.physics.restitution)
           .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS);
@@ -180,7 +207,7 @@ export class Runtime {
         bind.collider = this.world.createCollider(colDesc, body);
       }
       // 复合体附加碰撞体（U-LIQ：tank 四壁与底同一 fixed 刚体）；无独立事件上报需求
-      for (const extra of (c.buildExtraColliders ? c.buildExtraColliders(RAPIER, e.params) : [])) {
+      for (const extra of (c.buildExtraColliders ? c.buildExtraColliders(RAPIER, colParams) : [])) {
         extra.setFriction(e.physics.friction).setRestitution(e.physics.restitution);
         this.world.createCollider(extra, body);
       }

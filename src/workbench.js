@@ -2247,7 +2247,7 @@ function renderInspector() {
   const vscaled = Math.abs(vs[0] - 1) > 1e-6 || Math.abs(vs[1] - 1) > 1e-6 || Math.abs(vs[2] - 1) > 1e-6;
   const vsRow = document.createElement('div');
   vsRow.className = 'frow';
-  vsRow.innerHTML = `<label>视觉缩放</label><span class="v" style="font-family:var(--mono);font-size: 12px;color:var(--dim)">×${vs[0]} · 仅视觉</span>`;
+  vsRow.innerHTML = `<label>视觉缩放</label><span class="v" style="font-family:var(--mono);font-size: 12px;color:var(--dim)" title="碰撞体同步缩放（球取均值/盒按轴/柱半径×kz）；质量不变">×${vs[0]} · 碰撞同步</span>`;   // B4：缩放体碰撞一致化后改标注
   vsRow.title = '缩放 gizmo 只改显示大小（0.25–4 倍）；碰撞体/质量/转动惯量不变。要改物理尺寸请编辑下方尺寸参数';
   grpT.appendChild(vsRow);
   box.appendChild(grpT);
