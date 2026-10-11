@@ -112,7 +112,9 @@ export class Viewport {
   // ============ 选中对象定位：相机 target/距离平滑移向实体（第六章「选中对象定位」） ============
   // 场景全景取景（UI-49）：建场/载入后把相机平滑移到全部实体的包围盒
   setGridVisible(on) {
+    this._gridOn = on;
     if (this._grid) this._grid.visible = on;
+    if (this._gridMajor) this._gridMajor.visible = on;
     if (this._axes) this._axes.forEach((a) => { a.visible = on; });
     this.markDirty();
   }
@@ -926,18 +928,18 @@ export class Viewport {
     shadowFloor.receiveShadow = true;
     scene.add(shadowFloor);
 
-    // 工作台网格：1m 主格 + 坐标轴（刻度间距随相机距离动态重建，见 setGridScale）
-    const grid = new THREE.GridHelper(20, 20, 0x3c4046, 0x1f2226);
-    grid.material.transparent = true;
-    grid.material.opacity = 0.85;
-    scene.add(grid);
-    this._grid = grid;
+    // 工作台网格：细格+主格双频（Blender 式分层，两层各自低不透明度；刻度间距随相机
+    // 距离动态重建，见 setGridScale）+ 坐标轴
+    this._grid = null;      // 细格层（步距 <0.25m 的密距档不渲染，防摩尔条纹）
+    this._gridMajor = null; // 主格层（5×步距）
+    this._gridOn = true;
+    this._rebuildGrid(1);
     this._gridStep = 1;
-    const axisMat = (c) => new THREE.LineBasicMaterial({ color: c, transparent: true, opacity: 0.6 });
+    const axisMat = (c) => new THREE.LineBasicMaterial({ color: c, transparent: true, opacity: 0.38 });
     const xAxis = new THREE.Line(new THREE.BufferGeometry().setFromPoints(
-      [new THREE.Vector3(-10, 0.002, 0), new THREE.Vector3(10, 0.002, 0)]), axisMat(0x8a4a42));
+      [new THREE.Vector3(-10, 0.002, 0), new THREE.Vector3(10, 0.002, 0)]), axisMat(0xa1554a));
     const zAxis = new THREE.Line(new THREE.BufferGeometry().setFromPoints(
-      [new THREE.Vector3(0, 0.002, -10), new THREE.Vector3(0, 0.002, 10)]), axisMat(0x42688a));
+      [new THREE.Vector3(0, 0.002, -10), new THREE.Vector3(0, 0.002, 10)]), axisMat(0x4f7ba6));
     scene.add(xAxis, zAxis);
     this._axes = [xAxis, zAxis];   // 网格显隐开关一并管坐标轴
 
@@ -1240,7 +1242,7 @@ export class Viewport {
       const main = id === ids[ids.length - 1];
       const h = new THREE.BoxHelper(bind.mesh, main ? ACCENT : 0x82878f);
       h.material.transparent = true;
-      h.material.opacity = main ? 0.9 : 0.45;
+      h.material.opacity = main ? 0.65 : 0.4;
       this.scene.add(h);
       this._highlights.push(h);
       mainMesh = bind.mesh;
@@ -1296,18 +1298,41 @@ export class Viewport {
   setGridScale(step) {
     if (this._gridStep === step) return;
     this._gridStep = step;
-    if (this._grid) {
-      this.scene.remove(this._grid);
-      this._grid.geometry.dispose();
-      this._grid.material.dispose();
-    }
-    const divisions = Math.max(4, Math.round(20 / step));
-    const grid = new THREE.GridHelper(20, divisions, 0x3c4046, 0x1f2226);
-    grid.material.transparent = true;
-    grid.material.opacity = 0.85;
-    this.scene.add(grid);
-    this._grid = grid;
+    this._rebuildGrid(step);
     this.markDirty();
+  }
+
+  // 双频网格（UI 审计 U1）：单层 0.85 不透明度在 0.1m 档=200 条线，掠射角下摩尔条纹把
+  // 地面糊成瓦楞钢；拆细格(op .30)+主格(op .52)两层。细格只在步距 ≥0.25m 渲染（密距档
+  // 留 0.5m 主格承担参照，读数签仍报真实测量步距）；步距 5m 时主格超地界不画。
+  _rebuildGrid(step) {
+    for (const k of ['_grid', '_gridMajor']) {
+      const g = this[k];
+      if (g) {
+        this.scene.remove(g);
+        g.geometry.dispose();
+        g.material.dispose();
+        this[k] = null;
+      }
+    }
+    const SIZE = 20;
+    if (step >= 0.25) {
+      const minor = new THREE.GridHelper(SIZE, Math.round(SIZE / step), 0x1f2226, 0x1f2226);
+      minor.material.transparent = true;
+      minor.material.opacity = 0.3;
+      minor.visible = this._gridOn !== false;
+      this.scene.add(minor);
+      this._grid = minor;
+    }
+    const majorStep = step * 5;
+    if (majorStep <= SIZE) {
+      const major = new THREE.GridHelper(SIZE, Math.max(4, Math.round(SIZE / majorStep)), 0x3c4046, 0x3c4046);
+      major.material.transparent = true;
+      major.material.opacity = 0.52;
+      major.visible = this._gridOn !== false;
+      this.scene.add(major);
+      this._gridMajor = major;
+    }
   }
 
   gridInfo() {

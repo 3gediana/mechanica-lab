@@ -14,7 +14,7 @@ import { createMaterials } from './materials.js';
 import { normalizeParse, planToOverrides, ballOnRamp } from './engine/parse-schema.js';
 import { explainRun } from './engine/explain.js';
 import { auditStatic, auditMotion, summarize, rampGeomFromParams, patchBrief } from './engine/agent-verify.js';
-import { renderThumb } from './engine/thumbs.js';
+import { renderThumb, preloadEnv as preloadThumbEnv } from './engine/thumbs.js';
 import { PerfMon } from './perfmon.js';
 import { SoundEngine } from './sound.js';
 import { JuiceFX } from './engine/juice.js';
@@ -1512,6 +1512,8 @@ function bindUI() {
   }, { passive: false });
 
   renderCatalog();
+  // 缩略图环境贴图（UI 审计 U2）：就绪后重渲目录，金属件（球/圆柱等）不再黑对黑
+  preloadThumbEnv(M).then((ok) => { if (ok) renderCatalog(); }).catch(() => {});
   refreshHistoryButtons();
 }
 
@@ -3152,7 +3154,7 @@ function updateScaleReadout() {
     } else if (tag) tag.style.display = 'none';
   }
   // UI-604：网格隐藏时读数改说真话（网格/轴都被 setGridVisible 关掉）
-  if (viewport._grid && !viewport._grid.visible) { setTxt(el, '网格已隐藏'); return; }
+  if (viewport._gridOn === false) { setTxt(el, '网格已隐藏'); return; }
   const cam = viewport.camera;
   const viewW = cam.isOrthographicCamera
     ? (cam.right - cam.left) / (cam.zoom || 1)

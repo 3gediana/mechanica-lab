@@ -197,6 +197,15 @@ export async function createMaterials() {
 
     // 反光地板覆层：近黑基色压暗摄影棚地面，roughness 0.5 只留温润反光，opacity 0.9 透出镜面地板的克制倒影
     floorOverlay: new THREE.MeshPhysicalMaterial({ color: 0x0a0a0c, roughness: 0.5, metalness: 0, transparent: true, opacity: 0.9 }),
+
+    // 绳（U1 审计）：原用 steelDark——暗钢细圆柱贴暗背景不可见（单摆摆绳消失实锤）。
+    // 黑板教学画的就是白绳：麻白暖灰全哑光，任何背景都可读
+    rope: new THREE.MeshPhysicalMaterial({ color: 0xcfc8b8, roughness: 0.9, metalness: 0 }),
+
+    // 影棚地台（U1 审计）：地面板专用。原默认 steelDark 的程序化拉丝 roughnessMap 铺上 12m
+    // 大平面会摩尔条纹化成瓦楞钢皮；地台回归「无声承托」——冷石墨全哑光 + 一层若隐若现的
+    // 清漆膜（clearcoatRoughness 0.5 漫射开），网格线/阴影/物体在其上保持可读
+    floor: new THREE.MeshPhysicalMaterial({ color: 0x1b1e22, roughness: 0.88, metalness: 0, clearcoat: 0.12, clearcoatRoughness: 0.5 }),
   };
   shared = mats;
   return mats;

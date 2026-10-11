@@ -57,7 +57,7 @@ export const PRESETS = {
         transform: { pos: [0, -0.05, 0], rot: [0, 0, 0] },
         params: { sx: 14, sy: 0.1, sz: 6 },
         physics: { body: 'fixed', friction: 0, restitution: 0.1 },
-        render: { material: 'steelDark' },
+        render: { material: 'floor' },
         source: 'preset',
       }, seq);
       // 二维斜碰：两球 z 错开 0.12m（非对心），入射速度带 z 分量 → 碰后两球在 xz 平面散开
@@ -110,7 +110,7 @@ export const PRESETS = {
         transform: { pos: [0, -0.05, 0], rot: [0, 0, 0] },
         params: { sx: 14, sy: 0.1, sz: 4 },
         physics: { body: 'fixed', friction: 0, restitution: 0.1 },
-        render: { material: 'steelDark' },
+        render: { material: 'floor' },
         source: 'preset',
       }, seq);
       // 球 A：动碰者；球 B：静止。质量/初速度/弹性(恢复系数)全部可在检查器编辑
@@ -565,7 +565,7 @@ export const PRESETS = {
         transform: { pos: [0, -0.05, 0], rot: [0, 0, 0] },
         params: { sx: 6, sy: 0.1, sz: 1.6 },
         physics: { body: 'fixed', friction: 0, restitution: 0 },
-        render: { material: 'steelDark' },
+        render: { material: 'floor' },
         source: 'preset',
       }, seq);
       // 固定墙：中心与球心等高（弹簧沿两刚体质心连线作用，等高才是纯水平力）
@@ -662,7 +662,7 @@ export const PRESETS = {
         transform: { pos: [2, -0.05, 0], rot: [0, 0, 0] },
         params: { sx: 14, sy: 0.1, sz: 3 },            // 质心漂移 0.5 m/s 需长地面承接
         physics: { body: 'fixed', friction: 0, restitution: 0 },
-        render: { material: 'steelDark' },
+        render: { material: 'floor' },
         source: 'preset',
       }, seq);
       const mkBlock = (x, mat) => createEntity('box', {
@@ -708,7 +708,7 @@ export const PRESETS = {
         transform: { pos: [9, -0.05, 0], rot: [0, 0, 0] },
         params: { sx: 24, sy: 0.1, sz: 3 },            // 球落地后滚动段防滚出
         physics: { body: 'fixed', friction: 0.3, restitution: 0.05 },
-        render: { material: 'steelDark' },
+        render: { material: 'floor' },
         source: 'preset',
       }, seq);
       // 高台：台面顶 y=1.0，右缘 x=0.7（球离台后平抛 1 m 落地）
@@ -781,7 +781,7 @@ export const PRESETS = {
         transform: { pos: [5, -0.05, 0], rot: [0, 0, 0] },
         params: { sx: 24, sy: 0.1, sz: 2.4 },          // 碰后滚行段防滚出
         physics: { body: 'fixed', friction: 0, restitution: 0.1 },
-        render: { material: 'steelDark' },
+        render: { material: 'floor' },
         source: 'preset',
       }, seq);
       // 双泳道：z=−0.3 弹性道（e=1），z=+0.3 非弹性道（e=0）；同泳道两球同 e（引擎按平均合成）
@@ -836,7 +836,7 @@ export const PRESETS = {
         transform: { pos: [2, -0.05, 0], rot: [0, 0, 0] },
         params: { sx: 20, sy: 0.1, sz: 3 },            // 共速 0.71 m/s 长滑行需长地面
         physics: { body: 'fixed', friction: 0, restitution: 0.1 },
-        render: { material: 'steelDark' },
+        render: { material: 'floor' },
         source: 'preset',
       }, seq);
       const bullet = createEntity('sphere', {
@@ -947,7 +947,7 @@ export const PRESETS = {
         transform: { pos: [6, -0.05, 0], rot: [0, 0, 0] },
         params: { sx: 24, sy: 0.1, sz: 2 },            // 链传递后滚行段防滚出（入射球少量反弹向左）
         physics: { body: 'fixed', friction: 0, restitution: 0.05 },
-        render: { material: 'steelDark' },
+        render: { material: 'floor' },
         source: 'preset',
       }, seq);
       doc.entities.push(ground);
@@ -1005,7 +1005,7 @@ export const PRESETS = {
           transform: { pos: [0, -0.05, z], rot: [0, 0, 0] },
           params: { sx: 2, sy: 0.1, sz: 0.3 },
           physics: { body: 'fixed', friction: 0.6, restitution: e },
-          render: { material: 'steelDark' },
+          render: { material: 'floor' },
           source: 'preset',
         }, seq));
         doc.entities.push(createEntity('sphere', {
@@ -1041,7 +1041,7 @@ export const PRESETS = {
         transform: { pos: [4, -0.05, 0], rot: [0, 0, 0] },
         params: { sx: 24, sy: 0.1, sz: 2 },            // 平抛球落地后仍滚动，长地面防滚出
         physics: { body: 'fixed', friction: 0.4, restitution: 0.05 },
-        render: { material: 'steelDark' },
+        render: { material: 'floor' },
         source: 'preset',
       }, seq);
       const mk = (z, vx, name, mat) => createEntity('sphere', {
@@ -1080,7 +1080,7 @@ export const PRESETS = {
         transform: { pos: [16, -0.05, 0], rot: [0, 0, 0] },
         params: { sx: 36, sy: 0.1, sz: 2.4 },          // 落点 2.2~2.6 m，落地后滚动防滚出
         physics: { body: 'fixed', friction: 0.4, restitution: 0.05 },
-        render: { material: 'steelDark' },
+        render: { material: 'floor' },
         source: 'preset',
       }, seq);
       const lanes = [
@@ -1340,7 +1340,7 @@ export const PRESETS = {
         transform: { pos: [6, -0.05, 0], rot: [0, 0, 0] },
         params: { sx: 28, sy: 0.1, sz: 3 },            // 共速 1.33 m/s 长滑行需长地面
         physics: { body: 'fixed', friction: 0, restitution: 0.1 },
-        render: { material: 'steelDark' },
+        render: { material: 'floor' },
         source: 'preset',
       }, seq);
       // 板 μ=0、滑块 μ=0.8：叠面有效 μ=avg(0,0.8)=0.4，板-地有效 μ=avg(0,0)=0（两侧接触面各取所需）
@@ -1390,7 +1390,7 @@ export const PRESETS = {
         transform: { pos: [4, -0.05, 0], rot: [0, 0, 0] },
         params: { sx: 16, sy: 0.1, sz: 3 },            // 落地弹跳滚动段防滚出
         physics: { body: 'fixed', friction: 0.6, restitution: 0.2 },
-        render: { material: 'steelDark' },
+        render: { material: 'floor' },
         source: 'preset',
       }, seq);
       const ball = createEntity('sphere', {
@@ -1435,7 +1435,7 @@ export const PRESETS = {
         transform: { pos: [0.2, 0, 0], rot: [0, 0, 0] },
         params: { sx: 9, sy: 0.1, sz: 6 },
         physics: { body: 'fixed', friction: 0.5, restitution: 0.2 },
-        render: { material: 'steelDark' },
+        render: { material: 'floor' },
         source: 'preset',
       }, seq);
       const ramp = createEntity('ramp', {

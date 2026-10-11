@@ -15,7 +15,7 @@
     --panel-solid: #14161b;
     --raise: #1a1d23;                      /* 提升面：卡片/托盘 hover 内衬 */
     --inset: #0d0f13;                      /* 输入/缩略图内衬底 */
-    --line: rgba(255, 255, 255, 0.065);
+    --line: rgba(255, 255, 255, 0.08);
     --line-strong: rgba(255, 255, 255, 0.15);
     --text: #eceae4;
     --dim: #a2a8b1;                        /* 次级文本，深底 ≥7:1 */
@@ -206,7 +206,9 @@
   .comp-item .thumbbox { position: relative; flex: none; }
   .comp-item .thumb {
     width: 54px; height: 54px; display: block; border-radius: 5px;
-    background: var(--inset); border: 1px solid var(--line);
+    /* 影棚旋景墙：左上主光径向渐变（U2 审计：纯 --inset 底吃掉黑金属件的剪影） */
+    background: radial-gradient(130% 130% at 28% 22%, #31353c 0%, #1d2025 62%, #15171b 100%);
+    border: 1px solid rgba(255, 255, 255, 0.06);
     object-fit: contain;
   }
   .comp-item:hover { background: rgba(255, 255, 255, 0.055); border-color: rgba(217, 164, 65, 0.5); transform: translateY(-1px); }
@@ -270,7 +272,9 @@
   .frow input:focus:not(:focus-visible), .frow select:focus:not(:focus-visible) { outline: none; }
   .frow input.bad { border-color: var(--danger); background: rgba(208, 128, 109, 0.08); }
   .frow input:disabled, .frow select:disabled { opacity: 1; color: var(--faint); background: var(--inset); }   /* UI-534 轴色 border 不随禁用淡出 */
-  .frow input[type=checkbox], .pgrid input[type=checkbox] { accent-color: var(--accent); }
+  .frow input[type=checkbox], .pgrid input[type=checkbox] { accent-color: var(--accent); width: 14px; height: 14px; }
+  /* 勾选行标签自适应（64px 定宽列装不下 6 字标签会换行错位）；输入行仍走 64px 对齐列 */
+  .frow:has(input[type=checkbox]) label { flex: 0 0 auto; min-width: 64px; }
   .tri { display: flex; gap: 6px; flex: 1; min-width: 0; }
   .tri input { flex: 1 1 0px; width: 0; min-width: 0; }
   .errmsg { font-size: 11px; color: var(--danger); margin: 4px 0 0 72px; display: none; }
@@ -387,7 +391,7 @@
   #simbar button.primary { padding: 0 13px; gap: 6px; }
   #simbar button:disabled { color: var(--faint); cursor: not-allowed; background: none; transform: none; }
   #simbar .ro { font-family: var(--mono); font-size: 12px; color: var(--faint); letter-spacing: .03em; white-space: nowrap; }
-  #simbar .ro b { color: var(--accent-hi); font-weight: 500; font-variant-numeric: tabular-nums; }
+  #simbar .ro b { color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
   #simbar .ro.ro-sep { border-left: 1px solid var(--line); padding-left: 10px; }   /* UI-569：显式分隔类,不依赖 DOM 顺序 */
   #replayBar { accent-color: var(--accent); height: 26px; }
 

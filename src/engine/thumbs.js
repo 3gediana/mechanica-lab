@@ -60,3 +60,32 @@ export function renderThumb(comp, materials) {
   scene.remove(mesh);
   return cache.get(comp.id);
 }
+
+// 环境贴图惰性加载（UI 审计 U2）：金属材质(metalness 1)无 envMap 只反射环境=纯黑——
+// 目录里球/圆柱/传送带黑对黑的根因。主视口同款 HDRI 优先、RoomEnvironment 降级。
+// 时序：首次 renderThumb 同步建渲染器后由 workbench 调本函数；环境就绪后清缓存并返回
+// true，调用方重渲目录（材质预览同款「异步完成后就地补挂」套路）。
+let envTried = false;
+export async function preloadEnv(materials) {
+  ensure(materials);
+  if (envTried) return false;
+  envTried = true;
+  try {
+    const { HDRLoader } = await import('three/addons/loaders/HDRLoader.js');
+    const tex = await new HDRLoader().loadAsync('./assets/hdri/studio_1k.hdr');
+    tex.mapping = THREE.EquirectangularReflectionMapping;
+    scene.environment = tex;
+  } catch {
+    try {
+      const { RoomEnvironment } = await import('three/addons/environments/RoomEnvironment.js');
+      const pmrem = new THREE.PMREMGenerator(renderer);
+      scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    } catch (e2) {
+      console.warn('[thumbs] 环境贴图缺失，金属件缩略图降级为灯光照明', e2);
+      return false;
+    }
+  }
+  scene.environmentIntensity = 0.7;
+  cache.clear();
+  return true;
+}

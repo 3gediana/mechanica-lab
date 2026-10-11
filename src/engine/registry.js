@@ -373,7 +373,7 @@ export const COMPONENTS = {
     id: 'ground', label: '地面板', category: '表面与结构',
     desc: '大平面承接板（默认固定），供物体落上反弹滑动',
     compat: '大承接板（固定）；与所有动态体碰撞',
-    defaults: { params: { sx: 12, sy: 0.1, sz: 12 }, physics: { ...defaultPhysics('fixed', 0), friction: 0.6, restitution: 0.3 }, render: { material: 'steelDark' } },
+    defaults: { params: { sx: 12, sy: 0.1, sz: 12 }, physics: { ...defaultPhysics('fixed', 0), friction: 0.6, restitution: 0.3 }, render: { material: 'floor' } },
     schema: [
       { key: 'sx', label: '长', unit: 'm', min: 0.5, max: 60, step: 0.5 },
       { key: 'sy', label: '厚', unit: 'm', min: 0.02, max: 2, step: 0.02 },
@@ -459,7 +459,7 @@ export const COMPONENTS = {
     id: 'rope', label: '绳', category: '绳和约束',
     desc: '连接两个实体的轻绳（仅拉不推）；先选中两个实体再点目录添加，或由解析自动连接',
     compat: '需先选两个实体：按当前距离定长（超长张紧）',
-    defaults: { params: { length: 0 }, physics: defaultPhysics('fixed', 0), render: { material: 'steelDark' } },
+    defaults: { params: { length: 0 }, physics: defaultPhysics('fixed', 0), render: { material: 'rope' } },
     schema: [
       { key: 'length', label: '绳长', unit: 'm', min: 0.05, max: 20, step: 0.05 },
     ],
