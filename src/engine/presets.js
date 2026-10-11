@@ -47,6 +47,55 @@ export const PRESETS = {
     },
   },
 
+  sinkfloat: {
+    id: 'sinkfloat', label: '浮与沉（密度比较）',
+    build() {
+      const doc = createEmptyDoc('浮与沉：同体积不同密度');
+      const seq = {};
+      const tank = createEntity('tank', {
+        name: '水槽',
+        transform: { pos: [0, 0.6, 0], rot: [0, 0, 0] },
+        params: { sx: 2.4, sy: 1.2, sz: 1.4, density: 1000 },
+        physics: { body: 'fixed', friction: 0.4, restitution: 0.05 },
+        render: { material: 'glass' },
+        source: 'preset',
+      }, seq);
+      // 同体积（0.3×0.2×0.2=0.012 m³）不同材质：木块 ρ=600<1000 浮，铁块 ρ=7800>1000 沉
+      // ——漂浮平衡时 V排/V = ρ物/ρ液 = 0.6（浸没 60%）
+      const wood = createEntity('box', {
+        name: '木块（ρ=600）',
+        transform: { pos: [-0.55, 2.0, 0], rot: [0, 0, 0] },
+        params: { sx: 0.3, sy: 0.2, sz: 0.2 },
+        physics: {
+          body: 'dynamic', mass: 7.2, friction: 0.3, restitution: 0.1,
+          linvel: [0, 0, 0], angvel: [0, 0, 0], linDamping: 0, angDamping: 0, gravityScale: 1,
+        },
+        render: { material: 'wood' },
+        measured: true,
+        source: 'preset',
+      }, seq);
+      const iron = createEntity('box', {
+        name: '铁块（ρ=7800）',
+        transform: { pos: [0.55, 2.0, 0], rot: [0, 0, 0] },
+        params: { sx: 0.3, sy: 0.2, sz: 0.2 },
+        physics: {
+          body: 'dynamic', mass: 93.6, friction: 0.3, restitution: 0.1,
+          linvel: [0, 0, 0], angvel: [0, 0, 0], linDamping: 0, angDamping: 0, gravityScale: 1,
+        },
+        render: { material: 'steelDark' },
+        measured: true,
+        source: 'preset',
+      }, seq);
+      doc.entities.push(tank, wood, iron);
+      doc.meta.assumptions = [
+        '浮力 F=ρ液·g·V排（阿基米德原理），作用于质心（无力矩，漂浮姿态理想化）',
+        '水的阻力为二次+线性混合近似；球体浸没体积用精确球缺，方块按包围盒（正姿态即精确）',
+        '木块 ρ=600<ρ水=1000 → 平衡时浸没 60%；铁块 ρ=7800>ρ水 → 沉底',
+      ];
+      return doc;
+    },
+  },
+
   momentum2d: {
     id: 'momentum2d', label: '动量守恒（二维斜碰）',
     build() {

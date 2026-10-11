@@ -71,10 +71,11 @@ const EXPECT = {
   curvedRace: { count: 5, types: { ground: 1, ramp: 1, curvedRamp: 1, sphere: 2 } },
   bowlOsc: { count: 2, types: { bowl: 1, sphere: 1 } },
   waveRoad: { count: 2, types: { waveFloor: 1, sphere: 1 } },
+  sinkfloat: { count: 3, types: { tank: 1, box: 2 } },
 };
 
 // ---------- 通用：全部预置结构与引用闭合 ----------
-test('预置注册表完整（原有 10 + 新增 24 = 34）', () => {
+test('预置注册表完整（原有 10 + 新增 25 = 35）', () => {
   assert.deepEqual(Object.keys(PRESETS).sort(), Object.keys(EXPECT).sort());
   for (const id of NEW_IDS) {
     assert.equal(PRESETS[id].id, id);

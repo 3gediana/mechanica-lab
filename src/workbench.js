@@ -3794,6 +3794,10 @@ const PEDIT = {
     ['waveLen', '波长', 'm', 0.8, [0.2, 3]],
     ['waveAmp', '波幅', 'm', 0.05, [0.005, 0.25]],
   ],
+  tank: [
+    ['density', '液体密度', 'kg/m³', 1000, [500, 3000]],
+    ['sy', '水深', 'm', 1.2, [0.2, 4]],
+  ],
   ground: [],
   pulley: [],
   celestial: [
@@ -5246,7 +5250,7 @@ async function runAgentVerifyInner() {
     // bowl=开放薄壳：自心 26 向射线必穿自家开口打到腔内物体，误判「碗嵌球」并把碗阶梯
     // 抬成悬空（B5 双次实锤）。凹腔内的球由球自身嵌入核对兜底（球的射线只扫到局部碗壁）。
     // bowl=开放薄壳/绳·弹簧=连接件 mesh(悬链穿过端物体是常态,无碰撞体)——都不参与嵌入口径(MOD-504 竖直圆实锤:正下方球被绳段误判抬飞)
-    penetrations[it.id] = (it.type === 'bowl' || it.type === 'rope' || it.type === 'spring') ? 0 : (entityPoseBlocked(it.id, it.pos) || 0);
+    penetrations[it.id] = (it.type === 'bowl' || it.type === 'rope' || it.type === 'spring' || it.type === 'tank') ? 0 : (entityPoseBlocked(it.id, it.pos) || 0);
   }
   let findings = auditStatic({ ...ctx, penetrations });
   // ---- 2. 自动修复（一轮 ≤6 处）：嵌入抬升 / 坡面重算落点 / 题给位置还原 ----

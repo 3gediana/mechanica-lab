@@ -385,6 +385,62 @@ export const COMPONENTS = {
     inertiaY: (p, m) => m * (p.sx * p.sx + p.sz * p.sz) / 12,
   },
 
+  tank: {
+    id: 'tank', label: '水槽', category: '表面与结构',
+    desc: '透明水槽（固定容器+水体）：物体入水受浮力 F=ρ液·g·V排，沉浮自判——球用精确球缺（漂浮液面定量可信），其余按包围盒近似（旋转偏乐观）；液体密度可调（盐水≈1030）',
+    compat: '固定水槽；开放顶部，物体从上方入水；四壁+底为玻璃碰撞体',
+    defaults: { params: { sx: 3, sy: 1.2, sz: 1.6, density: 1000 }, physics: { ...defaultPhysics('fixed', 0), friction: 0.4, restitution: 0.05 }, render: { material: 'glass' } },
+    schema: [
+      { key: 'sx', label: '槽长', unit: 'm', min: 0.6, max: 12, step: 0.1 },
+      { key: 'sy', label: '水深', unit: 'm', min: 0.2, max: 4, step: 0.05 },
+      { key: 'sz', label: '槽宽', unit: 'm', min: 0.4, max: 8, step: 0.1 },
+      { key: 'density', label: '液体密度', unit: 'kg/m³', min: 500, max: 3000, step: 10 },
+    ],
+    buildGeometry: (p) => new THREE.BoxGeometry(p.sx, p.sy, p.sz), // ghost/包围占位
+    // 底板（厚 6cm 实体，沉底物体的承托面）——主体碰撞体；四壁走 buildExtraColliders
+    buildCollider: (RAPIER, p) => RAPIER.ColliderDesc.cuboid(p.sx / 2, 0.03, p.sz / 2)
+      .setTranslation(0, -(p.sy / 2 - 0.03), 0),
+    // 玻璃四壁（同一 fixed 刚体的附加碰撞体，runtime 通用支持）：壁厚 2cm、通高
+    buildExtraColliders: (RAPIER, p) => {
+      const t = 0.02;
+      return [
+        RAPIER.ColliderDesc.cuboid(t / 2, p.sy / 2, p.sz / 2 + t).setTranslation(p.sx / 2 - t / 2, 0, 0),
+        RAPIER.ColliderDesc.cuboid(t / 2, p.sy / 2, p.sz / 2 + t).setTranslation(-(p.sx / 2 - t / 2), 0, 0),
+        RAPIER.ColliderDesc.cuboid(p.sx / 2, p.sy / 2, t / 2).setTranslation(0, 0, p.sz / 2 - t / 2),
+        RAPIER.ColliderDesc.cuboid(p.sx / 2, p.sy / 2, t / 2).setTranslation(0, 0, -(p.sz / 2 - t / 2)),
+      ];
+    },
+    spawnY: (p) => p.sy / 2,
+    // 玻璃壁+底（glass）与水体（water，水面留 5mm）——透明件 depthWrite 已关
+    makeMesh: (p, material) => {
+      const M = getSharedMaterials() || {};
+      const g = new THREE.Group();
+      const t = 0.02, bot = 0.06;
+      const put = (geo, mat, x, y, z, order) => {
+        const m = new THREE.Mesh(geo, mat || material);
+        m.position.set(x, y, z);
+        m.renderOrder = order;
+        m.receiveShadow = true;
+        g.add(m);
+        return m;
+      };
+      if (M.glass) {
+        put(new THREE.BoxGeometry(p.sx, bot, p.sz), M.glass, 0, -(p.sy / 2 - bot / 2), 0, 3);
+        put(new THREE.BoxGeometry(t, p.sy, p.sz + 2 * t), M.glass, p.sx / 2 - t / 2, 0, 0, 3);
+        put(new THREE.BoxGeometry(t, p.sy, p.sz + 2 * t), M.glass, -(p.sx / 2 - t / 2), 0, 0, 3);
+        put(new THREE.BoxGeometry(p.sx + 2 * t, p.sy, t), M.glass, 0, 0, p.sz / 2 - t / 2, 3);
+        put(new THREE.BoxGeometry(p.sx + 2 * t, p.sy, t), M.glass, 0, 0, -(p.sz / 2 - t / 2), 3);
+      }
+      if (M.water) {
+        const hw = Math.max(0.05, p.sy - bot - 0.005);
+        put(new THREE.BoxGeometry(Math.max(0.05, p.sx - 2 * t), hw, Math.max(0.05, p.sz - 2 * t)),
+          M.water, 0, -(p.sy / 2) + bot + hw / 2, 0, 2);
+      }
+      return g;
+    },
+    computed: (p) => [{ key: 'rho', label: '液体密度', value: p.density, unit: 'kg/m³' }],
+  },
+
   conveyor: {
     id: 'conveyor', label: '传送带', category: '表面与结构',
     desc: '水平传送带（固定）：带面以给定速度持续输运其上的物体——「轻放上去先滑动后共速」的经典模型',

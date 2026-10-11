@@ -238,6 +238,18 @@ export async function createMaterials() {
     // 反光地板覆层：近黑基色压暗摄影棚地面，roughness 0.5 只留温润反光，opacity 0.9 透出镜面地板的克制倒影
     floorOverlay: new THREE.MeshPhysicalMaterial({ color: 0x0a0a0c, roughness: 0.5, metalness: 0, transparent: true, opacity: 0.9 }),
 
+    // 水（U-LIQ 液体）：透蓝水体，depthWrite 关闭防透明排序吃面；clearcoat 薄膜给水面高光
+    water: new THREE.MeshPhysicalMaterial({
+      color: 0x2f7fae, roughness: 0.1, metalness: 0, transparent: true, opacity: 0.42,
+      depthWrite: false, envMapIntensity: 1.0, clearcoat: 0.4, clearcoatRoughness: 0.1,
+    }),
+
+    // 玻璃（U-LIQ 水槽壁/底）：近透明薄壳
+    glass: new THREE.MeshPhysicalMaterial({
+      color: 0xdfe9ee, roughness: 0.06, metalness: 0, transparent: true, opacity: 0.14,
+      depthWrite: false, envMapIntensity: 1.2,
+    }),
+
     // 绳（U1 审计）：原用 steelDark——暗钢细圆柱贴暗背景不可见（单摆摆绳消失实锤）。
     // 黑板教学画的就是白绳：麻白暖灰全哑光，任何背景都可读
     rope: new THREE.MeshPhysicalMaterial({ color: 0xcfc8b8, roughness: 0.9, metalness: 0 }),

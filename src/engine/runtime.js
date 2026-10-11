@@ -2,6 +2,7 @@
 // 全量重建语义：任何文档变更（编辑态）都 rebuild，杜绝增量同步bug；场景规模小，重建毫秒级。
 // 步进：固定步长 1/120s + 每帧步数上限，超限丢弃积压（防掉帧后追赶螺旋、防物理死循环）。
 import * as THREE from 'three';
+import { submergedVolume } from './buoyancy.js';
 import { TRACK_POINTS, TRACK_META } from '../track-curve.js';
 
 export const FIXED_H = 1 / 120;
@@ -93,6 +94,7 @@ export class Runtime {
       b.mesh.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
     }
     this.binds.clear();
+    this._tanks = [];
   }
 
   _createEntity(e) {
@@ -172,6 +174,15 @@ export class Runtime {
           .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS);
         if (e.physics.body === 'dynamic' && e.physics.mass > 0) colDesc.setMass(e.physics.mass);
         bind.collider = this.world.createCollider(colDesc, body);
+      }
+      // 复合体附加碰撞体（U-LIQ：tank 四壁与底同一 fixed 刚体）；无独立事件上报需求
+      for (const extra of (c.buildExtraColliders ? c.buildExtraColliders(RAPIER, e.params) : [])) {
+        extra.setFriction(e.physics.friction).setRestitution(e.physics.restitution);
+        this.world.createCollider(extra, body);
+      }
+      if (e.type === 'tank') {
+        if (!this._tanks) this._tanks = [];
+        this._tanks.push(bind);
       }
       if (e.params.noCollide && bind.collider) {
         // noCollide：保留质量/惯性（joint 求解需要），但不与任何东西碰撞
@@ -487,6 +498,54 @@ export class Runtime {
     return { ke, pe, e: ke + pe };
   }
 
+  // ============ 液体浮力（U-LIQ） ============
+  // 每步 world.step 前：对每个水槽重叠的动态体施
+  //   浮力 Fb = ρ液·g·V排（向上，作用于质心——无力矩 V1，漂浮姿态理想化）
+  //   水阻 Fd = −v·(½·ρ·A·|v| + 1.5·ρ·V排)（二次+线性混合，入水既缓冲又不永久震荡）
+  // 力学口径：resetForces 后施力——有水槽时本函数是唯一力源，无水槽零开销。
+  // gravityScale=0 的理想化悬浮体不受浮力（无重力也无浮力，能量账一致）。
+  _applyBuoyancy() {
+    const tanks = this._tanks;
+    if (!tanks || !tanks.length) return;
+    const gy = this._bindDocs ? this._bindDocs.gravity : -9.81;
+    const g = Math.abs(gy);
+    const box = new THREE.Box3();
+    for (const tank of tanks) {
+      const p = tank.entity.params;
+      const pos = tank.mesh.position;
+      const t = 0.02, bot = 0.06;
+      const surf = pos.y + p.sy / 2 - 0.005;
+      const wMin = [pos.x - p.sx / 2 + t, pos.y - p.sy / 2 + bot, pos.z - p.sz / 2 + t];
+      const wMax = [pos.x + p.sx / 2 - t, surf, pos.z + p.sz / 2 - t];
+      const rho = p.density ?? 1000;
+      for (const [, b] of this.binds) {
+        if (!b.body || b.entity.physics.body !== 'dynamic') continue;
+        b.body.resetForces(true);
+        if (b.entity.physics.gravityScale === 0) continue;
+        const e = b.entity;
+        const c = b.mesh.position;
+        let vSub = 0;
+        if (e.type === 'sphere') {
+          b.mesh.geometry.computeBoundingSphere();
+          const bs = b.mesh.geometry.boundingSphere;
+          const sc = Math.max(b.mesh.scale.x, b.mesh.scale.y, b.mesh.scale.z, 1e-6);
+          vSub = submergedVolume('sphere', null, [c.x, c.y, c.z], bs.radius * sc, wMin, wMax);
+        } else {
+          box.setFromObject(b.mesh);
+          vSub = submergedVolume(e.type, { min: [box.min.x, box.min.y, box.min.z], max: [box.max.x, box.max.y, box.max.z] },
+            [c.x, c.y, c.z], 0, wMin, wMax);
+        }
+        if (!(vSub > 0)) continue;
+        const v = b.body.linvel();
+        const speed = Math.hypot(v.x, v.y, v.z);
+        const A = Math.max(1e-4, Math.pow(vSub, 2 / 3));
+        const k = 0.5 * rho * A * speed + 1.5 * rho * vSub;
+        const fb = rho * g * vSub;
+        b.body.addForce({ x: -v.x * k, y: fb - v.y * k, z: -v.z * k }, true);
+      }
+    }
+  }
+
   // ============ 步进 ============
   stepOnce() {
     if (!this.world) return;
@@ -501,6 +560,7 @@ export class Runtime {
       pv[0] = v.x; pv[1] = v.y; pv[2] = v.z;
     }
     this._gravStep(FIXED_H);                  // 天体（自积分）先行；Rapier 步内不含天体
+    this._applyBuoyancy();                    // U-LIQ：入水物体 F=ρgV排+水阻（world.step 前施力）
     this.world.step(this.eventQueue);         // 事件队列必须传入 step 才会被填充
     for (const tb of this._trackBalls) this._constrainToPipe(tb);
     this._constrainAtwood();
