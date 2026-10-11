@@ -250,6 +250,11 @@ export async function createMaterials() {
       depthWrite: false, envMapIntensity: 1.2,
     }),
 
+    // 冰（U-MAT）：淡冰蓝近镜面+清漆膜——与「近无摩擦」物理预设配对的视觉语言
+    ice: new THREE.MeshPhysicalMaterial({
+      color: 0xd7ecf4, roughness: 0.08, metalness: 0, clearcoat: 0.8, clearcoatRoughness: 0.12, envMapIntensity: 1.1,
+    }),
+
     // 绳（U1 审计）：原用 steelDark——暗钢细圆柱贴暗背景不可见（单摆摆绳消失实锤）。
     // 黑板教学画的就是白绳：麻白暖灰全哑光，任何背景都可读
     rope: new THREE.MeshPhysicalMaterial({ color: 0xcfc8b8, roughness: 0.9, metalness: 0 }),

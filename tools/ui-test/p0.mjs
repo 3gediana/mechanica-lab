@@ -67,7 +67,7 @@ try {
   check('质量改为 2kg', Math.abs(ballDoc.physics.mass - 2) < 1e-6, `mass=${ballDoc.physics.mass}`);
 
   // 位置三连输入（斜坡在 [-0.8,0.07,-0.8]，高墙 -x；球放坡面上段，z 同步改值验证写入）
-  const posRow = page.locator('#inspBody .frow', { has: page.locator('label', { hasText: '位置' }) }).locator('input');
+  const posRow = page.locator('#inspBody .frow', { has: page.locator('label', { hasText: '坐标' }) }).locator('input');   // U-READ：位置→坐标（里程读数上线后改名防位移/路程混淆）
   await posRow.nth(0).fill('-1.15');
   await posRow.nth(1).fill('0.78');
   await posRow.nth(2).fill('-0.6');

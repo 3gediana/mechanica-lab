@@ -55,11 +55,36 @@ export const MATERIAL_OPTIONS = [
   { key: 'mattePlastic', label: '哑光塑料' }, // MAT-75
   { key: 'chalk', label: '粉笔' },            // MAT-75
   { key: 'brass', label: '黄铜' },
+  { key: 'ice', label: '冰' },                // U-MAT：近无摩擦低弹（高速滑行/冰面斜面题型）
   { key: 'sun', label: '恒星' },
   { key: 'saturn', label: '土星' },
   { key: 'jupiter', label: '木星' },          // MAT-67
   { key: 'mars', label: '火星' },             // MAT-67
 ];
+
+// U-MAT：材质→物理预设（摩擦系数 μ / 恢复系数 e / 密度 ρ kg/m³）——教学惯例+常见实测档位。
+// 换材质自动套用：视觉材质与物理行为同源（用户点单「材质要影响物体的表现」）；
+// 预设是起点不是锁——文档只存 μ/e/mass，套用后仍可逐项手改
+export const MAT_PHYS = {
+  chrome: { mu: 0.25, e: 0.60, rho: 7800 },    // 铬钢
+  steelDark: { mu: 0.30, e: 0.50, rho: 7850 }, // 暗钢
+  wood: { mu: 0.45, e: 0.35, rho: 600 },       // 橡木
+  rubber: { mu: 0.90, e: 0.85, rho: 1100 },    // 橡胶
+  marble: { mu: 0.40, e: 0.55, rho: 2700 },    // 大理石
+  mattePlastic: { mu: 0.40, e: 0.40, rho: 1150 },
+  chalk: { mu: 0.60, e: 0.20, rho: 2200 },
+  brass: { mu: 0.30, e: 0.50, rho: 8500 },
+  ice: { mu: 0.03, e: 0.10, rho: 917 },
+};
+
+// U-MAT：标准几何体按参数求体积（m³），供换材质按 ρV 重算质量；非标准形状返回 null（只套 μ/e）
+export function volumeOf(typeId, params) {
+  const p = params || {};
+  if (typeId === 'sphere') return (4 / 3) * Math.PI * Math.pow(p.radius ?? 0.15, 3);
+  if (typeId === 'box') return (p.sx ?? 0.3) * (p.sy ?? 0.3) * (p.sz ?? 0.3);
+  if (typeId === 'cylinder') return Math.PI * Math.pow(p.radius ?? 0.12, 2) * (p.height ?? 0.3);
+  return null;
+}
 
 export const BODY_OPTIONS = [
   { key: 'dynamic', label: '动态' },
@@ -560,6 +585,9 @@ export const COMPONENTS = {
           pts.push(new THREE.Vector3(Math.cos(a) * 0.034, t, Math.sin(a) * 0.034));
         }
         coil = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 170, 0.0075, 8, false);
+        coil.translate(0, -0.5, 0);   // B1 用户实锤：螺旋 y 跨 [0,1] 未居中，_syncLinks 按中点+居中
+                                      // 假设摆放→每根弹簧渲染整体偏移半长（端点够不到球/飘出球）。
+                                      // 平移到 [-0.5,0.5] 后端点=两侧实体中心，与同步语义一致。
         return coil;
       };
     })(),

@@ -5,6 +5,9 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { createEnvironment } from '../materials.js';
 
+// U-FLY 漫游键位（e.code 布局无关；Shift 任侧=加速）
+const FLY_CODES = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'ShiftLeft', 'ShiftRight']);
+
 const ACCENT = 0xd9a441;
 
 // 叠加层箭头/法线的模块级 scratch（PL-54）：每帧 × 每箭头的 new THREE.Vector3 是
@@ -1266,6 +1269,93 @@ export class Viewport {
       this.gizmo.attach(this.selectedMesh);
       this.gizmo.enabled = true;
     }
+  }
+
+  // ============ 自由视角漫游（U-FLY，用户点单：WASD 移动+鼠标转视角+按钮切换） ============
+  // OrbitControls 是绕目标点的轨道相机；漫游=第一人称：键持续按住平移、左键拖拽转头。
+  // 开启时接管相机（workbench tick 见 updateFly 返回值），gizmo 挂起、Esc/再点按钮退出。
+  setFlyMode(on) {
+    if (!!this._fly?.on === on) return;
+    if (on) {
+      const eul = new THREE.Euler().setFromQuaternion(this.camera.quaternion, 'YXZ');
+      this._fly = {
+        on: true, yaw: eul.y, pitch: eul.x, keys: new Set(), _last: 0,
+        speed: Math.min(20, Math.max(0.8, this.camera.position.distanceTo(this.controls.target) * 1.1)),
+      };
+      this.controls.enabled = false;
+      this.setGizmoEnabled(false);
+      if (!this._flyKeyDn) {
+        this._flyKeyDn = (ev) => this._flyKey(ev, true);
+        this._flyKeyUp = (ev) => this._flyKey(ev, false);
+        this._flyPtrDn = (ev) => { if (ev.button !== 0) return; this._flyDrag = true; try { this.renderer.domElement.setPointerCapture(ev.pointerId); } catch { /* 捕获失败不致命 */ } };
+        this._flyPtrMv = (ev) => this._flyLook(ev);
+        this._flyPtrUp = () => { this._flyDrag = false; };
+      }
+      window.addEventListener('keydown', this._flyKeyDn);
+      window.addEventListener('keyup', this._flyKeyUp);
+      const el = this.renderer.domElement;
+      el.addEventListener('pointerdown', this._flyPtrDn);
+      window.addEventListener('pointermove', this._flyPtrMv);
+      window.addEventListener('pointerup', this._flyPtrUp);
+    } else {
+      this._fly.on = false;
+      this.controls.enabled = true;
+      this.setGizmoEnabled(true);
+      window.removeEventListener('keydown', this._flyKeyDn);
+      window.removeEventListener('keyup', this._flyKeyUp);
+      const el = this.renderer.domElement;
+      el.removeEventListener('pointerdown', this._flyPtrDn);
+      window.removeEventListener('pointermove', this._flyPtrMv);
+      window.removeEventListener('pointerup', this._flyPtrUp);
+      // 回轨道模式：目标点放到视线前方 3m，衔接自然
+      this.controls.target.copy(this.camera.position).add(
+        new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion).multiplyScalar(3));
+    }
+    this.markDirty();
+    if (this.onFlyChange) this.onFlyChange(on);
+  }
+
+  _flyKey(ev, down) {
+    const fly = this._fly;
+    if (!fly || !fly.on) return;
+    if (ev.code === 'Escape') { this.setFlyMode(false); return; }
+    const t = ev.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+    if (!FLY_CODES.has(ev.code)) return;
+    ev.preventDefault();
+    if (down) fly.keys.add(ev.code); else fly.keys.delete(ev.code);
+  }
+
+  _flyLook(ev) {
+    const fly = this._fly;
+    if (!fly || !fly.on || !this._flyDrag) return;
+    fly.yaw -= (ev.movementX || 0) * 0.0032;
+    fly.pitch = Math.max(-1.45, Math.min(1.45, fly.pitch - (ev.movementY || 0) * 0.0032));
+    this.camera.rotation.set(fly.pitch, fly.yaw, 0, 'YXZ');
+    this.markDirty();
+  }
+
+  // 每帧由 workbench tick 调用：返回 true=漫游态已驱动相机（跳过 controls.update 防阻尼打架）
+  updateFly() {
+    const fly = this._fly;
+    if (!fly || !fly.on) return false;
+    const now = performance.now();
+    const dt = Math.min(0.05, (now - (fly._last || now)) / 1000);
+    fly._last = now;
+    this.camera.rotation.set(fly.pitch, fly.yaw, 0, 'YXZ');
+    const f = fly.keys.has('KeyW') ? 1 : (fly.keys.has('KeyS') ? -1 : 0);
+    const r = fly.keys.has('KeyD') ? 1 : (fly.keys.has('KeyA') ? -1 : 0);
+    const u = fly.keys.has('KeyE') ? 1 : (fly.keys.has('KeyQ') ? -1 : 0);
+    if (f || r || u) {
+      const sp = fly.speed * (fly.keys.has('ShiftLeft') || fly.keys.has('ShiftRight') ? 2.5 : 1);
+      const dir = new THREE.Vector3(0, 0, -1).applyEuler(new THREE.Euler(fly.pitch, fly.yaw, 0, 'YXZ'));
+      const right = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 1, 0)).normalize();
+      this.camera.position.addScaledVector(dir, f * sp * dt);
+      this.camera.position.addScaledVector(right, r * sp * dt);
+      this.camera.position.y += u * sp * dt;
+      this.markDirty();
+    }
+    return true;
   }
 
   setGizmoEnabled(on) {

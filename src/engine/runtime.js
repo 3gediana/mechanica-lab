@@ -18,6 +18,7 @@ const _vt = new THREE.Vector3(), _vs = new THREE.Vector3();
 const _n1 = new THREE.Vector3(), _n2 = new THREE.Vector3();
 // 受力差分基准（PER-3/52：120Hz 下每步新分配 Map+数组是 GC 大头，模块级复用原地写入）
 const _prevVel = new Map();
+const _prevPos = new Map();   // U-READ 里程：步进前位置快照（Σ|Δp| 路程累计）
 
 export class Runtime {
   constructor(RAPIER, materials, scene) {
@@ -62,6 +63,9 @@ export class Runtime {
     this._bindDocs = doc;
     this._colOwner.clear();
     _prevVel.clear();
+    _prevPos.clear();
+    this._distAcc = new Map();
+    this._restCnt = new Map();
     this.world = new this.RAPIER.World({ x: 0, y: doc.gravity, z: 0 });
     this.world.timestep = FIXED_H;
     this.world.numSolverIterations = 8;
@@ -558,10 +562,37 @@ export class Runtime {
       let pv = _prevVel.get(id);
       if (!pv) { pv = [0, 0, 0]; _prevVel.set(id, pv); }
       pv[0] = v.x; pv[1] = v.y; pv[2] = v.z;
+      const p = b.body.translation();
+      let pp = _prevPos.get(id);
+      if (!pp) { pp = [0, 0, 0]; _prevPos.set(id, pp); }
+      pp[0] = p.x; pp[1] = p.y; pp[2] = p.z;
+      // 静息钳制（B2 用户实锤：静止球读数 v=0.06——接触求解微漂移永不停息）。
+      // 连续 45 步(0.375s)速率 <0.06 且角速 <0.6 → 速度/角速归零。SHM 折返点低速窗口
+      // ~3 步（T=1.4s/A=0.3 实算），安全裕度 ×15；教学演示无受影响口径。
+      const sp = Math.hypot(v.x, v.y, v.z);
+      const wv = b.body.angvel();
+      const wm = Math.hypot(wv.x, wv.y, wv.z);
+      if (sp < 0.06 && wm < 0.6) {
+        const cnt = (this._restCnt.get(id) || 0) + 1;
+        if (cnt >= 45) { b.body.setLinvel({ x: 0, y: 0, z: 0 }, true); b.body.setAngvel({ x: 0, y: 0, z: 0 }, true); }
+        this._restCnt.set(id, cnt);
+      } else {
+        this._restCnt.set(id, 0);
+      }
     }
     this._gravStep(FIXED_H);                  // 天体（自积分）先行；Rapier 步内不含天体
     this._applyBuoyancy();                    // U-LIQ：入水物体 F=ρgV排+水阻（world.step 前施力）
     this.world.step(this.eventQueue);         // 事件队列必须传入 step 才会被填充
+    // 里程（U-READ 真路程）：Σ|Δp| 标量累计，永不为负——路程/位移之辨是初中考点，
+    // 「位置坐标」显示的是位移分量可负，读数区补路程口径
+    for (const [id, b] of this.binds) {
+      if (!b.body || b.entity.physics.body !== 'dynamic') continue;
+      const pp = _prevPos.get(id);
+      if (!pp) continue;
+      const p = b.body.translation();
+      const d = Math.hypot(p.x - pp[0], p.y - pp[1], p.z - pp[2]);
+      if (d > 0) this._distAcc.set(id, (this._distAcc.get(id) || 0) + d);
+    }
     for (const tb of this._trackBalls) this._constrainToPipe(tb);
     this._constrainAtwood();
     this._constrainSpinSlots();
@@ -968,7 +999,7 @@ export class Runtime {
 
   // ============ 遥测（检查器实时区 / 底栏 / 解释器用）；天体走自积分状态 ============
   telemetry(id) {
-    const out = { pos: [0, 0, 0], vel: [0, 0, 0], angvel: [0, 0, 0], speed: 0, mass: 0, momentum: 0, keTrans: 0, height: 0 };
+    const out = { pos: [0, 0, 0], vel: [0, 0, 0], angvel: [0, 0, 0], speed: 0, mass: 0, momentum: 0, keTrans: 0, height: 0, dist: 0 };
     return this.telemetryInto(id, out) ? out : null;
   }
 
@@ -999,6 +1030,7 @@ export class Runtime {
     out.momentum = m * speed;
     out.keTrans = 0.5 * m * speed * speed;
     out.height = out.pos[1];
+    out.dist = this._distAcc ? (this._distAcc.get(id) || 0) : 0;
     return out;
   }
 

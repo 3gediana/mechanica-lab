@@ -1378,6 +1378,9 @@ function bindUI() {
   $('btnFocus').onclick = () => viewport.focusOn(selectedId ? runtime.binds.get(selectedId).mesh : null);
   // R6-F3：Home 键移除后全景取景的 UI 入口（双击=全部实体入画；单击聚焦不变）
   $('btnFocus').ondblclick = () => { viewport.focusScene(); toast('全景取景'); };
+  // U-FLY 自由漫游：按钮切换，状态回写热态
+  $('btnFly').onclick = () => viewport.setFlyMode(!(viewport._fly && viewport._fly.on));   // 常驻热态由 onFlyChange 管（viewPulse 的 160ms 移除会打架）
+  viewport.onFlyChange = (on) => { $('btnFly').classList.toggle('hot', on); toast(on ? '漫游：WASD 平移 / Q E 升降 / 拖拽转视角 / Esc 退出' : '已回到轨道视角'); };
   // R6-F3：B 键移除后子弹时间的 UI 入口（simbar 开关钮）
   {
     const bb = $('btnBpt');
@@ -1903,8 +1906,10 @@ function renderCatalogEnvMats(box, grid) {
       const e = getEntity(doc, eid);
       if (!e) return;
       e.render.material = mo.key;
-      patchRender(e, '换材质为' + mo.label);
-      toast(`${e.name} → ${mo.label}`);
+      const physTxt = applyMaterialPhysics(e, mo.key);     // U-MAT：材质→物理同源套用
+      opUpdateEntity(e.id, { render: e.render, physics: e.physics },
+        physTxt ? `换材质为${mo.label}·套用物理（${physTxt}）` : `换材质为${mo.label}`);
+      toast(`${e.name} → ${mo.label}` + (physTxt ? '（已套用材质物理）' : ''));
     };
     mg.appendChild(card);
   }
@@ -2234,7 +2239,7 @@ function renderInspector() {
 
   // 变换组
   const grpT = grp('变换');
-  triRow(grpT, '位置', 'm', e.transform.pos, 0.1, (vals) => patchTransform(e, { pos: vals }, '移动'));
+  triRow(grpT, '坐标', 'm', e.transform.pos, 0.1, (vals) => patchTransform(e, { pos: vals }, '移动'));   // U-READ：坐标（分量可负）≠里程（路程,见实时区）
   triRow(grpT, '旋转', '°', e.transform.rot.map((r) => +(r * 180 / Math.PI).toFixed(1)), 1,
     (vals) => patchTransform(e, { rot: vals.map((v) => +(v * Math.PI / 180).toFixed(4)) }, '旋转'));
   // 视觉缩放（缩放 gizmo 写 transform.scale）：只改显示网格，物理参数不变——必须让用户看得见这条边界
@@ -2402,7 +2407,12 @@ function renderInspector() {
     msel.appendChild(op);
   }
   msel.disabled = dis;
-  msel.onchange = () => { e.render.material = msel.value; patchRender(e, '换材质'); };
+  msel.onchange = () => {
+    e.render.material = msel.value;
+    const physTxt = applyMaterialPhysics(e, msel.value);   // U-MAT：材质→物理同源套用
+    opUpdateEntity(e.id, { render: e.render, physics: e.physics },
+      physTxt ? `换材质·套用物理（${physTxt}）` : '换材质');
+  };
 
   // 检查器既有「操作」组（尾部 grpA）补聚焦按钮——见本函数尾部 
   grpM.appendChild(mrow);
@@ -2416,6 +2426,7 @@ function renderInspector() {
   grid.innerHTML = `
     <div class="cell"><span class="k">速率</span><span class="v" data-lv="speed">--</span></div>
     <div class="cell"><span class="k">高度</span><span class="v" data-lv="height">--</span></div>
+    <div class="cell"><span class="k">里程</span><span class="v" data-lv="dist">--</span></div>
     <div class="cell"><span class="k">质量</span><span class="v plain" data-lv="mass">--</span></div>
     <div class="cell"><span class="k">动量</span><span class="v" data-lv="momentum">--</span></div>
     <div class="cell"><span class="k">平动动能</span><span class="v" data-lv="keTrans">--</span></div>
@@ -2465,6 +2476,23 @@ function patchTransform(e, t, label) { opUpdateEntity(e.id, { transform: t }, la
 function patchParams(e, label, rerender = true) { opUpdateEntity(e.id, { params: e.params }, label, { rerender }); }
 function patchPhysics(e, label) { opUpdateEntity(e.id, { physics: e.physics }, label, { rerender: false }); }
 function patchRender(e, label) { opUpdateEntity(e.id, { render: e.render }, label, { rerender: false }); }
+
+// U-MAT：材质影响物理——换材质自动套用预设（μ/e + 动态体 m=ρV 重算，固定体不重算质量）。
+// 返回描述串供历史日志；无预设的材质返回 null（天体/水面等非实体材质）
+function applyMaterialPhysics(e, matKey) {
+  const mp = registry.MAT_PHYS[matKey];
+  if (!mp) return null;
+  e.physics.friction = mp.mu;
+  e.physics.restitution = mp.e;
+  let txt = `μ=${mp.mu} e=${mp.e}`;
+  const vol = registry.volumeOf(e.type, e.params);
+  if (vol != null && e.physics.body === 'dynamic') {
+    const m = Math.max(0.01, +(mp.rho * vol).toFixed(3));
+    e.physics.mass = m;
+    txt += ` m=${m}kg`;
+  }
+  return txt;
+}
 
 function grp(title) {
   const g = document.createElement('div');
@@ -2952,6 +2980,7 @@ function updateReadouts() {
       if (t) {
         set('speed', t.speed.toFixed(3));
         set('height', t.height.toFixed(3));
+        set('dist', (t.dist || 0).toFixed(3));   // U-READ：累计路程（标量,非位移）
         set('mass', t.mass.toFixed(2));
         set('momentum', t.momentum.toFixed(3));
         set('keTrans', t.keTrans.toFixed(3));
@@ -3490,7 +3519,7 @@ function tick() {
   }
   const _tPhys = performance.now();
   viewport.tickZoom();            // PL-42 平滑缩放收敛（在 controls.update 前，阻尼不冲突）
-  viewport.controls.update();     // 阻尼收敛期持续触发 change→脏（render 内不再重复调用）
+  if (!viewport.updateFly()) viewport.controls.update();   // 漫游态接管相机；阻尼收敛期持续触发 change→脏
   viewport.tickFocus();
   viewport.tickPose();
   if (viewport._focusAnim || viewport._poseAnim || (juice && juice.needsFrame())) viewport.markDirty();
@@ -6206,6 +6235,7 @@ window.MECH = {
   },
   state: () => ({ mode, paused, simT: runtime.simT, timeScale: effectiveTimeScale(), timeScaleBase: timeScale, autoBPT, bptEase: +_bptEase.toFixed(2), bptMsLeft: Math.max(0, _bptUntil - performance.now()) | 0, hitMsLeft: Math.max(0, _hitUntil - performance.now()) | 0, count: doc.entities.length, fixedH: FIXED_H }),
   telemetry: (id) => runtime.telemetry(id || selectedId),
+  stepOnce: () => stepOnce(),   // 诊断通道（p46 逐步采样用）
   accel: (id) => runtime.accels.get(id || selectedId) || null,
   collisions: () => [...runtime.collisions],
   agentState: () => ({
