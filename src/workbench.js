@@ -14,7 +14,7 @@ import { createMaterials } from './materials.js';
 import { normalizeParse, planToOverrides, ballOnRamp } from './engine/parse-schema.js';
 import { explainRun } from './engine/explain.js';
 import { auditStatic, auditMotion, summarize, rampGeomFromParams, patchBrief } from './engine/agent-verify.js';
-import { renderThumb, preloadEnv as preloadThumbEnv } from './engine/thumbs.js';
+import { renderThumb } from './engine/thumbs.js';
 import { PerfMon } from './perfmon.js';
 import { SoundEngine } from './sound.js';
 import { JuiceFX } from './engine/juice.js';
@@ -1512,8 +1512,6 @@ function bindUI() {
   }, { passive: false });
 
   renderCatalog();
-  // 缩略图环境贴图（UI 审计 U2）：就绪后重渲目录，金属件（球/圆柱等）不再黑对黑
-  preloadThumbEnv(M).then((ok) => { if (ok) renderCatalog(); }).catch(() => {});
   refreshHistoryButtons();
 }
 

@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
-import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
+import { createEnvironment } from '../materials.js';
 
 const ACCENT = 0xd9a441;
 
@@ -884,18 +884,10 @@ export class Viewport {
     }, { passive: false, capture: true });
     this.controls = controls;
 
-    // 环境：HDRI 失败降级 RoomEnvironment（材质复用 materials.js，光照环境必须先就绪）
-    try {
-      const tex = await new HDRLoader().loadAsync('./assets/hdri/studio_1k.hdr');
-      tex.mapping = THREE.EquirectangularReflectionMapping;
-      scene.environment = tex;
-    } catch (e) {
-      console.warn('[viewport] HDRI 缺失，降级 RoomEnvironment', e);
-      const { RoomEnvironment } = await import('three/addons/environments/RoomEnvironment.js');
-      const pmrem = new THREE.PMREMGenerator(renderer);
-      scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-    }
-    scene.environmentIntensity = 0.55;
+    // 环境：程序化环境球（materials.createEnvironment，与三灯位同源——网图 HDRI 的摄影棚
+    // 在场景里不存在，金属反射两张皮；环境与光照必须同源）
+    scene.environment = createEnvironment(renderer);
+    scene.environmentIntensity = 0.9;
 
     const key = new THREE.DirectionalLight(0xfff1dd, 2.0);
     key.position.set(4.5, 7.5, 3.5);

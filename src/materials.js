@@ -85,6 +85,46 @@ function rubberNoiseTexture() {
   return new THREE.CanvasTexture(c); // 线性色彩空间
 }
 
+// 程序化环境球（用户实锤：铬球反射的是网图 HDRI 摄影棚——柔光箱/白反光板/暗房间在场景里
+// 都不存在，两张皮）。env 内容按主视口真实三灯位生成：主光暖柔光箱 (4.5,7.5,3.5)、
+// 冷灰补光 (-5,3.5,-4)、冷色轮廓条 (-3.5,5.5,-5.5)、石墨地面微回弹、0x0b0c0e 暗幕。
+// 金属/清漆反射的都是「场景里真存在的光」，主视口与缩略图共用同一份。
+let sharedEnv = null;
+export function createEnvironment(renderer) {
+  if (sharedEnv) return sharedEnv;
+  const env = new THREE.Scene();
+  env.background = new THREE.Color(0x0b0c0e);
+  const panel = (w, h, color, intensity, pos) => {
+    const m = new THREE.Mesh(
+      new THREE.PlaneGeometry(w, h),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(intensity), side: THREE.DoubleSide })
+    );
+    m.position.set(...pos);
+    m.lookAt(0, 0, 0);
+    env.add(m);
+    return m;
+  };
+  // 面板刻意大而亮：金属的可读性=大源柔光占比（暗幕全包围时铬球会黑成塑料）
+  panel(5.0, 3.5, 0xfff1dd, 6.0, [4.5, 7.5, 3.5]);   // 主柔光箱（与 key 光同位同色）
+  panel(4.0, 3.0, 0xbcccdd, 1.5, [-5, 3.5, -4]);     // 冷灰补光板
+  panel(6.0, 1.5, 0x8ab0d0, 2.5, [-3.5, 5.5, -5.5]); // 冷色轮廓长条
+  panel(3.0, 4.0, 0xfff1dd, 1.2, [-4, 2.5, 3.5]);    // 前左反光板：暗侧给一条高光，球面不断黑
+  { // 石墨地面回弹：反射下半球不至于死黑
+    const g = new THREE.Mesh(new THREE.PlaneGeometry(12, 12),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(0x23262b).multiplyScalar(2.5) }));
+    g.rotation.x = Math.PI / 2; g.position.y = -3; env.add(g);
+  }
+  { // 暗摄影棚底衬：全向深灰包裹——金属基反射=深灰而非死黑（黑漆化），高光贴片仍由柔光箱主导
+    const shell = new THREE.Mesh(new THREE.SphereGeometry(30, 24, 16),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(0x1d2026).multiplyScalar(5.0), side: THREE.BackSide }));
+    env.add(shell);
+  }
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  sharedEnv = pmrem.fromScene(env, 0.04).texture;
+  pmrem.dispose();
+  return sharedEnv;
+}
+
 // 单例缓存（MAT-68）：registry.celestial 的环 mesh 需跨模块复用这里的 saturnRing；
 // workbench/legacy 各自 await 一次，重复调用幂等返回同一份（材质全 app 生命周期只读共享）
 let shared = null;
