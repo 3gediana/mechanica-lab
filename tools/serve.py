@@ -11,7 +11,9 @@ ROOT = Path(__file__).resolve().parent.parent
 STEP_URL = "https://api.stepfun.com/step_plan/v1/chat/completions"
 STEP_MODEL = "step-5-preview"
 MAX_BODY = 8 * 1024 * 1024          # 8MB 图片上限
-CALL_TIMEOUT = 90                    # 单次解析超时 s
+CALL_TIMEOUT = 90                    # 代理兜底尝试超时 s
+DIRECT_TIMEOUT = 70                  # 直连尝试超时 s（健康推理实测 44~60s；死路由快速转兜底，
+                                      # 直连+兜底最坏 160s < 客户端 170s abort——客户端拿到可重试 502 而非干等）
 
 PARSE_PROMPT = """你是大学物理题解析器。看图中的物理题，输出严格 JSON（不要 markdown 代码块，不要解释文字），schema：
 {
@@ -31,6 +33,7 @@ PARSE_PROMPT = """你是大学物理题解析器。看图中的物理题，输�
  "keyPoints": ["题目关键点（关键位置/时刻/事件），没有则空数组"],
  "environment": "环境条件短语（如：光滑水平面、不计空气阻力），没有则空字符串",
  "unknowns": ["图中未给出的量（不要编造数值）"],
+ "teaching": [{"moment":"教学触发时机（枚举）：release=释放/启动瞬间|contact=碰撞/接触/绳绷紧|highest=最高点/折返点|lowest=最低点|ground=落地/触底|end=收尾总结", "title":"要点名（≤10字）", "formula":"此刻对应的公式（纯文本，如 a=(m1-m2)g/(m1+m2)）", "note":"此刻该看什么（≤30字，给学生的话）"}],
  "uncertain": ["题图未明示、你按惯例处理但需用户确认的内容，没有则空数组"],
  "joint": {"from": 实体索引, "to": 实体索引, "axis": [1,0,0], "limits": [0.15, 1.05], "anchor1": [0,0.14,0], "anchor2": [0,0,0]},
  "attaches": [{"type":"spring","from":实体索引,"to":实体索引,"stiffness":数值N/m,"restLength":数值m,"damping":数值}],
@@ -43,6 +46,7 @@ PARSE_PROMPT = """你是大学物理题解析器。看图中的物理题，输�
 - 复摆/铰链摆（kind 填 hinge）：摆杆写 box（given.length=杆长），悬点/锚点写 box 或 ground（given.position=锚点坐标）。
 - 抛体题：单个 sphere，given.velocity=[vx,vy,0]；抛出点写 given.position（缺省 [0,0.6,0]，沙盘自动补地面），离地高度明显时务必写 position 的 y。
 - 混合搭建里用户要求"删除/去掉/拿走"某对象：把对象名或类型写进 removals（如 ["小球"]），不要假装它不存在。
+- teaching ≤4 条：按这道题真正的教学关键点给（公式/易错点/此刻看点），moment 必须从枚举里选；不确定的时机宁可不给，没有就空数组。
 输出纪律（不要在思考过程里起草完整 JSON，直接给最终结果）：所有数值必须是 JSON 数字（不要字符串、不要带单位）；实体不超过 16 个，无关实体一律不列；确需舍弃实体时保留与 observations 直接相关的，被舍弃的写进 unknowns 说明。
 示例二（弹簧题，注意 attaches）：{"questionType":"弹簧振子","kind":"spring","goal":"求周期","gravity":null,"entities":[{"type":"box","name":"墙","given":{"fixed":1,"position":[-1,0.3,0]},"confidence":0.95},{"type":"sphere","name":"小球","given":{"mass":1},"confidence":0.9}],"attaches":[{"type":"spring","from":0,"to":1,"stiffness":20,"restLength":0.8}],"observations":["周期"],"anchorPoints":[],"keyPoints":[],"environment":"光滑水平面","unknowns":[],"uncertain":[],"joint":null,"assumptions":[],"confidence":0.9}
 示例三（天体圆轨道题）：{"questionType":"卫星圆轨道","kind":"astro","goal":"求轨道周期","gravity":null,"entities":[{"type":"celestial","name":"地球","given":{"mass":5.97e24,"position":[0,0,0]},"confidence":0.95},{"type":"celestial","name":"卫星","given":{"mass":100,"position":[4e7,0,0],"velocity":[0,0,3074]},"confidence":0.9}],"observations":["周期"],"anchorPoints":[],"keyPoints":[],"environment":"","unknowns":[],"uncertain":[],"joint":null,"assumptions":[],"confidence":0.9,"G":6.67e-11}
@@ -133,7 +137,7 @@ def _open_step(req):
     避免重复计费。"""
     direct = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
-        return direct.open(req, timeout=CALL_TIMEOUT)
+        return direct.open(req, timeout=DIRECT_TIMEOUT)
     except urllib.error.HTTPError:
         raise
     except (urllib.error.URLError, TimeoutError, OSError):

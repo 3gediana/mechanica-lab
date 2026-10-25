@@ -44,6 +44,16 @@ const RANGES = {
   sx: [1, 20], sz: [0.4, 8],                    // 波浪路面长宽（ground 也可复用）
 };
 
+// teaching.moment 中文/近义归一（R6-033 教学讲解）：模型枚举+中文近义都收，未识别时机丢弃不猜
+const MOMENT_MAP = {
+  release: 'release', 释放: 'release', 启动: 'release', 开始: 'release', 出发: 'release',
+  contact: 'contact', 碰撞: 'contact', 接触: 'contact', 相撞: 'contact', 撞击: 'contact', 绷紧: 'contact', 挂上: 'contact',
+  highest: 'highest', 最高点: 'highest', 最高: 'highest', 顶点: 'highest', 折返: 'highest',
+  lowest: 'lowest', 最低点: 'lowest', 最低: 'lowest',
+  ground: 'ground', 落地: 'ground', 触底: 'ground', 着地: 'ground',
+  end: 'end', 收尾: 'end', 结束: 'end', 总结: 'end',
+};
+
 // given 键别名归一（AG-527）：模型偶发输出 mu/μ→friction、v0→velocity、m→mass、theta→angleDeg
 const GIVEN_KEY_ALIAS = {
   mu: 'friction', 'μ': 'friction', 摩擦系数: 'friction', 摩擦因数: 'friction',
@@ -240,6 +250,7 @@ export function normalizeParse(raw) {
     joint,
     entities,                                        // 保留 given 供 UI 标来源
     observations: strs(raw.observations),
+    teaching: normTeaching(raw.teaching),          // R6-033 教学讲解：关键事件 tips（模型拆题产物）
     anchorPoints: strs(raw.anchorPoints),            // 固定点（支撑/悬挂/铰接点描述；Goal 七）
     environment: str(raw.environment, ''),           // 环境条件（光滑水平面/不计空气阻力…）
     keyPoints: strs(raw.keyPoints),                  // 题目关键点（关键位置/时刻/事件）
@@ -296,6 +307,32 @@ export function normalizeParse(raw) {
 
 function str(v, d) { return typeof v === 'string' && v.trim() ? v.trim().slice(0, 80) : d; }
 function strs(v) { return Array.isArray(v) ? v.filter((x) => typeof x === 'string').map((s) => s.slice(0, 120)).slice(0, 8) : []; }
+
+// teaching 数组规范化（R6-033）：moment 归一枚举（未识别丢弃）、文案限长、≤4 条；
+// formula 允许空（有的要点是「看什么」而非公式）
+function normTeaching(v) {
+  if (!Array.isArray(v)) return [];
+  const out = [];
+  for (const t of v) {
+    if (!t || typeof t !== 'object') continue;
+    // moment 是自由短语（模型实测输出「碰撞瞬间/释放瞬间」类）：先精确后包含匹配
+    const raw0 = String(t.moment ?? '').trim();
+    let moment = MOMENT_MAP[raw0] || MOMENT_MAP[raw0.toLowerCase()];
+    if (!moment) {
+      const hit = Object.keys(MOMENT_MAP).find((k) => k.length >= 2 && raw0.includes(k));
+      moment = hit ? MOMENT_MAP[hit] : null;
+    }
+    if (!moment) continue;
+    const title = str(t.title, '');
+    const formula = str(t.formula, '').slice(0, 60);
+    const note = str(t.note, '').slice(0, 60);
+    if (!title && !formula && !note) continue;
+    if (out.some((x) => x.moment === moment)) continue;   // 同时机去重，先到先得
+    out.push({ moment, title: title.slice(0, 16), formula, note });
+    if (out.length >= 4) break;
+  }
+  return out;
+}
 function clamp01(v) { const n = Number(v); return Number.isFinite(n) ? Math.min(Math.max(n, 0), 1) : null; }
 
 // ---------- 铰链复摆布局：锚点基座 + 刚性杆（近锚端对齐锚点，初始摆角 1.2 rad） ----------

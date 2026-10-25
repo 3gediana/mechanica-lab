@@ -27,7 +27,9 @@ const ok = (name, cond, detail = '') => {
 try {
   const page = await (await browser.newContext({ viewport: { width: 1600, height: 900 }, acceptDownloads: true })).newPage();
   const errors = [];
-  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  // 502 资源行=R6-030 自愈链的重试噪声（首枪 502→parseWithRetry 自动补一枪→成功），
+  // 流程级断言已证链路成功，不计错误；其余 console error 照计
+  page.on('console', (m) => { if (m.type() === 'error' && !/Failed to load resource.*50[234]/.test(m.text())) errors.push(m.text()); });
   page.on('pageerror', (e) => errors.push(String(e)));
 
   await page.goto(BASE, { waitUntil: 'domcontentloaded' });
@@ -64,7 +66,7 @@ try {
     }
     return stageText();
   };
-  const parsed = await waitStage(['待确认', '出错'], 200000);
+  const parsed = await waitStage(['待确认', '出错'], 380000);
   ok('题图视觉解析成功（待确认）', (await parsed).includes('待确认'), await parsed);
 
   // 评审 → 建场（vivid 分批）。自查很快时「已建场」badge 可能只闪现 <250ms 就翻到
@@ -94,7 +96,8 @@ try {
   ok('结构：2 个悬挂动体', hang.length === 2, `n=${hang.length}`);
   ok('质量合规 {3,2}kg', masses.length === 2 && Math.abs(masses[0] - 3) < 0.05 && Math.abs(masses[1] - 2) < 0.05, `masses=${masses}`);
 
-  // 运行中采样前 1.0s 匀加速段（重球降/轻球升/斜率≈a）；运行已在建场后立即触发
+  // 采样（模拟时钟）：教学慢放（R6-033）会拉长 wall 时间——合规回归必须对 simT 做；
+  // 跑到 simT≥6.6s 让 end tip（收尾公式）也进录像
   await page.waitForTimeout(250);                       // 越过启动瞬态
   const series = await page.evaluate(async () => {
     const ents = window.MECH.entities();
@@ -102,35 +105,50 @@ try {
       .filter(({ e, b }) => (e.type === 'sphere' || e.type === 'box') && b && b.body && b.entity.physics.body !== 'fixed');
     const rows = [];
     const t0 = performance.now();
-    for (let i = 0; i <= 7; i++) {                      // 7×160ms ≈ 1.0s
-      const row = { t: (performance.now() - t0) / 1000, v: [], y: [] };
+    while (performance.now() - t0 < 25000) {
+      const st = window.MECH.state();
+      const row = { simT: st.simT, v: [], y: [] };
       for (const { b } of items) {
         const lv = b.body.linvel();
         row.v.push(+lv.y.toFixed(4));
         row.y.push(+b.mesh.position.y.toFixed(4));
       }
       rows.push(row);
-      if (i < 7) await new Promise((r) => setTimeout(r, 160));
+      if (st.simT >= 6.6) break;
+      await new Promise((r) => setTimeout(r, 150));
     }
     return { rows, items: items.map(({ e }) => ({ name: e.name, type: e.type })) };
   });
-  // 页内顺序与质量排序无关：末帧 vy 更负者为重球（阿特伍德重球侧加速下降）
-  const vFirst = series.rows[0].v, vLast = series.rows[series.rows.length - 1].v;
-  const iHeavy = vFirst.length === 2 ? (vLast[0] < vLast[1] ? 0 : 1) : -1;
+  // 末帧 vy 更负者为重球（阿特伍德重球侧加速下降）；回归取干净窗口 simT∈[0.25,1.15]
+  const rows = series.rows.filter((r) => Number.isFinite(r.simT) && r.v.length === 2);
+  if (!rows.length) {
+    console.error('采样空窗现场：', JSON.stringify(series.items), '| rows=', series.rows.length,
+      JSON.stringify(series.rows.slice(0, 3)), '| struct=', JSON.stringify(struct.map((e) => `${e.type}(${e.mass},${e.fixed})`)));
+    throw new Error('采样空窗');
+  }
+  const vLast = rows[rows.length - 1].v;
+  const iHeavy = vLast[0] < vLast[1] ? 0 : 1;
   const iLight = iHeavy === 0 ? 1 : 0;
+  const win = rows.filter((r) => r.simT >= 0.25 && r.simT <= 1.15);
   const slope = (idx) => {
-    const n = series.rows.length;
-    const xs = series.rows.map((r) => r.t), ys = series.rows.map((r) => r.v[idx]);
+    const n = win.length;
+    if (n < 3) return NaN;
+    const xs = win.map((r) => r.simT), ys = win.map((r) => r.v[idx]);
     const mx = xs.reduce((a, b) => a + b, 0) / n, my = ys.reduce((a, b) => a + b, 0) / n;
     let num = 0, den = 0;
     for (let i = 0; i < n; i++) { num += (xs[i] - mx) * (ys[i] - my); den += (xs[i] - mx) ** 2; }
     return den ? num / den : NaN;
   };
   const aH = slope(iHeavy), aL = slope(iLight);
-  const dyH = series.rows[series.rows.length - 1].y[iHeavy] - series.rows[0].y[iHeavy];
+  const dyH = rows[rows.length - 1].y[iHeavy] - rows[0].y[iHeavy];
   ok('重球加速下降（a∈[−2.4,−1.55]）', Number.isFinite(aH) && aH <= -1.55 && aH >= -2.4, `aHeavy=${aH && aH.toFixed(3)} (理论 −${A_THEORY})`);
   ok('轻球反向上升（|aH+aL|<0.4）', Number.isFinite(aL) && Math.abs(aH + aL) < 0.4, `aLight=${aL && aL.toFixed(3)}`);
-  ok('重球位移为负（下降）', dyH < -0.2, `dy=${dyH && dyH.toFixed(3)}m / 采样窗（headless 渲染慢时窗长可超 1s，加速判据以上面回归斜率为准）`);
+  ok('重球位移为负（下降）', dyH < -0.2, `dy=${dyH && dyH.toFixed(3)}m（全程含慢放段）`);
+
+  // 教学讲解（R6-033）：模型拆题 teaching → 关键事件触发（软断言：给了就至少讲一条）
+  const teach = await page.evaluate(() => window.MECH.teachState());
+  ok('教学讲解装载并触发（模型拆题）', teach.armed > 0 ? teach.fired >= 1 : true,
+    `armed=${teach.armed} fired=${teach.fired} [${teach.items.map((i) => i.moment + (i.fired ? '✓' : '')).join(',')}]`);
 
   await page.screenshot({ path: SHOT });
   await page.waitForTimeout(1200);                      // 静帧收尾进片

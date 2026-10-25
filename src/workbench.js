@@ -788,12 +788,119 @@ function maybeHitstop(strength) {
   _hitUntil = now + 60;
 }
 
+// ============ 教学讲解（R6-033）：模型拆题→关键事件 tips→场景内卡片+自动慢放 ============
+// plan.teaching = 模型按题给的关键教学点（moment 枚举/title/formula/note，normalizeParse 已归一）。
+// 事件检测：release=运行首帧、contact/ground=撞击对（ground=对家是地面）、highest/lowest=vy 变号、
+// end=模拟 6s 自动收尾或用户暂停时。触发即：场景内卡片（3D 锚定跟随，textContent 防注入）+
+// 录屏字幕（recorder.caption，公式进视频）+ 0.25x 教学慢放 1.6s（复用子弹时间缓动，不碰用户档位）。
+let teachArmed = [];            // [{moment,title,formula,note,fired}]
+let teachVyPrev = new Map();    // id -> prev vy（变号检测）
+let teachSeen = false;          // release 已发（每轮 play 重置）
+let teachT = 0;                 // 模拟秒累计（end 自动收尾）
+const TEACH_END_AT = 6;
+function armTeaching(plan) {
+  teachArmed = (plan && Array.isArray(plan.teaching)) ? plan.teaching.map((t) => ({ ...t, fired: false })) : [];
+  teachVyPrev = new Map();
+  teachSeen = false;
+  teachT = 0;
+  renderTeachList();
+  if (teachArmed.length) toast(`已装载教学讲解 ${teachArmed.length} 条：关键事件将自动慢放并显示公式`);
+}
+function resetTeachRun() {
+  teachSeen = false;
+  teachT = 0;
+  teachVyPrev.clear();
+  for (const t of teachArmed) t.fired = false;
+  renderTeachList();
+}
+function teachSlowmo() {
+  const now = performance.now();
+  _bptLast = now;                  // 与自动子弹时间共享冷却（防双触发打架）
+  _bptUntil = now + 1600;
+  const chip = $('modeChip');
+  if (chip && !chip.textContent.includes('教学慢放')) chip.textContent += ' · 教学慢放';
+  if (chip) chip.classList.add('grab');
+}
+function fireTeach(moment, pos) {
+  const tip = teachArmed.find((x) => x.moment === moment && !x.fired);
+  if (!tip) return;
+  tip.fired = true;
+  showTeachCard(tip, pos);
+  recorder.caption(`💡 ${tip.title}${tip.formula ? '｜' + tip.formula : ''}`);   // 公式进录屏字幕
+  teachSlowmo();
+  renderTeachList();
+}
+function showTeachCard(tip, pos) {
+  const card = $('teachCard');
+  if (!card) return;
+  card.innerHTML = '<div class="tt-title"></div>'
+    + (tip.formula ? '<div class="tt-formula"></div>' : '')
+    + (tip.note ? '<div class="tt-note"></div>' : '');
+  card.querySelector('.tt-title').textContent = '💡 ' + (tip.title || tip.moment);   // 模型产物全走 textContent
+  if (tip.formula) card.querySelector('.tt-formula').textContent = tip.formula;
+  if (tip.note) card.querySelector('.tt-note').textContent = tip.note;
+  card.classList.remove('on');
+  void card.offsetWidth;   // 重启入场动画
+  card.classList.add('on');
+  card._pos = pos || null;
+  card._until = performance.now() + 4200;
+}
+function updateTeachCardPos(card) {
+  if (!card._pos) { card.style.left = 'auto'; card.style.right = '20px'; card.style.top = '84px'; return; }
+  card.style.right = 'auto';
+  const v = new THREE.Vector3(...card._pos).project(viewport.camera);
+  const x = (v.x * 0.5 + 0.5) * innerWidth, y = (-v.y * 0.5 + 0.5) * innerHeight;
+  card.style.left = Math.max(12, Math.min(innerWidth - 360, x + 16)) + 'px';
+  card.style.top = Math.max(60, Math.min(innerHeight - 150, y - 24)) + 'px';
+}
+function tickTeach(dtSim) {
+  const card = $('teachCard');
+  if (card) {
+    if (card._until && performance.now() > card._until) { card.classList.remove('on'); card._until = 0; }
+    if (card.classList.contains('on')) updateTeachCardPos(card);
+  }
+  if (mode !== 'run' || paused || !teachArmed.length) return;
+  teachT += dtSim;
+  if (!teachSeen) { teachSeen = true; fireTeach('release', null); }
+  if (teachT >= TEACH_END_AT) fireTeach('end', null);
+  for (const [id, b] of runtime.binds) {
+    if (!b.body || !b.entity || !b.entity.physics || b.entity.physics.body !== 'dynamic') { teachVyPrev.delete(id); continue; }
+    const vy = b.body.linvel().y;
+    const prev = teachVyPrev.get(id);
+    teachVyPrev.set(id, vy);
+    if (prev == null) continue;
+    const p = b.mesh.position;
+    if (prev > 0.06 && vy <= 0) fireTeach('highest', [p.x, p.y + 0.3, p.z]);
+    else if (prev < -0.06 && vy >= 0) fireTeach('lowest', [p.x, p.y + 0.3, p.z]);
+  }
+}
+const TEACH_MOMENT_CN = { release: '释放', contact: '接触/碰撞', highest: '最高/折返', lowest: '最低点', ground: '落地', end: '收尾' };
+function renderTeachList() {
+  const el = $('teachList');
+  if (!el) return;
+  if (!teachArmed.length) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  el.innerHTML = '<div class="grp-h">教学要点（关键事件自动慢放）</div>'
+    + teachArmed.map((t) => `<div class="teach-item${t.fired ? ' done' : ''}"><span class="ti-m"></span><span class="ti-t"></span>${t.formula ? '<code class="ti-f"></code>' : ''}</div>`).join('');
+  el.querySelectorAll('.teach-item').forEach((div, i) => {
+    const t = teachArmed[i];
+    div.querySelector('.ti-m').textContent = (TEACH_MOMENT_CN[t.moment] || t.moment) + (t.fired ? ' ✓' : '');
+    div.querySelector('.ti-t').textContent = t.title;
+    const f = div.querySelector('.ti-f');
+    if (f) f.textContent = t.formula;
+  });
+}
+function teachState() {
+  return { armed: teachArmed.length, fired: teachArmed.filter((t) => t.fired).length, items: teachArmed.map((t) => ({ moment: t.moment, title: t.title, fired: t.fired })) };
+}
+
 // ============ 模拟控制 ============
 function play() {
   if (mode === 'run' && !paused) return;
   if (doc.entities.length === 0) toast('空场景：无实体可演化，从目录添加组件后再运行');
   if (mode === 'edit') perfMon.reset();   // 运行态重开预算采样窗（启动尖峰不污染）
   mode = 'run'; paused = false;
+  resetTeachRun();      // R6-033：每轮运行重置教学触发（重放再讲一遍）
   viewport.setGizmoEnabled(false);
   $('stage').classList.add('running');   // 运行态抓手光标：可抓动态体的暗示
   sound.ui('play');
@@ -802,6 +909,7 @@ function play() {
 function pauseToggle() {
   if (mode !== 'run') return;
   paused = !paused;
+  if (paused && teachArmed.length) fireTeach('end', null);   // R6-033：用户暂停=讲收尾总结
   // 暂停态 gizmo 摆姿势（PL-14）：暂停=接管摆位，继续=交还运行
   viewport.setGizmoEnabled(paused && !!selectedId);
   sound.ui('pause');
@@ -3518,7 +3626,9 @@ function tick() {
   } else if (mode === 'run' && !paused) {
     // FX-581/531：子弹时间缓动 + 伪景深（雾近距收紧 + vignette 随缓动进出）
     {
-      const bptTarget = (autoBPT && mode === 'run' && !paused && performance.now() < _bptUntil) ? 1 : 0;
+      // R6-033：_bptUntil 只由 maybeBulletTime(autoBPT 自查) 与 teachSlowmo 两处合法置位，
+      // 此处不再叠 autoBPT 门（否则教学慢放开了窗口缓动也进不去）；mode/paused 守卫保留
+      const bptTarget = (mode === 'run' && !paused && performance.now() < _bptUntil) ? 1 : 0;
       _bptEase += (bptTarget - _bptEase) * Math.min(1, rawDtRaw * 6);   // 时间驱动（帧率无关）：~0.5s 收敛，弱机低 fps 也来得及停稳 0.25x
       if (bptTarget === 0 && _bptEase < 0.01) _bptEase = 0;
       else if (bptTarget === 1 && _bptEase > 0.99) _bptEase = 1;
@@ -3748,6 +3858,11 @@ function tick() {
           juice.spawnImpact(s.pos, strength, timbre);
           if (strength > 0.08) juice.spawnRing(s.pos, strength, normal);
         }
+        // R6-033 教学讲解：撞击事件喂 tips（对家是地面=落地时机，否则接触/碰撞时机）
+        if (strength > 0.03) {
+          const onGround = (ba && ba.entity && ba.entity.type === 'ground') || (bb && bb.entity && bb.entity.type === 'ground');
+          fireTeach(onGround ? 'ground' : 'contact', s.pos);
+        }
         maybeBulletTime(strength);
         maybeHitstop(strength);
       }
@@ -3773,6 +3888,7 @@ function tick() {
   viewport.render();     // tickFocus/tickPose 已在脏门槛前统一调用（FEEL-96/PER-83：此前双调致动画 2 倍速收敛）
   if (shook) juice.revertShake(viewport.camera);
   recorder.frame();      // R6-F5 内置录屏帧合成（未录制时零开销早退）
+  tickTeach(rawDt * effectiveTimeScale());   // R6-033 教学讲解：卡片跟随+事件检测（dt 用模拟秒）
   const _tRnd = performance.now();
   if (juice) {
     juice.tick(rawDt);
@@ -4889,6 +5005,7 @@ async function applyAgentPlan(opts = {}) {
     applyAgentBusy = false;
     if (ap) { ap.disabled = false; setBtnText('btnApplyParse', '创建场景实体'); }
   }
+  armTeaching(agentPlan);   // R6-033：拆题教学点装填（无 teaching 字段=静默无 tips）
 }
 
 async function applyAgentPlanGuarded(opts = {}) {
@@ -5601,6 +5718,7 @@ function resetAgentPanel() {
   agentImageCanvas = null;
   agentCrop = null;
   agentStandalone = false;   // R6-F5：通道语义随面板复位
+  armTeaching(null);   // R6-033：场景切换摘掉教学 tips
   cropMode = false;
   agentPlan = null;
   agentPlanApplied = false;
@@ -6292,6 +6410,7 @@ window.MECH = {
     return cloneDoc(doc.meta);
   },
   state: () => ({ mode, paused, simT: runtime.simT, timeScale: effectiveTimeScale(), timeScaleBase: timeScale, autoBPT, bptEase: +_bptEase.toFixed(2), bptMsLeft: Math.max(0, _bptUntil - performance.now()) | 0, hitMsLeft: Math.max(0, _hitUntil - performance.now()) | 0, count: doc.entities.length, fixedH: FIXED_H }),
+  teachState: () => teachState(),   // R6-033：教学讲解状态（p47/p48 断言用）
   telemetry: (id) => runtime.telemetry(id || selectedId),
   stepOnce: () => stepOnce(),   // 诊断通道（p46 逐步采样用）
   accel: (id) => runtime.accels.get(id || selectedId) || null,

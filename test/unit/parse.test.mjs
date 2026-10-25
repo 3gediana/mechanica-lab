@@ -417,3 +417,24 @@ test('R6-F5：atwood 绳 attach 去重 + 悬挂高度跟随滑轮', () => {
   const b2 = ov2.find((o) => o.type === 'sphere');
   assert.ok(Math.abs(b2.transform.pos[1] - (-1.0)) < 1e-6, `低滑轮 y=1 → 球挂其下 y=-1.0，实测 ${b2.transform.pos[1]}`);
 });
+
+// R6-033：teaching 教学点归一——moment 中文/英文枚举都收、未识别丢弃、≤4 条、同时机去重
+test('R6-033：teaching moment 归一与限量', () => {
+  const raw = { questionType: 'x', entities: [{ type: 'sphere', given: { mass: 1 } }], teaching: [
+    { moment: '释放', title: '出发', formula: 'v0=0', note: '看初速' },
+    { moment: 'release', title: '重复时机', formula: '', note: '' },
+    { moment: '碰撞瞬间', title: '撞', formula: 'p=mv', note: '' },
+    { moment: '不存在的时机', title: '丢', formula: '', note: '' },
+    { moment: '落地', title: 'g1', formula: '', note: '' },
+    { moment: '最高点', title: 'h2', formula: '', note: '' },
+  ] };
+  const t = normalizeParse(raw).plan.teaching;
+  assert.equal(t.length, 4, '≤4 且未知时机丢弃');
+  assert.equal(t[0].moment, 'release');
+  assert.equal(t[0].title, '出发');            // 同时机先到先得（中文归一后与第二条同枚举）
+  assert.equal(t[1].moment, 'contact');        // 碰撞瞬间→contact
+  assert.ok(!t.some((x) => x.moment === '丢' || x.title === '丢'), '未识别时机丢弃');
+  assert.ok(t.some((x) => x.moment === 'ground' && x.title === 'g1'));
+  const none = normalizeParse({ entities: [{ type: 'sphere', given: {} }] }).plan.teaching;
+  assert.deepEqual(none, [], '无 teaching 字段=空数组');
+});
