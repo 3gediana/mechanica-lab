@@ -913,6 +913,78 @@ function teachState() {
   return { armed: teachArmed.length, fired: teachArmed.filter((t) => t.fired).length, items: teachArmed.map((t) => ({ moment: t.moment, title: t.title, fired: t.fired })) };
 }
 
+// ============ 阿特伍德跨绳可视化（R6-036）：约束是纯 PBD 投影（无绳实体） ============
+// 用户实锤「绳子完全看不到」：孤轮+双球在视觉上就是悬浮。每对 pulley+双 onPulley 球画：
+// 两侧竖直绳段（球顶→轮缘切点，随球每帧更新）+ 轮顶半弧（跨接两切点）。直接读 doc——
+// 编辑态/运行态/预置 atwood 一并可见；无滑轮场景零开销早退。
+let _atwGroup = null;
+let _atwSig = '';
+const _atwRopeMat = new THREE.MeshStandardMaterial({ color: 0xd8d2c4, roughness: 0.9, metalness: 0 });
+function syncAtwoodRopes() {
+  const pulleys = doc.entities.filter((e) => e.type === 'pulley');
+  if (!pulleys.length) {
+    if (_atwGroup) { viewport.scene.remove(_atwGroup); _disposeAtw(); }
+    return;
+  }
+  const groups = [];
+  for (const pl of pulleys) {
+    const balls = doc.entities.filter((e) => e.physics && e.physics.onPulley === pl.id && e.physics.body === 'dynamic');
+    if (balls.length !== 2) continue;
+    groups.push({ pl, balls });
+  }
+  const sig = groups.map((g) => g.pl.id + ':' + g.balls.map((b) => b.id).join('+')).join('|');
+  if (sig !== _atwSig) {
+    if (_atwGroup) { viewport.scene.remove(_atwGroup); _disposeAtw(); }
+    if (!groups.length) return;
+    _atwGroup = new THREE.Group();
+    _atwGroup.name = 'atwoodRopes';
+    for (let gi = 0; gi < groups.length; gi++) {
+      const g = groups[gi];
+      const sides = [0, 1].map(() => {
+        const m = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 1, 8), _atwRopeMat);
+        m.name = 'atwoodRope';
+        _atwGroup.add(m);
+        return m;
+      });
+      const arc = new THREE.Mesh(new THREE.TorusGeometry(1, 0.012, 8, 32, Math.PI), _atwRopeMat);
+      arc.name = 'atwoodRope';
+      _atwGroup.add(arc);
+      _atwGroup.userData.pairs = [...(_atwGroup.userData.pairs || []), { pl: g.pl, balls: g.balls, sides, arc }];
+    }
+    viewport.scene.add(_atwGroup);
+    _atwSig = sig;
+  }
+  if (!_atwGroup) return;
+  for (const pair of _atwGroup.userData.pairs) {
+    const [bl, br] = pair.balls;
+    const bindOf = (e) => runtime.binds.get(e.id);
+    const bL = bindOf(bl), bR = bindOf(br);
+    if (!bL || !bR || !bL.mesh || !bR.mesh) continue;
+    const p = pair.pl.transform.pos, R = pair.pl.params.radius || 0.3;
+    const yTopL = bL.mesh.position.y + (bl.params.radius ?? 0.12);
+    const yTopR = bR.mesh.position.y + (br.params.radius ?? 0.12);
+    const xL = bl.transform.pos[0], xR = br.transform.pos[0], z = p[2];
+    // 两侧竖直段：球顶 → (轨x, 滑轮心高)；球越过切点时夹高度下限防翻转
+    const seg = (mesh, x, yTop) => {
+      const h = Math.max(0.03, p[1] - yTop);
+      mesh.scale.set(1, h, 1);
+      mesh.position.set(x, yTop + h / 2, z);
+    };
+    seg(pair.sides[0], xL, yTopL);
+    seg(pair.sides[1], xR, yTopR);
+    // 轮顶半弧：半径=两侧轨距的较大者（对称布置下与切点严丝合缝）
+    const arcR = Math.max(Math.abs(xL - p[0]), Math.abs(xR - p[0]), 0.05);
+    pair.arc.scale.set(arcR, arcR, 1);
+    pair.arc.position.set(p[0], p[1], z);
+  }
+}
+function _disposeAtw() {
+  if (!_atwGroup) return;
+  _atwGroup.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+  _atwGroup = null;
+  _atwSig = '';
+}
+
 // ============ 模拟控制 ============
 function play() {
   if (mode === 'run' && !paused) return;
@@ -3907,6 +3979,7 @@ function tick() {
   viewport.render();     // tickFocus/tickPose 已在脏门槛前统一调用（FEEL-96/PER-83：此前双调致动画 2 倍速收敛）
   if (shook) juice.revertShake(viewport.camera);
   recorder.frame();      // R6-F5 内置录屏帧合成（未录制时零开销早退）
+  syncAtwoodRopes();     // R6-036 阿特伍德跨绳可视化（无滑轮场景零开销早退）
   tickTeach(rawDt * effectiveTimeScale());   // R6-033 教学讲解：卡片跟随+事件检测（dt 用模拟秒）
   const _tRnd = performance.now();
   if (juice) {

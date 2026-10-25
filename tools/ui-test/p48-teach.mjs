@@ -38,6 +38,14 @@ try {
   ok('teaching 装填 3 条', pre.armed === 3, JSON.stringify(pre.items));
   ok('教学清单可见', await page.evaluate(() => document.getElementById('teachList').style.display) === 'block');
 
+  // R6-036：跨绳可视化——两侧绳段+轮顶半弧（编辑态即可见，用户实锤「绳子完全看不到」）
+  const ropes = await page.evaluate(() => {
+    let n = 0;
+    window.MECH.__vp.scene.traverse((o) => { if (o.name === 'atwoodRope') n++; });
+    return n;
+  });
+  ok('跨绳可视化在场（绳段×2+轮顶弧）', ropes >= 3, `atwoodRope 网格数=${ropes}`);
+
   await page.evaluate(() => document.getElementById('btnPlay').click());
 
   // release=首帧：1s 内卡片上屏 + 公式在场 + 教学慢放窗口开启（FX-581 缓动 ~0.4s 后 effective 才到底）

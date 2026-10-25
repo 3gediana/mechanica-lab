@@ -532,6 +532,17 @@ export const COMPONENTS = {
       { key: 'radius', label: '半径', unit: 'm', min: 0.1, max: 1.5, step: 0.05 },
     ],
     buildGeometry: (p) => new THREE.CylinderGeometry(p.radius, p.radius, 0.08, 32),
+    // R6-036：轮面必须朝 z（跨绳在 XY 竖直平面）——裸 CylinderGeometry 轴沿 Y，渲染成
+    // 水平躺平的圆盘（用户实锤「整个场景就一块圆盘」），跨绳绳段/半弧与轮缘全对不上
+    makeMesh: (p, material) => {
+      const g = new THREE.Group();
+      const wheel = new THREE.Mesh(new THREE.CylinderGeometry(p.radius, p.radius, 0.08, 32), material);
+      wheel.rotation.x = Math.PI / 2;
+      const axle = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.22, 12), material);
+      axle.rotation.x = Math.PI / 2;
+      g.add(wheel, axle);
+      return g;
+    },
     buildCollider: () => null,   // 轮体无碰撞：跨绳球走 onPulley 导轨约束（碰撞体会挡住上升侧）
     spawnY: () => 3.0,
   },
