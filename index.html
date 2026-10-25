@@ -388,6 +388,9 @@
   #simbar button:active { transform: translateY(1px); }
   #simbar button.hot { color: var(--accent-hi); background: var(--accent-dim); box-shadow: inset 0 0 0 1px rgba(217, 164, 65, 0.32); }
   #simbar button.hot:hover { color: var(--accent-hi); background: rgba(217, 164, 65, 0.19); }
+  #simbar button.rec { color: #ff787d; background: rgba(229, 72, 77, .13); box-shadow: inset 0 0 0 1px rgba(229, 72, 77, .5); animation: recPulse 1.6s ease-in-out infinite; }   /* R6-F5 录制态：红描边呼吸（REC 语义色，不与琥珀热态混淆） */
+  #simbar button.rec:hover { color: #ff9296; background: rgba(229, 72, 77, .2); }
+  @keyframes recPulse { 50% { box-shadow: inset 0 0 0 1px rgba(229, 72, 77, .95); } }
   #simbar button.primary { padding: 0 13px; gap: 6px; }
   #simbar button:disabled { color: var(--faint); cursor: not-allowed; background: none; transform: none; }
   #simbar .ro { font-family: var(--mono); font-size: 12px; color: var(--faint); letter-spacing: .03em; white-space: nowrap; }
@@ -923,6 +926,7 @@
     <button id="btnViewSide" class="tbtn" title="侧视图">侧</button>
     <button id="btnFocus" class="tbtn" title="聚焦选中（F）">聚焦</button>
     <button id="btnFly" class="tbtn" title="自由视角漫游：WASD 平移 / Q E 升降 / 按住左键拖动转视角 / Shift 加速 / Esc 退出">漫游</button>
+    <button id="btnRec" class="tbtn" title="内置录屏：录制主视口+Agent 字幕+原题图角标为 WebM；再点一次结束并自动下载">录屏</button>
   </div>
   <div class="spacer"></div>
   <div class="tb-group"><button id="btnPerf" class="tbtn" aria-label="性能 HUD" title="性能 HUD：帧预算/分段耗时/draw calls（运行态采样，PL-50）"><svg class="ic"><use href="#i-activity"/></svg></button></div>
@@ -1236,6 +1240,7 @@
       <tr><td class="k"><span>Ctrl</span>+<span>S</span></td><td>保存到场景库（自动缩略图/标签）</td></tr>
       <tr><td class="k"><span>Ctrl</span>+<span>O</span></td><td>场景库：打开 / 改名 / 标签 / 导出</td></tr>
       <tr class="grp"><td colspan="2">Agent 与帮助</td></tr>
+      <tr><td class="k"><a href="./assets/demo/agent-demo.webm" target="_blank" rel="noopener">演示回放</a></td><td>题图→Agent 建场→验证→录屏 全流程演示录像（内置录屏生成，assets/demo/）</td></tr>
       <tr><td class="k"><span>Ctrl</span>+<span>Enter</span></td><td>Agent 文字框：解析输入的要求</td></tr>
       <tr><td class="k"><span>?</span> / <span>F1</span></td><td>打开 / 关闭本速查</td></tr>
       <tr><td class="k"><span>Esc</span></td><td>关闭浮层 / 退出框选</td></tr>

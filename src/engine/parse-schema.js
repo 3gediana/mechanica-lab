@@ -255,6 +255,16 @@ export function normalizeParse(raw) {
   }
   if (vec2Padded) plan.uncertain.push(`二维向量已按 [x,y,0] 补零升维（velocity/position/angvel 共 ${vec2Padded} 处）`);
   if (plan_entities_truncate_note) plan.uncertain.push(`实体超 16 上限，${plan_entities_truncate_note} 个已丢弃（优先保留与观察量相关的实体）`);   // AG-524
+  // R6-F5 阿特伍德双约束去重：atwoodLayout 给两悬挂体建理想滑轮约束（onPulley），模型若
+  // 再给绳 attach（两球互挂 / 各自挂到滑轮，实测两种输出都出现过）= 双倍约束互相锁死
+  // （实测 a 从 1.96 掉到 0）。atwood 布局只建滑轮+两悬挂体，附加 attach 无处安放——全丢并亮 uncertain
+  if ((plan.kind === 'atwood' || entities.some((e) => e.type === 'pulley'))
+    && entities.filter((e) => e.type === 'sphere' || e.type === 'box').length === 2) {
+    if (plan.attaches.length) {
+      plan.uncertain.push('滑轮理想约束（onPulley）已承担两侧悬绳，重复绳/簧连接已丢弃（避免双约束锁死）');
+      plan.attaches = [];
+    }
+  }
   // 越界/非数值 gravity 的显式提示（AG-10）：不再静默落默认
   if (gravityRaw != null && plan.gravity === null) {
     errors.push(`gravity 值无效（${gravityRaw}），已按默认 9.81 处理`);
@@ -343,9 +353,11 @@ function atwoodLayout(plan) {
   balls.forEach((e, i) => {
     const m = e.given.mass ?? 1;
     const x = (i === 0 ? -1 : 1) * (R + 0.05);
-    // AG-538：尊重题给 position(「m1 从高 h 处释放」类题的保真)与 velocity;仅未给时用默认 1.0/0
+    // AG-538：尊重题给 position(「m1 从高 h 处释放」类题的保真)与 velocity;仅未给时用默认。
+    // R6-F5：缺省悬挂高度跟随滑轮（官方预置同比例：滑轮 3.0 / 球 1.0，绳侧垂降 R+1.7）——
+    // 模型把滑轮低置(如 y=1)时，旧缺省 y=1.0 会把球摆到轮轴同一高度，绳穿轴几何报废
     const givenP = Array.isArray(e.given.position) ? e.given.position : null;
-    const py = givenP ? Math.min(givenP[1], plPos[1] - R - 0.15) : 1.0;
+    const py = givenP ? Math.min(givenP[1], plPos[1] - R - 0.15) : +(plPos[1] - R - 1.7).toFixed(3);
     out.push({
       type: 'sphere', name: e.name || ('球 ' + (i + 1)), source: 'agent',
       params: { radius: 0.12 },

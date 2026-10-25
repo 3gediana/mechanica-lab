@@ -5,3 +5,4 @@ tools/ui-test/w*-run.log
 tools/ui-test/realspot-raw-*.json
 tools/ui-test/last-realspot.txt
 tools/ui-test/last-run.txt
+assets/demo/*.webm

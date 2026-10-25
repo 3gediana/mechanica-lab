@@ -9,6 +9,7 @@ import {
 } from './engine/scene-doc.js';
 import { Runtime, FIXED_H, attachRegistry } from './engine/runtime.js';
 import { Viewport } from './engine/viewport.js';
+import { recorder } from './engine/recorder.js';
 import { getPreset, PRESETS, PRESET_CAMERA } from './engine/presets.js';
 import { createMaterials } from './materials.js';
 import { normalizeParse, planToOverrides, ballOnRamp } from './engine/parse-schema.js';
@@ -1381,6 +1382,23 @@ function bindUI() {
   // U-FLY 自由漫游：按钮切换，状态回写热态
   $('btnFly').onclick = () => viewport.setFlyMode(!(viewport._fly && viewport._fly.on));   // 常驻热态由 onFlyChange 管（viewPulse 的 160ms 移除会打架）
   viewport.onFlyChange = (on) => { $('btnFly').classList.toggle('hot', on); toast(on ? '漫游：WASD 平移 / Q E 升降 / 拖拽转视角 / Esc 退出' : '已回到轨道视角'); };
+  // R6-F5 内置录屏：REC 切换——主视口 + Agent 字幕 + 原题图角标 合成为 WebM 下载
+  $('btnRec').onclick = async () => {
+    if (recorder.active) {
+      const blob = await recorder.stop();
+      if (blob && blob.size > 1024) {
+        const name = recorder.saveBlob(blob);
+        toast(`录像已保存 ${name}（${(blob.size / 1048576).toFixed(1)} MB）`);
+      } else toast('录像为空（时长过短或编码不可用）', true);
+      $('btnRec').classList.remove('rec');
+      return;
+    }
+    const r = recorder.start(viewport.renderer.domElement);
+    if (!r.ok) { toast(r.reason === 'busy' ? '已在录制中' : '此浏览器不支持内置录屏（需 MediaRecorder/WebM）', true); return; }
+    recorder.caption('开始录屏');
+    $('btnRec').classList.add('rec');
+    toast('开始录屏：再点一次结束并自动下载 WebM');
+  };
   // R6-F3：B 键移除后子弹时间的 UI 入口（simbar 开关钮）
   {
     const bb = $('btnBpt');
@@ -3754,6 +3772,7 @@ function tick() {
   const shook = juice ? juice.applyShake(viewport.camera, _tOv / 1000) : false;
   viewport.render();     // tickFocus/tickPose 已在脏门槛前统一调用（FEEL-96/PER-83：此前双调致动画 2 倍速收敛）
   if (shook) juice.revertShake(viewport.camera);
+  recorder.frame();      // R6-F5 内置录屏帧合成（未录制时零开销早退）
   const _tRnd = performance.now();
   if (juice) {
     juice.tick(rawDt);
@@ -3777,6 +3796,7 @@ let agentOps = [];       // Agent 建场操作明细 [{op, target, ok}]
 let agentPlanApplied = false;   // 当前 plan 是否已建场（换场景作废依据，AG-46）
 let agentImageDataUrl = null;
 let agentPlan = null;
+let agentStandalone = false;   // R6-F5：本计划独立成题？题图/示例通道=true（建场前自清无关旧场景）；文字通道=混合搭建
 let agentCorrections = [];
 let agentChanges = [];   // 逐条接受/拒绝：待执行变更清单 [{type,idx,label,detail,skipped}]
 
@@ -4041,6 +4061,7 @@ let cropDragStart = null;
 function setAgentImageFromCanvas(cv, note = '') {
   agentImageCanvas = cv;
   agentImageDataUrl = cv.toDataURL('image/jpeg', 0.85);
+  recorder.setPip(agentImageDataUrl);   // R6-F5：原题图进录屏角标
   agentCrop = null;
   stopCamera();
   const ip = $('imgPrev');
@@ -4146,6 +4167,7 @@ function setParseStatus(msg, isErr = false, busy = false) {
   const el = $('parseStatus');
   el.textContent = (isErr ? chrBad() + ' ' : '') + msg;   // UI-561：错误加 ✗ 字形，不只靠颜色
   el.style.color = isErr ? 'var(--danger)' : 'var(--dim)';
+  recorder.caption((isErr ? '✗ ' : '') + msg);   // R6-F5：Agent 状态进录屏字幕
   parseBusy = busy;   // 解析互斥（AG-72）：图片/文字/fixture 三通道任一进行中，其余禁点（防双计费）
   $('btnParse').disabled = busy;
   $('btnParseText').disabled = busy;
@@ -4178,10 +4200,12 @@ function adoptServerParse(out) {
   return true;
 }
 
-// fetch + 100s 超时（AG-38）：浏览器默认超时远长于服务端 90s，AbortController 收口
+// fetch + 170s 超时（AG-38 收口；R6-F5 放宽）：step-5-preview 深推理实测量级 60~120s 波动，
+// 服务端最坏 = 直连 90s 超时 + 代理兜底 90s；客户端上限须高于服务端最坏，否则服务端成功
+// 响应写回已断开的 socket（白烧一次 key）
 async function fetchParse(url, body) {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 100000);
+  const timer = setTimeout(() => ctrl.abort(), 170000);
   try {
     return await fetch(url, {
       method: 'POST',
@@ -4216,7 +4240,7 @@ async function parseWithRetry(url, body, statusEl) {
   return out;
 }
 
-async function parseQuestion() {
+async function parseQuestion(retried = false) {
   if (parseBusy) return;
   if (!agentImageDataUrl) { setParseStatus('请先上传或拍照题目图片', true); return; }
   const send = croppedCanvas();
@@ -4227,11 +4251,18 @@ async function parseQuestion() {
   try {
     const out = await parseWithRetry('/api/parse-question', { image: dataUrl }, true);
     if (!out.ok) { setAgentStage('error', '解析失败'); setParseStatus('解析失败：' + out.error + '（可重试，或用下方示例数据）', true); return; }
+    agentStandalone = true;   // R6-F5：题图=独立成题（应用层语义，建场前自清无关旧场景）
     adoptServerParse(out);
   } catch (e) {
+    // R6-F5 超时自愈：深推理模型实测量级 60~170s 波动，偶发超时自动补一枪（只补一次，不空转烧 key）
+    if (e && e.name === 'AbortError' && !retried) {
+      parseBusy = false;
+      setParseStatus('解析超时（170s），上游偶发慢——自动重试一次…', false, true);
+      return parseQuestion(true);
+    }
     setAgentStage('error', '解析失败');   // AG-93：异常路径也要流转阶段，徽标不得停在「解析中」
     setParseStatus(e && e.name === 'AbortError'
-      ? '解析超时（100s），可重试或换一张更清晰的图'
+      ? '解析超时（170s，已自动重试过一次），可再手动重试或换一张更清晰的图'
       : '解析请求失败（网络或服务不可用）。可重试，或用下方示例数据', true);
   }
 }
@@ -4409,7 +4440,7 @@ function bindVoiceInput() {
 }
 
 // 文字要求通道（混合搭建）：文字 → 真实模型解析 → 与图片通道同一条评审/预览/建场链路
-async function parseTextQuestion() {
+async function parseTextQuestion(retried = false) {
   if (parseBusy) return;
   const text = $('agentTextReq').value.trim();
   if (!text) { setParseStatus('请先输入题目或搭建要求的文字', true); return; }
@@ -4419,14 +4450,20 @@ async function parseTextQuestion() {
   try {
     const out = await parseWithRetry('/api/parse-text', { text }, true);
     if (!out.ok) { setAgentStage('error', '解析失败'); setParseStatus('解析失败：' + out.error + '（可重试）', true); return; }
+    agentStandalone = false;   // R6-F5：文字通道=混合搭建语义（在当前场景上增删改，不整场重建）
     if (adoptServerParse(out)) {
       $('parseSrcBadge').textContent = 'step-5-preview·文字';
       setParseStatus(`文字要求解析完成（真实模型，耗时 ${((performance.now() - t0) / 1000).toFixed(1)}s）。请检查/修正/勾选变更后再创建实体`);
     }
   } catch (e) {
+    if (e && e.name === 'AbortError' && !retried) {   // R6-F5 超时自愈（与题图通道同口径）
+      parseBusy = false;
+      setParseStatus('解析超时（170s），上游偶发慢——自动重试一次…', false, true);
+      return parseTextQuestion(true);
+    }
     setAgentStage('error', '解析失败');   // AG-93：同上
     setParseStatus(e && e.name === 'AbortError'
-      ? '解析超时（100s），可重试或精简要求描述'
+      ? '解析超时（170s，已自动重试过一次），可再手动重试或精简要求描述'
       : '解析请求失败（网络或服务不可用）。可重试', true);
   }
 }
@@ -4455,6 +4492,7 @@ function adoptParse(raw, statusLine) {
   const n = normalizeParse(raw);
   if (!n.ok) { setParseStatus('解析结果无效：' + n.errors.join('; '), true); return null; }
   agentPlan = n.plan;
+  agentStandalone = true;   // R6-F5：示例数据=完整独立题目（与题图通道同语义）
   agentPlan.autoTags = deriveTagsFromPlan(n.plan);   // Agent 自动标签
   agentPlanApplied = false;
   agentCorrections = [];
@@ -4855,6 +4893,24 @@ async function applyAgentPlan(opts = {}) {
 
 async function applyAgentPlanGuarded(opts = {}) {
   const M = window.MECH;
+  // R6-F5 独立成题自清场（agent 鲁棒性）：题图/示例通道的解析是「一道完整的题」，
+  // 旧场景（上次演示/预置残留）与新题无关——混合复用会把新体埋进旧装置（实测：
+  // 3kg 挂球落在残留斜坡上动弹不得，a 从 1.96 掉到 0.15）。建场前自清，独立成
+  // 一条历史可单独撤销；文字通道（"往这个场景加…"混合搭建语义）不触发。
+  if (agentStandalone && doc.entities.length > 0) {
+    const names = doc.entities.map((e) => e.name || e.type).join('、');
+    beginHistoryBatch();
+    try {
+      for (const ent of [...doc.entities]) docRemove(doc, ent.id);
+      selectedIds = [];
+      selectedId = null;
+      rebuildAll();
+    } finally {
+      endHistoryBatch('Agent 清空旧场景（独立成题）');
+    }
+    agentOps.push({ op: '清空旧场景', target: names, ok: true });
+    toast('题图独立成题：已清空旧场景后重建');
+  }
   const wasEmpty = doc.entities.length === 0;
   if (!opts.vivid) {
     let batchReused = 0, batchCreated = 0, batchRemoved = 0;
@@ -5541,8 +5597,10 @@ function renderAgentVerify() {
 function resetAgentPanel() {
   stopCamera();
   agentImageDataUrl = null;
+  recorder.setPip(null);   // R6-F5：摘录屏角标
   agentImageCanvas = null;
   agentCrop = null;
+  agentStandalone = false;   // R6-F5：通道语义随面板复位
   cropMode = false;
   agentPlan = null;
   agentPlanApplied = false;

@@ -124,6 +124,21 @@ def _extract_json(text):
     raise json.JSONDecodeError("no extractable JSON", text[:60], 0)
 
 
+def _open_step(req):
+    """stepfun 上游连接策略：直连优先、系统代理兜底。
+
+    api.stepfun.com 是国内域名（火山 WAF），本机系统代理(clash)常把它分流到境外出口，
+    实测被 WAF 挂连接（90s 超时→502）；直连 0.1s 即达。仅连接层错误（URLError 非
+    HTTPError）才回退代理 opener——上游 HTTP 状态（401/429/5xx）直连已可判定，不双发
+    避免重复计费。"""
+    direct = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        return direct.open(req, timeout=CALL_TIMEOUT)
+    except urllib.error.HTTPError:
+        raise
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return urllib.request.urlopen(req, timeout=CALL_TIMEOUT)
+
 def call_step_messages(messages, temperature=0.2):
     """共用请求+提取链：图片/文字通道 temperature=0.2，patch 修订通道显式传 0.05（AG-509：确定性重写）。"""
     body = json.dumps({
@@ -136,7 +151,7 @@ def call_step_messages(messages, temperature=0.2):
         "Content-Type": "application/json",
         "Authorization": "Bearer " + load_key(),
     })
-    with urllib.request.urlopen(req, timeout=CALL_TIMEOUT) as resp:
+    with _open_step(req) as resp:
         out = json.loads(resp.read().decode("utf-8"))
     msg = (out.get("choices") or [{}])[0].get("message", {})
     if os.environ.get("MECH_PARSE_DEBUG"):
@@ -151,9 +166,11 @@ def call_step_messages(messages, temperature=0.2):
         dump_path = os.path.join(tempfile.gettempdir(), "mech_step_raw.json")
         with open(dump_path, "w", encoding="utf-8") as f:
             json.dump(dump, f, ensure_ascii=False, indent=2)
-    # content 与 reasoning_content 走同一条提取链：正文直读优先，思考流启发式兜底
+    # content 与思考流走同一条提取链：正文直读优先，思考流启发式兜底。
+    # "reasoning" 与 "reasoning_content" 两种字段名都收（实测同端点不同响应两种拼写都出现，
+    # 正文空+思考流在 reasoning 键时，漏看会误判「无法解析的内容」→502）
     err = None
-    for src in (msg.get("content") or "", msg.get("reasoning_content") or ""):
+    for src in (msg.get("content") or "", msg.get("reasoning_content") or "", msg.get("reasoning") or ""):
         if not src.strip():
             continue
         try:

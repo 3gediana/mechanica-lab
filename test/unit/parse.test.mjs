@@ -393,3 +393,27 @@ test('R6-AG-525：重名实体加序号后缀', () => {
   assert.equal(new Set(names).size, 2);
   assert.ok(names.some((x) => /\(\d\)/.test(x)));
 });
+
+// R6-F5：阿特伍德双约束去重——atwoodLayout 建 onPulley 理想约束后，两悬挂体间的绳 attach
+// 必须丢弃（实测双约束把 a 从 1.96 对冲到 0.15）；悬挂高度跟随滑轮（题给低滑轮不再穿轴）
+test('R6-F5：atwood 绳 attach 去重 + 悬挂高度跟随滑轮', () => {
+  const raw = { questionType: '阿特伍德机', kind: 'atwood', entities: [
+    { type: 'pulley', given: { radius: 0.3 } },
+    { type: 'sphere', name: 'm1', given: { mass: 3 } },
+    { type: 'sphere', name: 'm2', given: { mass: 2 } }],
+    attaches: [{ type: 'rope', from: 1, to: 2, length: 1 }] };
+  const n = normalizeParse(raw);
+  assert.equal(n.ok, true);
+  assert.equal(n.plan.attaches.length, 0, '绳应被去重丢弃');
+  assert.ok(n.plan.uncertain.some((u) => u.includes('重复绳')), '去重要亮 uncertain');
+  const ov = planToOverrides(n.plan);
+  const balls = ov.filter((o) => o.type === 'sphere');
+  assert.equal(balls.length, 2);
+  assert.ok(Math.abs(balls[0].transform.pos[1] - 1.0) < 1e-6, `默认滑轮 y=3 → 球 y=1.0，实测 ${balls[0].transform.pos[1]}`);
+  const raw2 = { ...raw, entities: [
+    { type: 'pulley', given: { radius: 0.3, position: [0, 1, 0] } },
+    ...raw.entities.slice(1)] };
+  const ov2 = planToOverrides(normalizeParse(raw2).plan);
+  const b2 = ov2.find((o) => o.type === 'sphere');
+  assert.ok(Math.abs(b2.transform.pos[1] - (-1.0)) < 1e-6, `低滑轮 y=1 → 球挂其下 y=-1.0，实测 ${b2.transform.pos[1]}`);
+});
