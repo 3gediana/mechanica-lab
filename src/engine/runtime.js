@@ -609,7 +609,29 @@ export class Runtime {
     }
     this._gravStep(FIXED_H);                  // 天体（自积分）先行；Rapier 步内不含天体
     this._applyBuoyancy();                    // U-LIQ：入水物体 F=ρgV排+水阻（world.step 前施力）
-    this.world.step(this.eventQueue);         // 事件队列必须传入 step 才会被填充
+    // R6-037 隧道效应自愈：vendored Rapier 的 setCcdEnabled 实测不生效（弹丸 r=0.03~0.06
+    // v=15 全穿透、r=0.07 才命中=纯离散采样边界）。小体高速时按最坏体细分步长：
+    // 每子步位移 < 0.9×最小尺寸直径，普通场景 nSub=1 零开销。上限 8 防极端小体爆炸
+    // （r=0.01 v=30 会要 100+ 子步，宁漏不卡）。
+    let nSub = 1;
+    for (const [, bd] of this.binds) {
+      const ent = bd.entity;
+      if (!bd.body || !ent || !ent.physics || ent.physics.body !== 'dynamic' || !ent.params) continue;
+      let r = ent.params.radius;
+      if (r == null && ent.params.sx != null) r = Math.min(ent.params.sx, ent.params.sy ?? 9e9, ent.params.sz ?? 9e9) / 2;
+      if (!r || r <= 0) continue;
+      const lv = bd.body.linvel();
+      const need = Math.ceil(Math.hypot(lv.x, lv.y, lv.z) * FIXED_H / (0.9 * 2 * r));
+      if (need > nSub) nSub = Math.min(need, 8);
+    }
+    if (nSub > 1) {
+      const h0 = this.world.timestep;
+      this.world.timestep = FIXED_H / nSub;
+      for (let i = 0; i < nSub; i++) this.world.step(this.eventQueue);
+      this.world.timestep = h0;
+    } else {
+      this.world.step(this.eventQueue);       // 事件队列必须传入 step 才会被填充
+    }
     // 里程（U-READ 真路程）：Σ|Δp| 标量累计，永不为负——路程/位移之辨是初中考点，
     // 「位置坐标」显示的是位移分量可负，读数区补路程口径
     for (const [id, b] of this.binds) {

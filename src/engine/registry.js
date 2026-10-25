@@ -713,6 +713,11 @@ export const COMPONENTS = {
       // FIX_INTERNAL_EDGES：不修内边则球在 trimesh 上每帧吃鬼接触——实测能量蒸发 97%/弹跳失真（B5 实锤）
       return RAPIER.ColliderDesc.trimesh(m.verts, m.idx, RAPIER.TriMeshFlags ? RAPIER.TriMeshFlags.FIX_INTERNAL_EDGES : undefined);
     },
+    // R6-037 安全底衬：trimesh 薄壳特定入射角仍漏球（waveRoad 预置实测 2s 折返后穿面坠至
+    // −11m 出画）。顶面低于最深波谷 1cm，仅泄漏兜底——正常接触全在 trimesh 面上
+    buildExtraColliders: (RAPIER, p) => [
+      RAPIER.ColliderDesc.cuboid(p.sx / 2, 0.05, p.sz / 2).setTranslation(0, -(p.waveAmp * 1.35 + 0.06), 0),
+    ],
     spawnY: () => 0.02,
     computed: (p) => [
       { key: 'maxSlopeDeg', label: '最大坡度', value: +(Math.atan(2 * Math.PI * p.waveAmp / p.waveLen * 1.35) * 180 / Math.PI).toFixed(1), unit: '°' },

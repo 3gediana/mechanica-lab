@@ -336,6 +336,7 @@ function endHistoryBatch(label) {
 function rebuildAll(rerenderInspector = true) {
   if (rebuildSuspend > 0) return;   // 批内挂起：suspendRebuild 收尾统一重建一次
   runtime.rebuild(doc);
+  viewport._groundIds = new Set(doc.entities.filter((e) => e.type === 'ground').map((e) => e.id));   // R6-037：超大地面不主导自动取景（focusScene 切片用）
   if (juice) juice.clear();         // 瞬时 FX 与计数随场景换代清空
   viewport.markDirty();   // 全量重建=视觉必然变化（静止帧跳渲染必须感知）
   rotationBase = null; momentumBase = null; astroBase = null;   // 基准必须在初始态重采
@@ -859,24 +860,25 @@ function tickTeach(dtSim) {
     if (card._until && performance.now() > card._until) { card.classList.remove('on'); card._until = 0; }
     if (card.classList.contains('on')) updateTeachCardPos(card);
   }
-  if (mode !== 'run' || paused || !teachArmed.length) return;
-  teachT += dtSim;
-  if (!teachSeen) { teachSeen = true; fireTeach('release', null); }
-  if (teachT >= TEACH_END_AT) fireTeach('end', null);
-  for (const [id, b] of runtime.binds) {
-    if (!b.body || !b.entity || !b.entity.physics || b.entity.physics.body !== 'dynamic') { teachVyPrev.delete(id); continue; }
-    const vy = b.body.linvel().y;
-    const prev = teachVyPrev.get(id);
-    teachVyPrev.set(id, vy);
-    if (prev == null) continue;
-    const p = b.mesh.position;
-    if (prev > 0.06 && vy <= 0) fireTeach('highest', [p.x, p.y + 0.3, p.z]);
-    else if (prev < -0.06 && vy >= 0) fireTeach('lowest', [p.x, p.y + 0.3, p.z]);
+  if (mode !== 'run' || paused) return;
+  if (teachArmed.length) {
+    teachT += dtSim;
+    if (!teachSeen) { teachSeen = true; fireTeach('release', null); }
+    if (teachT >= TEACH_END_AT) fireTeach('end', null);
+    for (const [id, b] of runtime.binds) {
+      if (!b.body || !b.entity || !b.entity.physics || b.entity.physics.body !== 'dynamic') { teachVyPrev.delete(id); continue; }
+      const vy = b.body.linvel().y;
+      const prev = teachVyPrev.get(id);
+      teachVyPrev.set(id, vy);
+      if (prev == null) continue;
+      const p = b.mesh.position;
+      if (prev > 0.06 && vy <= 0) fireTeach('highest', [p.x, p.y + 0.3, p.z]);
+      else if (prev < -0.06 && vy >= 0) fireTeach('lowest', [p.x, p.y + 0.3, p.z]);
+    }
   }
-  // 滑轮行程到端自动定格（R6-035，教学场景）：上升侧抵达滑轮下缘=绳行程用尽。理想约束
-  // 不会停——继续跑对体会绕/穿轮飞出画框（实测 6.6s 下降 44m，录像里就是「球突然飞起来」）。
-  // 定格即触发收尾讲解（pauseToggle 内 fireTeach('end')），画面停在终态而非荒诞穿轮。
-  // 只对装填了教学点的 Agent 场景生效：预置/普通场景行为不变（p11/p13 口径零扰动）。
+  // 滑轮行程到端自动定格（R6-035/037，全场景）：上升侧抵达滑轮下缘=绳行程用尽。理想约束
+  // 不会停——继续跑对体会绕/穿轮飞出画框（用户实锤「球突然飞起来」；预置 atwood 同病：
+  // 3s 时两球已 ±25m 出画）。定格即触发收尾讲解（若装填），画面停在终态。
   for (const [, b] of runtime.binds) {
     const e = b.entity;
     const op = e && e.physics && e.physics.onPulley;
@@ -983,6 +985,28 @@ function _disposeAtw() {
   _atwGroup.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
   _atwGroup = null;
   _atwSig = '';
+}
+
+// R6-037 阿特伍德运动包络：重球终点 = 2·y0 − 滑轮下缘（行程到端定格处）——终点在初始
+// 包围盒之外，按初始取景必出画。返回并入 focusScene 的额外包围盒（无配对返回 null）。
+function atwoodEnvelopeBox() {
+  let box = null;
+  for (const pl of doc.entities) {
+    if (pl.type !== 'pulley') continue;
+    const balls = doc.entities.filter((e) => e.physics && e.physics.onPulley === pl.id && e.physics.body === 'dynamic');
+    if (balls.length !== 2) continue;
+    const R = pl.params.radius || 0.3, py = pl.transform.pos[1];
+    const bot = py - R;
+    const ys = balls.map((b) => b.transform.pos[1]);
+    const yEnd = 2 * Math.min(...ys) - bot;   // 行程对称：重球终点
+    const xs = balls.map((b) => b.transform.pos[0]).concat(pl.transform.pos[0]);
+    const b2 = new THREE.Box3(
+      new THREE.Vector3(Math.min(...xs) - 0.3, yEnd - 0.25, -0.5),
+      new THREE.Vector3(Math.max(...xs) + 0.3, py + R + 0.25, 0.5),
+    );
+    box = box ? box.union(b2) : b2;
+  }
+  return box;
 }
 
 // ============ 模拟控制 ============
@@ -5420,7 +5444,7 @@ function agentPostPass(M, created, rejected, mixed, nReused, nCreated, matches) 
   // 建场成功即开放"运行并生成解释"（解释体在运行后填充）。
   // 不再强制跳检查器页签（UI-48）：操作明细就在本页签，跳走会打断核对；相机自动取景代偿（UI-49）
   $('explainGrp').style.display = 'block';
-  viewport.focusScene();
+  viewport.focusScene(atwoodEnvelopeBox());   // R6-037：并入绳行程运动包络（终点出画实锤）
   // AG-V 自查上下文：本次解析建出的实体/连接快照（探针与静核只对 Agent 建的东西负责，
   // 用户手动加的对象不进核对范围）；rewrites 在混合复用时取建场后的实际位姿
   agentVerifyCtx = {
@@ -6478,10 +6502,11 @@ window.MECH = {
   undo, redo,
   loadPreset: (id) => {
     applyDoc(getPreset(id), '载入预置');
-    // PL-43 预置相机位：显式 pose 优先，无则自动取景（全实体包围盒平滑飞行）
+    // PL-43 预置相机位：显式 pose 优先，无则自动取景（全实体包围盒平滑飞行）；
+    // 阿特伍德类并入绳行程运动包络（R6-037：终点出画实锤）
     const cam = PRESET_CAMERA[id];
     if (cam) viewport.flyToPose(cam.pos, cam.target);
-    else viewport.focusScene();
+    else viewport.focusScene(atwoodEnvelopeBox());
   },
   // 重力用正数表示向下的模长（存 doc.gravity 为负）；越界抛错由调用方处理
   setG: (g) => {

@@ -132,14 +132,33 @@ export class Viewport {
     }
   }
 
-  focusScene() {
+  focusScene(extraBox) {
     const box = new THREE.Box3();
     let any = false;
+    // R6-037 超大地面不主导取景：抛体/伽利略类场景 30m 地面会把相机拉到 40m 外，
+    // 主角球缩成芝麻（视觉闸门 C 探针实锤亮像素≈0）。地面只并入动作区 ±2.5m 切片
+    const grounds = [];
     for (const m of this.scene.children) {
       if (!m.userData || !m.userData.entityId || !m.visible) continue;
+      const eid = m.userData.entityId;
+      const isGround = this._groundIds && this._groundIds.has(eid);
+      if (isGround) { grounds.push(m); continue; }
       box.expandByObject(m);
       any = true;
     }
+    if (any && grounds.length) {
+      for (const g of grounds) {
+        const gb = new THREE.Box3().setFromObject(g);
+        const sl = new THREE.Box3(
+          new THREE.Vector3(Math.max(gb.min.x, box.min.x - 2.5), gb.min.y, Math.max(gb.min.z, box.min.z - 2.5)),
+          new THREE.Vector3(Math.min(gb.max.x, box.max.x + 2.5), gb.max.y, Math.min(gb.max.z, box.max.z + 2.5)),
+        );
+        if (sl.max.x > sl.min.x && sl.max.z > sl.min.z) box.union(sl);
+      }
+    }
+    // R6-037 运动包络：调用方可传额外包围盒并入（阿特伍德绳行程端这类「终点在初始
+    // 包围盒之外」的场景——按初始包围盒取景，球到终点即出画，用户实锤类）
+    if (extraBox) { box.union(extraBox); any = true; }
     if (!any) return;
     const center = box.getCenter(new THREE.Vector3());
     const size = Math.max(box.getSize(new THREE.Vector3()).length(), 1);

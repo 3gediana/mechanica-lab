@@ -68,7 +68,7 @@ const EXPECT = {
   frictionLock: { count: 3, types: { ground: 1, ramp: 1, box: 1 } },
   blockOnBlock: { count: 3, types: { ground: 1, box: 2 } },
   weightless: { count: 3, types: { ground: 1, sphere: 1, forceSensor: 1 } },
-  curvedRace: { count: 5, types: { ground: 1, ramp: 1, curvedRamp: 1, sphere: 2 } },
+  curvedRace: { count: 6, types: { ground: 1, box: 1, ramp: 1, curvedRamp: 1, sphere: 2 } },   // R6-037 +缓冲挡板
   bowlOsc: { count: 2, types: { bowl: 1, sphere: 1 } },
   waveRoad: { count: 2, types: { waveFloor: 1, sphere: 1 } },
   sinkfloat: { count: 3, types: { tank: 1, box: 2 } },

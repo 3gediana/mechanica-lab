@@ -1482,9 +1482,18 @@ export const PRESETS = {
       const ground = createEntity('ground', {
         name: '接引地面',
         transform: { pos: [0.2, 0, 0], rot: [0, 0, 0] },
-        params: { sx: 9, sy: 0.1, sz: 6 },
+        params: { sx: 12, sy: 0.1, sz: 6 },   // R6-037：9→12+末端挡板（球 4.4m/s 滚出旧地面坠落出画实锤）
         physics: { body: 'fixed', friction: 0.5, restitution: 0.2 },
         render: { material: 'floor' },
+        source: 'preset',
+      }, seq);
+      // R6-037 末端缓冲挡板：滚行球撞停不坠出画（撞击本身也是演示节拍）
+      const bumper = createEntity('box', {
+        name: '缓冲挡板',
+        transform: { pos: [6.0, 0.15, 0], rot: [0, 0, 0] },
+        params: { sx: 0.2, sy: 0.3, sz: 6 },
+        physics: { body: 'fixed', friction: 0.1, restitution: 0.3 },
+        render: { material: 'steelDark' },
         source: 'preset',
       }, seq);
       const ramp = createEntity('ramp', {
@@ -1531,7 +1540,7 @@ export const PRESETS = {
         measured: true,
         source: 'preset',
       }, seq);
-      doc.entities.push(ground, ramp, cr, ballA, ballB);
+      doc.entities.push(ground, bumper, ramp, cr, ballA, ballB);
       doc.meta.assumptions = [
         '验证目标：两球落差相同（0.825 m），坡底末速理论同为 √(2gH)=4.03 m/s——末速与滑道形状无关',
         '耗时不同：凹曲面顶端陡（33°）先获得速度，先到坡底；直坡（26.6°）匀加速后到',
@@ -1629,16 +1638,17 @@ export const PRESET_CAMERA = {
   incline: { pos: [2.6, 1.9, 3.6], target: [0.5, 0.6, 0] },
   momentum: { pos: [1.8, 1.5, 4.0], target: [0, 0.4, 0] },
   momentum2d: { pos: [2.4, 2.0, 3.4], target: [0.2, 0.4, 0] },
-  projectile: { pos: [2.8, 1.8, 4.4], target: [1.4, 0.8, 0] },
+  projectile: { pos: [4.6, 2.6, 10.2], target: [4.3, 1.1, 0] },   // R6-037：覆盖弹道+落点（落点 x≈8.8 实测）
   pendulum: { pos: [1.6, 1.8, 3.2], target: [0, 1.0, 0] },
-  atwood: { pos: [2.0, 3.0, 4.2], target: [0, 2.0, 0] },
+  atwood: null,   // R6-037：改走 focusScene+运动包络（终点出画实锤；authored 位不含行程端）
   newtonCradle: { pos: [1.4, 1.6, 3.0], target: [0, 0.8, 0] },
   ballChain: { pos: [2.2, 1.8, 3.6], target: [0, 0.6, 0] },
   collLab: { pos: [2.0, 1.7, 4.0], target: [0, 0.6, 0] },
   classic: { pos: [2.6, 2.0, 4.2], target: [0.4, 0.8, 0] },
   threeBody: { pos: [0, 10, 18], target: [0, 0, 0] },
   binaryStar: { pos: [0, 8, 14], target: [0, 0, 0] },
-  curvedRace: { pos: [0.2, 2.2, 6.8], target: [0, 0.5, 0] },
+  curvedRace: { pos: [1.4, 2.8, 11.0], target: [1.2, 0.7, 0] },   // R6-037：覆盖滑道+滚行全径（末速 4.4m/s 滚出旧镜头实锤）
   bowlOsc: { pos: [1.3, 1.3, 2.8], target: [0, 0.25, 0] },
+  rangeAngles: { pos: [3.2, 2.2, 10.5], target: [3.2, 0.9, 0] },   // R6-037：覆盖三角度落点+滚动（落地后滚出镜头实锤）
   waveRoad: { pos: [0, 2.6, 5.4], target: [0, 0.12, 0] },
 };
