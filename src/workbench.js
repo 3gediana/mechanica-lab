@@ -873,6 +873,25 @@ function tickTeach(dtSim) {
     if (prev > 0.06 && vy <= 0) fireTeach('highest', [p.x, p.y + 0.3, p.z]);
     else if (prev < -0.06 && vy >= 0) fireTeach('lowest', [p.x, p.y + 0.3, p.z]);
   }
+  // 滑轮行程到端自动定格（R6-035，教学场景）：上升侧抵达滑轮下缘=绳行程用尽。理想约束
+  // 不会停——继续跑对体会绕/穿轮飞出画框（实测 6.6s 下降 44m，录像里就是「球突然飞起来」）。
+  // 定格即触发收尾讲解（pauseToggle 内 fireTeach('end')），画面停在终态而非荒诞穿轮。
+  // 只对装填了教学点的 Agent 场景生效：预置/普通场景行为不变（p11/p13 口径零扰动）。
+  for (const [, b] of runtime.binds) {
+    const e = b.entity;
+    const op = e && e.physics && e.physics.onPulley;
+    if (!op || op === '__PULLEY__' || !b.body || e.physics.body !== 'dynamic') continue;
+    const pe = getEntity(doc, op);
+    if (!pe || pe.type !== 'pulley') continue;
+    const py = pe.transform.pos[1], R = (pe.params && pe.params.radius) || 0.3;
+    const r = (e.params && e.params.radius) || 0.12;
+    const y = b.body.translation().y;
+    if (y + r >= py - R - 0.03) {
+      pauseToggle();
+      toast('悬挂体到达滑轮：绳行程到端，演示定格');
+      break;
+    }
+  }
 }
 const TEACH_MOMENT_CN = { release: '释放', contact: '接触/碰撞', highest: '最高/折返', lowest: '最低点', ground: '落地', end: '收尾' };
 function renderTeachList() {
@@ -4364,6 +4383,12 @@ async function parseQuestion(retried = false) {
   const tag = agentCrop ? `（仅选区 ${send.width}x${send.height}）` : '';
   setAgentStage('parsing', '正在解析题目…');
   setParseStatus(`正在解析${tag}（step-5-preview 视觉模型）…`, false, true);
+  // R6-035：深推理实测 44~170s 波动，静态文案看着像死机——每 10s 报经过秒数（同时进录屏字幕）
+  const tParse = performance.now();
+  const parseTicker = setInterval(() => {
+    const s = Math.round((performance.now() - tParse) / 1000);
+    setParseStatus(`正在解析${tag}（step-5-preview 视觉模型，已 ${s}s——深推理偶发 1~2 分钟，请稍候）…`, false, true);
+  }, 10000);
   try {
     const out = await parseWithRetry('/api/parse-question', { image: dataUrl }, true);
     if (!out.ok) { setAgentStage('error', '解析失败'); setParseStatus('解析失败：' + out.error + '（可重试，或用下方示例数据）', true); return; }
@@ -4380,6 +4405,8 @@ async function parseQuestion(retried = false) {
     setParseStatus(e && e.name === 'AbortError'
       ? '解析超时（170s，已自动重试过一次），可再手动重试或换一张更清晰的图'
       : '解析请求失败（网络或服务不可用）。可重试，或用下方示例数据', true);
+  } finally {
+    clearInterval(parseTicker);
   }
 }
 

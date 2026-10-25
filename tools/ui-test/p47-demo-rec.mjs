@@ -107,14 +107,15 @@ try {
     const t0 = performance.now();
     while (performance.now() - t0 < 25000) {
       const st = window.MECH.state();
-      const row = { simT: st.simT, v: [], y: [] };
+      const row = { simT: st.simT, paused: st.paused, v: [], y: [] };
       for (const { b } of items) {
         const lv = b.body.linvel();
         row.v.push(+lv.y.toFixed(4));
         row.y.push(+b.mesh.position.y.toFixed(4));
       }
       rows.push(row);
-      if (st.simT >= 6.6) break;
+      // R6-035：悬挂体到滑轮自动定格（教学场景）——定格后 end tip 卡在终态帧上，再留 2.5s 进片
+      if (st.simT >= 6.6 || st.paused) { await new Promise((r) => setTimeout(r, 2500)); break; }
       await new Promise((r) => setTimeout(r, 150));
     }
     return { rows, items: items.map(({ e }) => ({ name: e.name, type: e.type })) };
