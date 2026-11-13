@@ -136,9 +136,9 @@ try {
   // ==== F. 录制/回放（动量预置）
   await page.selectOption('#selPreset', 'momentum');
   await page.waitForTimeout(300);
-  await page.click('#btnRec');    // 录制（自动开始演化）
+  await page.click('#btnFrameRec');    // 帧序列录制（自动开始演化）——R7 重复 ID 修复后归位（旧测点 btnRec 被顶栏 WebM 录屏占据）
   await page.waitForTimeout(2500);
-  await page.click('#btnRec');    // 停止录制
+  await page.click('#btnFrameRec');    // 停止录制
   await page.waitForTimeout(200);
   const fr = await page.evaluate(() => window.MECH.frameState());
   check('帧录制', fr.frames > 10 && !fr.recording, JSON.stringify({ frames: fr.frames }));

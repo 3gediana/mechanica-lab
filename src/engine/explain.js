@@ -438,9 +438,10 @@ function explainSpringPair(plan, doc, multiTrails) {
   const m1 = b1.physics.mass, m2 = b2.physics.mass;
   const pTotal = m1 * v1 + m2 * v2;
   const eKf = 0.5 * m1 * v1 * v1 + 0.5 * m2 * v2 * v2;
-  // 压缩量:原长−释放时安装距（端点距,取初始轨迹点）
+  // 压缩量:原长−释放时安装距（RP-FIX 表面口径：中心距扣两端半径=线圈实长）
   const pA = trailsArr[0][0], pB = trailsArr[1][0];
-  const install = Math.hypot(pB[0] - pA[0], (pB[1] - pA[1]), pB[2] - pA[2]);
+  const pad = (b1.params.radius ?? 0) + (b2.params.radius ?? 0);
+  const install = Math.hypot(pB[0] - pA[0], (pB[1] - pA[1]), pB[2] - pA[2]) - pad;
   const rest = spring.params.restLength ?? install;
   const x0 = Math.max(0, rest - install);
   const ePs = 0.5 * (spring.params.stiffness ?? 20) * x0 * x0;
@@ -477,12 +478,15 @@ function explainHookeStatic(plan, doc, series, ball, spring) {
   const otherId = spring.attach.find((id) => id !== ball.id);
   const anchor = doc.entities.find((e) => e.id === otherId);
   const yA = anchor ? anchor.transform.pos[1] : y0 + (spring.params.restLength ?? 1);
+  // RP-FIX：表面口径 pad = 球半径 + 锚沿竖直支撑投影（盒取 sy/2，球取半径）
+  const padHooke = (ball.params.radius ?? 0.12)
+    + (anchor && anchor.params ? (anchor.params.sy != null ? anchor.params.sy / 2 : (anchor.params.radius ?? 0)) : 0);
   // 末 25% 时间的球心均值 → 伸长 = 锚点到球心距离 − 原长
   const n = series.length;
   if (n < 40) return { supported: false, reason: '静态伸长需要更长观测（砝码稳定）', summary: telemetrySummary(series) };
   const tail = series.slice(Math.floor(n * 0.75));
   const yMean = tail.reduce((a, p) => a + p.pos[1], 0) / tail.length;
-  const lenFinal = yA - yMean;                       // 平衡弹簧长(锚→球心,砝码视作质点)
+  const lenFinal = yA - yMean - padHooke;            // 平衡弹簧实长（表面口径，=线圈渲染长）
   const xMeasured = lenFinal - (spring.params.restLength ?? 1);
   const errPct = Math.abs(xMeasured - xTheory) / xTheory * 100;
   const pass = errPct < 5;

@@ -8,8 +8,11 @@ import http.server, sys, json, os, urllib.request, urllib.error, re, tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-STEP_URL = "https://api.stepfun.com/step_plan/v1/chat/completions"
-STEP_MODEL = "step-5-preview"
+# 模型通道（2026-11-10 切换）：stepfun step-5-preview 额度耗尽 → 15730 付费池 apigoto
+# 提供商的 deepseek-flash（多模态，OpenAI Chat Completions 协议，额度充沛）。
+# 数值口径（temperature/max_tokens/提取链/错误语义）与 step-5-preview 时代完全一致。
+STEP_URL = "https://api.apigoto.com/v1/chat/completions"
+STEP_MODEL = "deepseek-flash"
 MAX_BODY = 8 * 1024 * 1024          # 8MB 图片上限
 CALL_TIMEOUT = 90                    # 代理兜底尝试超时 s
 DIRECT_TIMEOUT = 70                  # 直连尝试超时 s（健康推理实测 44~60s；死路由快速转兜底，
@@ -33,7 +36,7 @@ PARSE_PROMPT = """你是大学物理题解析器。看图中的物理题，输�
  "keyPoints": ["题目关键点（关键位置/时刻/事件），没有则空数组"],
  "environment": "环境条件短语（如：光滑水平面、不计空气阻力），没有则空字符串",
  "unknowns": ["图中未给出的量（不要编造数值）"],
- "teaching": [{"moment":"教学触发时机（枚举）：release=释放/启动瞬间|contact=碰撞/接触/绳绷紧|highest=最高点/折返点|lowest=最低点|ground=落地/触底|end=收尾总结", "title":"要点名（≤10字）", "formula":"此刻对应的公式（纯文本，如 a=(m1-m2)g/(m1+m2)）", "note":"此刻该看什么（≤30字，给学生的话）"}],
+ "teaching": [{"moment":"教学触发时机（枚举）：release=释放/启动瞬间|contact=碰撞/接触/绳绷紧|highest=最高点/折返点|lowest=最低点|ground=落地/触底|turn=水平折返/弹簧最大伸缩|leaveSurface=脱离接触抛离|equilibrium=达到平衡静止|sinkFloat=浮沉平衡|end=收尾总结", "title":"要点名（≤10字）", "formula":"此刻对应的公式（纯文本，如 a=(m1-m2)g/(m1+m2)）", "note":"此刻该看什么（≤30字，给学生的话）"}],
  "uncertain": ["题图未明示、你按惯例处理但需用户确认的内容，没有则空数组"],
  "joint": {"from": 实体索引, "to": 实体索引, "axis": [1,0,0], "limits": [0.15, 1.05], "anchor1": [0,0.14,0], "anchor2": [0,0,0]},
  "attaches": [{"type":"spring","from":实体索引,"to":实体索引,"stiffness":数值N/m,"restLength":数值m,"damping":数值}],

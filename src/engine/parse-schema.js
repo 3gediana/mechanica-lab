@@ -52,6 +52,11 @@ const MOMENT_MAP = {
   lowest: 'lowest', 最低点: 'lowest', 最低: 'lowest',
   ground: 'ground', 落地: 'ground', 触底: 'ground', 着地: 'ground',
   end: 'end', 收尾: 'end', 结束: 'end', 总结: 'end',
+  // R7-A3 扩展（2026-11）：水平折返/抛离/平衡/浮沉——各配确定性检测器（teaching.js）
+  turn: 'turn', 水平折返: 'turn', 折返点: 'turn', 回折: 'turn', 最大伸缩: 'turn',
+  leaveSurface: 'leaveSurface', 抛离: 'leaveSurface', 离面: 'leaveSurface', 脱离接触: 'leaveSurface',
+  equilibrium: 'equilibrium', 平衡: 'equilibrium', 静止: 'equilibrium', 稳定: 'equilibrium',
+  sinkFloat: 'sinkFloat', 浮沉: 'sinkFloat', 悬浮: 'sinkFloat', 漂浮: 'sinkFloat',
 };
 
 // given 键别名归一（AG-527）：模型偶发输出 mu/μ→friction、v0→velocity、m→mass、theta→angleDeg
@@ -91,6 +96,7 @@ export function normalizeParse(raw) {
   const droppedNotes = [];
   let plan_entities_truncate_note = 0;   // AG-524 超限丢弃计数
   let vec2Padded = 0;                                       // 二维向量补零升维计数（AG-97）
+  const scalarVelNotes = [];                                // 标量速率升维声明（R7：静默丢=球不动）
   for (const e of (Array.isArray(raw.entities) ? raw.entities : [])) {
     const type = TYPE_MAP[e.type];
     if (!type) { errors.push(`未知实体类型: ${e.type}（已跳过）`); continue; }
@@ -107,6 +113,11 @@ export function normalizeParse(raw) {
         if (arr && arr.length === 3 && vecOk(arr, 200)) given.velocity = arr;
         else if (arr && arr.length === 2 && vecOk([arr[0], arr[1], 0], 200)) { given.velocity = [arr[0], arr[1], 0]; vec2Padded++; }
         else if (arr && arr.length === 3) errors.push(`${e.name || type}.velocity 量级超限（${Math.hypot(...arr).toFixed(0)} m/s > 200），已忽略——请核对单位`);
+        else if (typeof v === 'number' && Number.isFinite(v) && Math.abs(v) <= 200) {
+          // 标量速率（模型常见「初速度 3」）：按 +x 水平方向升维并显式声明假设——静默丢=球不动
+          given.velocity = [v, 0, 0];
+          scalarVelNotes.push(`${e.name || type}.velocity 只给了大小 ${v} m/s，已按水平 +x 方向理解`);
+        }
         continue;
       }
       if (k === 'position') {
@@ -259,6 +270,11 @@ export function normalizeParse(raw) {
     assumptions: strs(raw.assumptions),
     confidence: clamp01(raw.confidence) ?? 0.5,
   };
+  // 标量速率升维假设同样透明化（评审界面可见）
+  for (const note of scalarVelNotes.slice(0, 4)) {
+    if (plan.uncertain.length >= 8) break;
+    plan.uncertain.push(note);
+  }
   // 被丢弃字段的透明化（AG-9）：进 uncertain 让用户在评审界面看见，不静默吞
   for (const note of droppedNotes) {
     if (plan.uncertain.length >= 8) break;
@@ -429,7 +445,11 @@ function springLayout(plan) {
     || (anchorPos && ballPos && anchorPos[1] - ballPos[1] >= rest * 0.8 && Math.abs(anchorPos[0] - ballPos[0]) < 0.3);
   if (isVertical) {
     const aP = anchorPos ?? [0, 3.4, 0];
-    const y0 = ballPos ? ballPos[1] : (aP[1] - rest);
+    // RP-FIX（弹簧表面口径）：推导位下移 padV（锚半厚 0.125 + 球半径）——表面距=rest，
+    // 自然长静止释放的物理与旧中心口径一致；题给球位优先不动（保真优先）
+    const rB = sphere ? (sphere.given.radius ?? 0.12) : 0.12;
+    const padV = 0.125 + rB;
+    const y0 = ballPos ? ballPos[1] : (aP[1] - rest - padV);
     out.push({
       type: 'box', name: (anchorE && anchorE.name) || '悬点支架', source: 'agent',
       params: { sx: 0.25, sy: 0.25, sz: 0.25 },
@@ -464,8 +484,9 @@ function springLayout(plan) {
   out.push({
     type: 'sphere', name: sphere ? sphere.name || '振子小球' : '振子小球', source: 'agent',
     params: { radius: 0.15 },
-    // 球放到拉伸位（墙 + rest+stretch 沿 +x）：否则 Rapier spring joint 首帧猛拉
-    transform: { pos: [wallPos[0] + rest + stretch, wallPos[1], 0], rot: [0, 0, 0] },
+    // 球放到拉伸位（墙 + pad+rest+stretch 沿 +x，pad=墙半厚+球半径的表面口径换算）：
+    // 否则 Rapier spring joint 首帧猛拉；拉伸量与旧中心口径一致
+    transform: { pos: [wallPos[0] + 0.15 + 0.15 + rest + stretch, wallPos[1], 0], rot: [0, 0, 0] },
     physics: {
       body: 'dynamic', mass: m, friction: 0, restitution: 0.1,
       linvel: [0, 0, 0], angvel: [0, 0, 0],
@@ -515,10 +536,19 @@ function rotationLayout(plan) {
     },
     render: { material: 'wood' },
   });
+  // RP-FIX（渲染-物理贴合）：滑槽锚高=台面顶+滑块半高+2mm——题给/默认 anchor1 y=0.14 会
+  // 把滑块钉在台面上方悬空 ~1-2cm，接触事件靠求解器预测接触反复触发（渲染审计 gap≈2cm
+  // 实锤）；几何换算后滑块底面贴住台面，画面与接触事件一致
+  const sliderHalf = 0.07;
+  const slotY = +(H / 2 + sliderHalf + 0.002).toFixed(4);
+  if (plan.joint) {
+    plan.joint.anchor1 = [(plan.joint.anchor1 || [])[0] ?? 0, slotY, (plan.joint.anchor1 || [])[2] ?? 0];
+    if (plan.joint.anchor2 == null) plan.joint.anchor2 = [0, 0, 0];
+  }
   out.push({
     type: 'box', name: sliderE.name || '滑块', source: 'agent',
     params: { sx: 0.14, sy: 0.14, sz: 0.14 },
-    transform: { pos: [r0, 0.56, 0], rot: [0, 0, 0] },
+    transform: { pos: [r0, +(0.42 + slotY).toFixed(4), 0], rot: [0, 0, 0] },
     physics: {
       body: 'dynamic', mass: ms, friction: 0, restitution: 0.1,
       linvel: [0, 0, -omega0 * r0], angvel: [0, 0, 0],
@@ -696,7 +726,9 @@ export function planToOverrides(plan) {
     pout.push({
       type: 'sphere', name: e.name || '抛体', source: 'agent',
       params: { radius: r },
-      transform: { pos: e.given.position ?? [0, 0.6, 0], rot: [0, 0, 0] },
+      // AG-地上钉（RP 系）：题给 y < r = 半埋进 y=0 地面（模型把「从地面」写成球心 y=0 实测）
+      // → 钳到贴地接触位；出生即嵌会被求解器暴力弹出，20m/s 上抛被弹飞成下坠
+      transform: { pos: (() => { const pp = e.given.position ?? [0, 0.6, 0]; pp[1] = Math.max(pp[1], r + 0.005); return [...pp]; })(), rot: [0, 0, 0] },
       physics: {
         body: 'dynamic', mass: e.given.mass ?? 1, friction: 0, restitution: 0.1,
         linvel: [...v], angvel: [0, 0, 0],
@@ -816,8 +848,10 @@ export function planToOverrides(plan) {
       } else if (!rampGeom) {
         const order = plan.entities.filter((x) => x.type === 'sphere').indexOf(e);
         const n = plan.entities.filter((x) => x.type === 'sphere').length;
-        // given.position 自由落位（二维斜碰 z 错开需要）；缺省一维沿 x 排开
-        o.transform = { pos: e.given.position ?? [(order - (n - 1) / 2) * 1.6, r + 0.005, 0], rot: [0, 0, 0] };
+        // given.position 自由落位（二维斜碰 z 错开需要）；缺省一维沿 x 排开。
+        // 题给 y < r 钳到贴地（半埋位=出生弹射，「从地面/在桌面上」的语义是贴面不是嵌进）
+        const gp = e.given.position;
+        o.transform = { pos: gp ? [gp[0], Math.max(gp[1], r + 0.005), gp[2] ?? 0] : [(order - (n - 1) / 2) * 1.6, r + 0.005, 0], rot: [0, 0, 0] };
         o.physics.friction = 0;
         // 自由落体例外（波2 补课）：无初速且题给高位置（y > r+0.1）=「从高处由静止释放」语义，
         // 必须保留重力——悬浮理想化只属于带初速的对撞场景（freefall fixture 此前一直悬浮，
@@ -828,7 +862,12 @@ export function planToOverrides(plan) {
         // （MOD-504 实锤：竖直圆周球被悬浮化,顶点速度≈初速,能量账全毁）
         const roped = (plan.attaches || []).some((a) => a.type === 'rope'
           && (plan.entities[a.from]?.type === 'sphere' || plan.entities[a.to]?.type === 'sphere'));
-        if (!dropFromHigh && !roped) o.physics.gravityScale = 0;
+        // RP-FIX（竖直上抛实锤）：单球+竖直占优初速（上抛/下抛）=重力是题目主角，悬浮化会把
+        // 20m/s 上抛变成永不落地的匀速直线（模型这轮在 plan 里多列了个 ground，抛体专用分支
+        // 没接管、通用分支把重力吃了——实测飞出 y>100m 出界）
+        const vv0 = e.given.velocity || [0, 0, 0];
+        const vertThrow = n === 1 && Math.abs(vv0[1]) > Math.hypot(vv0[0], vv0[2]);
+        if (!dropFromHigh && !roped && !vertThrow) o.physics.gravityScale = 0;
       } else {
         // UX-R：坡面球多车道并排（球 vs 球、球 vs 圆柱赛跑）；off=r+0.01 与 ballOnRamp 同点
         const spot = slopeSpot(o.params.radius, o.params.radius + 0.01);

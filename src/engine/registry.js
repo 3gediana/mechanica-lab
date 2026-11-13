@@ -358,6 +358,7 @@ export const COMPONENTS = {
           new THREE.BoxGeometry(p.radius * 2, 0.015, 0.035),
           SPOKE_MAT
         );
+        spoke.userData.deco = true;   // RP-FIX：装饰子件（辐条凸出盘面）不参与嵌入射线——贴台物体不再被误判
         spoke.position.y = p.height / 2 + 0.008;
         spoke.rotation.y = (i / p.spokes) * Math.PI;   // 每根辐条是一条直径
         g.add(spoke);
@@ -714,9 +715,11 @@ export const COMPONENTS = {
       return RAPIER.ColliderDesc.trimesh(m.verts, m.idx, RAPIER.TriMeshFlags ? RAPIER.TriMeshFlags.FIX_INTERNAL_EDGES : undefined);
     },
     // R6-037 安全底衬：trimesh 薄壳特定入射角仍漏球（waveRoad 预置实测 2s 折返后穿面坠至
-    // −11m 出画）。顶面低于最深波谷 1cm，仅泄漏兜底——正常接触全在 trimesh 面上
+    // −11m 出画）。顶面低于最深波谷 1cm，仅泄漏兜底——正常接触全在 trimesh 面上。
+    // R7 加宽成兜底盆（x×1.6/z×3）：波浪横向调制把球 z 向漂移出 1.2m 窄路侧缘（实测
+    // ~2s 滚出边缘直坠）——侧坠也要接住，p49 出画间歇爆红根因
     buildExtraColliders: (RAPIER, p) => [
-      RAPIER.ColliderDesc.cuboid(p.sx / 2, 0.05, p.sz / 2).setTranslation(0, -(p.waveAmp * 1.35 + 0.06), 0),
+      RAPIER.ColliderDesc.cuboid(p.sx * 0.8, 0.05, p.sz * 1.5).setTranslation(0, -(p.waveAmp * 1.35 + 0.06), 0),
     ],
     spawnY: () => 0.02,
     computed: (p) => [

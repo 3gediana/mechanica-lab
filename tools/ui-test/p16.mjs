@@ -1,6 +1,7 @@
 // p16.mjs — Round 19 验收：混合搭建（Agent 计划复用/更新已有实体，不推翻用户场景）
 // 纪律：单浏览器 / 单 context / 单标签；总时长上限约 3 分钟。
 import { chromium } from 'playwright';
+import { readFileSync } from 'node:fs';
 import { mkdirSync } from 'node:fs';
 
 const BASE = process.env.MECH_BASE || 'http://127.0.0.1:8721';
@@ -48,7 +49,9 @@ try {
 
   // ==== B. Agent 解析（incline fixture）→ 混合建场 ====
   await page.click('#tabAgent');
-  const plan = await page.evaluate(() => window.MECH.loadFixture('incline'));
+  // R7：混合复用验收走 loadParseMixed（R6-F5 后示例通道=独立成题自清场景，混合语义回归通道）
+  const inclineJson = readFileSync(new URL('../fixtures/parse-incline.json', import.meta.url), 'utf-8');
+  const plan = await page.evaluate((j) => window.MECH.loadParseMixed(JSON.parse(j)), inclineJson);
   check('incline 解析载入', plan && plan.entities.length === 2);
   await page.click('#btnApplyParse');
   await page.waitForTimeout(400);
@@ -113,7 +116,7 @@ try {
   await page.evaluate(() => window.MECH.loadPreset('empty'));
   await page.waitForTimeout(300);
   await page.click('#tabAgent');
-  await page.evaluate(() => window.MECH.loadFixture('incline'));
+  await page.evaluate((j) => window.MECH.loadParseMixed(JSON.parse(j)), inclineJson);
   await page.click('#btnApplyParse');
   await page.waitForTimeout(400);
   const pure = await page.evaluate(() => {

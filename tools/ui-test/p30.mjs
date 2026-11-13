@@ -123,9 +123,9 @@ try {
   // ==== C. 录制回放时间轴拖拽 ====
   await page.evaluate(() => window.MECH.loadPreset('incline'));
   await page.waitForTimeout(300);
-  await page.click('#btnRec');
+  await page.click('#btnFrameRec');    // R7 重复 ID 修复后归位（btnRec=顶栏 WebM 录屏）
   await page.waitForTimeout(1800);
-  await page.click('#btnRec');      // 停止录制
+  await page.click('#btnFrameRec');      // 停止录制
   await page.click('#btnReplay');   // 进入回放
   await page.waitForTimeout(400);
   const barVis = await page.evaluate(() => {

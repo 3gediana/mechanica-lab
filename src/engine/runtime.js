@@ -95,12 +95,22 @@ export class Runtime {
     this.world.timestep = FIXED_H;
     this.world.numSolverIterations = 8;
     this.eventQueue = new this.RAPIER.EventQueue(true);
+    // RP-FIX（渲染-物理一致性）：被绳/弹簧/铰链连接的实体集合——出生动效豁免用
+    this._linkAttachedIds = new Set();
+    for (const e of doc.entities) {
+      if (Array.isArray(e.attach)) for (const id of e.attach) this._linkAttachedIds.add(id);
+    }
     for (const e of doc.entities) if (!this._reg.getComponent(e.type).isLink) this._createEntity(e);
     for (const e of doc.entities) if (this._reg.getComponent(e.type).isLink) this._createEntity(e);
+    this._resolveSpawnDrops(doc);
     this._createJoints(doc);
     this._collectGravitating();
     this._collectTrackBalls(doc);
     this._collectPulleyPairs(doc);
+    // RP-FIX（F1/F2）：编辑态/重置态链接必须立即摆到两端实体之间——_syncLinks 此前只在
+    // stepOnce 里跑，编辑态弹簧/绳一直杵在世界原点（用户实锤「弹簧不显示/线不显示」）。
+    // 静态模式：绳按直线摆段（无 verlet 动力学、无随机出生抖动），弹簧/尺照常贴两端。
+    this._syncLinks(true);
     this.epoch++;
     this.simT = 0;    this.acc = 0;
     this.dropped = 0;
@@ -150,7 +160,14 @@ export class Runtime {
         const v = (a) => new RAPIER.Vector3(a[0], a[1], a[2]);
         let jd = null;
         if (e.type === 'rope') jd = RAPIER.JointData.rope(e.params.length, v([0, 0, 0]), v([0, 0, 0]));
-        else if (e.type === 'spring') jd = RAPIER.JointData.spring(e.params.restLength, e.params.stiffness, e.params.damping || 0, v([0, 0, 0]), v([0, 0, 0]));
+        else if (e.type === 'spring') {
+          // RP-FIX（口径统一）：胡克形变按「表面长度」计——线圈渲染在两表面之间（F7），
+          // 关节静长补上两端支撑投影 pad，使 F=k·(表面距−原长)：学生看到的线圈长度
+          // 与 Δx 一致（中心距口径会把没入球内的一段也算形变，视觉与公式矛盾）。
+          const pad = this.springSurfacePad(e);
+          bind.springPad = pad;
+          jd = RAPIER.JointData.spring(e.params.restLength + pad, e.params.stiffness, e.params.damping || 0, v([0, 0, 0]), v([0, 0, 0]));
+        }
         else if (e.type === 'hinge') {
           // 锚点 = 铰链实体自身位置（世界）→ 各 body 局部（忽略基座/臂的旋转，教学简化）
           const w = e.transform.pos;
@@ -179,12 +196,18 @@ export class Runtime {
       // 豁免：带初速（轨迹题）、天体（自积分）、转台 spinLock（悬空盘不落）、
       // gravityScale=0（理想化悬空场景——两球平面错位会让接触事件早于解析步，
       // 碰撞报告抓到速度未变的幽灵事件，p26 实测）、onPulley、spawnDrop:false。
+      // RP-FIX（F3，2026-11）：被绳/弹簧连接的体不再出生上抛（连接体被猛拉=「球莫名
+      // 飞起来」主源之一）；贴支撑面静置的体也不再上抛（编辑态→运行态画面跳变+
+      // 落地即产生碰撞事件）。_resolveSpawnDrops 在全部实体建完后二次裁定。
+      const linkAttached = this._linkAttachedIds && this._linkAttachedIds.has(e.id);
       const spawnDrop = e.physics.body === 'dynamic' && !e.physics.spinLock && !e.physics.onPulley
         && e.physics.spawnDrop !== false
+        && !linkAttached
         && e.physics.gravityScale !== 0
         && e.physics.linvel.every((x) => Math.abs(x) < 1e-9) ? 0.04 : 0;
       desc.setTranslation(e.transform.pos[0], e.transform.pos[1] + spawnDrop, e.transform.pos[2]).setRotation(quatFromEuler(RAPIER, e.transform.rot));
       const body = this.world.createRigidBody(desc);
+      bind.spawnLift = spawnDrop;   // RP-FIX：_resolveSpawnDrops 二次裁定（贴支撑面则撤掉）
       if (e.physics.body === 'dynamic') {
         body.setLinvel({ x: e.physics.linvel[0], y: e.physics.linvel[1], z: e.physics.linvel[2] }, true);
         body.setAngvel({ x: e.physics.angvel[0], y: e.physics.angvel[1], z: e.physics.angvel[2] }, true);
@@ -226,6 +249,48 @@ export class Runtime {
       bind.body = body;
     }
     this.binds.set(e.id, bind);
+  }
+
+  // ============ 出生位二次裁定（RP-FIX F3）：贴支撑面的体撤掉 4cm 出生上抛 ============
+  // 判据：体底面下方 [-2cm, +5cm] 窗口内存在别的实体承载面（xz 水平重叠 > 体投影 25%）。
+  // 静置体不再「开局跳一下」，落地碰撞事件（会污染碰撞报告/碰撞时刻 UI）也随之消失。
+  // 自由空中的体保留 AG-V2 落生动效。AABB 用视觉网格口径（Box3.setFromObject，
+  // boundingBox 首算后缓存——rebuild 毫秒级，16 实体场景可忽略）。
+  _resolveSpawnDrops(doc) {
+    const dropped = [...this.binds.values()].filter((b) => b.spawnLift > 0 && b.body);
+    if (!dropped.length) return;
+    const boxes = [];
+    for (const b of this.binds.values()) {
+      if (!b.mesh || b.isLink) continue;
+      boxes.push({ id: b.entity.id, box: new THREE.Box3().setFromObject(b.mesh) });
+    }
+    const foot = new THREE.Box3();
+    for (const b of dropped) {
+      // mesh 在 _createEntity 里放在文档位姿（上抛只进了 body）——包围盒即文档姿态
+      const bb = new THREE.Box3().setFromObject(b.mesh);
+      const bot = bb.min.y;
+      const area = Math.max((bb.max.x - bb.min.x) * (bb.max.z - bb.min.z), 1e-6);
+      let supported = false;
+      for (const o of boxes) {
+        if (o.id === b.entity.id) continue;
+        const top = o.box.max.y;
+        // 承载=嵌入或贴合（bot 低于/齐平支撑顶，3mm 浮点缝余量）。缝隙 >3mm 的悬空体
+        // 保留出生下落（AG-V2 p38 契约：留 5mm 缝也要落+微弹+入稳）；撤抬升只针对
+        // 贴面静置（编辑态→运行态跳变）与被埋（弹射抵消初速）两类真问题。
+        if (top < bot - 0.003) continue;
+        const ox = Math.min(bb.max.x, o.box.max.x) - Math.max(bb.min.x, o.box.min.x);
+        const oz = Math.min(bb.max.z, o.box.max.z) - Math.max(bb.min.z, o.box.min.z);
+        if (ox <= 0 || oz <= 0) continue;
+        if ((ox * oz) / area < 0.25) continue;                // 水平重叠份额
+        supported = true;
+        break;
+      }
+      if (supported) {
+        const p = b.entity.transform.pos;
+        b.body.setTranslation({ x: p[0], y: p[1], z: p[2] }, true);
+        b.spawnLift = 0;
+      }
+    }
   }
 
   // ============ 约束（entity.joints，场景文档可序列化） ============
@@ -522,7 +587,8 @@ export class Runtime {
       const ba = this.binds.get(e.attach[0]), bb = this.binds.get(e.attach[1]);
       if (!ba?.mesh || !bb?.mesh) continue;
       const p1 = ba.mesh.position, p2 = bb.mesh.position;
-      const len = Math.hypot(p2.x - p1.x, p2.y - p1.y, p2.z - p1.z);
+      // RP-FIX：弹性势按表面长度口径（与关节静长/线圈渲染一致，能量账不与视觉打架）
+      const len = Math.hypot(p2.x - p1.x, p2.y - p1.y, p2.z - p1.z) - this.springSurfacePad(e);
       const dx = len - (e.params.restLength ?? 0.8);
       pe += 0.5 * (e.params.stiffness ?? 20) * dx * dx;
     }
@@ -566,7 +632,8 @@ export class Runtime {
           vSub = submergedVolume(e.type, { min: [box.min.x, box.min.y, box.min.z], max: [box.max.x, box.max.y, box.max.z] },
             [c.x, c.y, c.z], 0, wMin, wMax);
         }
-        if (!(vSub > 0)) continue;
+        if (!(vSub > 0)) { b._vSub = 0; continue; }
+        b._vSub = vSub;   // A3 sinkFloat 时机检测读（teaching 链）
         const v = b.body.linvel();
         const speed = Math.hypot(v.x, v.y, v.z);
         const A = Math.max(1e-4, Math.pow(vSub, 2 / 3));
@@ -596,15 +663,29 @@ export class Runtime {
       // 静息钳制（B2 用户实锤：静止球读数 v=0.06——接触求解微漂移永不停息）。
       // 连续 45 步(0.375s)速率 <0.06 且角速 <0.6 → 速度/角速归零。SHM 折返点低速窗口
       // ~3 步（T=1.4s/A=0.3 实算），安全裕度 ×15；教学演示无受影响口径。
+      // RP-FIX（F6）：渗透 >2mm 的体不钳——嵌入弹出是位置偏置修正（linvel 读数≈0），
+      // 钳制杀不死它，但实测深嵌球（z-devprobe：埋 10cm）会被 45 步计数冻结在地下，
+      // 画面=永久半埋。有渗透就继续让求解器推，推出接触再进入正常钳制。
       const sp = Math.hypot(v.x, v.y, v.z);
       const wv = b.body.angvel();
       const wm = Math.hypot(wv.x, wv.y, wv.z);
       if (sp < 0.06 && wm < 0.6) {
         const cnt = (this._restCnt.get(id) || 0) + 1;
-        if (cnt >= 45) { b.body.setLinvel({ x: 0, y: 0, z: 0 }, true); b.body.setAngvel({ x: 0, y: 0, z: 0 }, true); }
+        if (cnt >= 45) {
+          // 渗透探测每 15 步一次（结果缓存）——嵌入式恢复本来就要几十步，探测节流后
+          // 近静止体的每步 WASM 接触遍历开销 ≈0（实测占步进成本 ~5%）
+          if (cnt % 15 === 0 || b._restPen == null) b._restPen = this._penetrationOf(b);
+          if (b._restPen > -0.002) {
+            b.body.setLinvel({ x: 0, y: 0, z: 0 }, true); b.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+          } else {
+            this._restCnt.set(id, 0);   // 还嵌着：不冻结，重数（求解器继续推出）
+            continue;
+          }
+        }
         this._restCnt.set(id, cnt);
       } else {
         this._restCnt.set(id, 0);
+        b._restPen = null;   // 重新运动后缓存作废（下次静息重测）
       }
     }
     this._gravStep(FIXED_H);                  // 天体（自积分）先行；Rapier 步内不含天体
@@ -662,28 +743,38 @@ export class Runtime {
         const pv = _prevVel.get(id);
         if (pv) preVels[id] = [pv[0], pv[1], pv[2]];
       }
-      // 碰撞位置：本次新事件两碰撞体的中点（视口碰撞时刻标记用）
-      const lastEvt = this.collisions[this.collisions.length - 1];
-      let pos = null;
-      const ca = lastEvt.a && this.binds.get(lastEvt.a), cb = lastEvt.b && this.binds.get(lastEvt.b);
-      if (ca && ca.mesh && cb && cb.mesh) {
-        pos = [(ca.mesh.position.x + cb.mesh.position.x) / 2, (ca.mesh.position.y + cb.mesh.position.y) / 2, (ca.mesh.position.z + cb.mesh.position.z) / 2];
-      }
       // 撞击冲量（声音/碰撞 juice 的强度源）：J = Σ m·|Δv|，碰前取 _prevVel（步前刷新=
       // 碰撞前瞬时）、碰后取当前 linvel。冲量口径对理想弹性碰撞照样响（ΔKE 口径会把
       // 无能量损耗的脆响漏成静音）；< 0.04 视为静默微接触不记。
-      if (pos && ca && cb) {
+      // RP-FIX（F8）：本步所有新事件逐个出声（落地闷响合法），不再只看最后一条。
+      let dynEvt = null;
+      for (let k = nCol0; k < this.collisions.length; k++) {
+        const evt = this.collisions[k];
+        const ca = evt.a && this.binds.get(evt.a), cb = evt.b && this.binds.get(evt.b);
+        if (evt.pairKind === 'dyn' && !dynEvt) dynEvt = evt;
+        if (!ca || !cb || !ca.mesh || !cb.mesh) continue;
+        const pos = [(ca.mesh.position.x + cb.mesh.position.x) / 2, (ca.mesh.position.y + cb.mesh.position.y) / 2, (ca.mesh.position.z + cb.mesh.position.z) / 2];
         let J = 0;
-        const va0 = _prevVel.get(lastEvt.a), vb0 = _prevVel.get(lastEvt.b);
+        const va0 = _prevVel.get(evt.a), vb0 = _prevVel.get(evt.b);
         if (ca.body && va0) { const v = ca.body.linvel(); J += ca.body.mass() * Math.hypot(v.x - va0[0], v.y - va0[1], v.z - va0[2]); }
         if (cb.body && vb0) { const v = cb.body.linvel(); J += cb.body.mass() * Math.hypot(v.x - vb0[0], v.y - vb0[1], v.z - vb0[2]); }
         if (J > 0.04) {
-          this.impactSounds.push({ t: this.simT, j: J, a: lastEvt.a, b: lastEvt.b, pos });
+          this.impactSounds.push({ t: this.simT, j: J, a: evt.a, b: evt.b, pos, pairKind: evt.pairKind });
           if (this.impactSounds.length > 160) this.impactSounds.shift();
         }
       }
-      this.collisionReports.push({ t: this.simT, pBefore: pre.p, keBefore: pre.ke, pAfter: post.p, keAfter: post.ke, postVels, preVels, pos });
-      if (this.collisionReports.length > 50) this.collisionReports.shift();
+      // 碰撞报告（RP-FIX F8）：只记 dyn-dyn 事件（两动态体相撞）——守恒量条「碰撞时刻」
+      // 与解释器要的是物体间碰撞；出生落地/滚动接地事件不再顶掉真实碰撞的读数。
+      // pair=[a,b] 供解释器精确配对（不再拿 postVels 启发式猜）。
+      if (dynEvt) {
+        const ca = this.binds.get(dynEvt.a), cb = this.binds.get(dynEvt.b);
+        let pos = null;
+        if (ca && ca.mesh && cb && cb.mesh) {
+          pos = [(ca.mesh.position.x + cb.mesh.position.x) / 2, (ca.mesh.position.y + cb.mesh.position.y) / 2, (ca.mesh.position.z + cb.mesh.position.z) / 2];
+        }
+        this.collisionReports.push({ t: this.simT, pair: [dynEvt.a, dynEvt.b], pBefore: pre.p, keBefore: pre.ke, pAfter: post.p, keAfter: post.ke, postVels, preVels, pos });
+        if (this.collisionReports.length > 50) this.collisionReports.shift();
+      }
     }
     // 滚动阻力（教学模型）：滚阻矩 τ = μr·N·r 与转动惯量耦合（α = τ/I），
     // N = m·|g|·gs（贴地法向近似，斜面上 cosθ 自动减小）、纯滚动 v=ωr → 线减速 dv = α·r·h。
@@ -844,7 +935,24 @@ export class Runtime {
       if (!started) return;
       const a = this._idOfCollider(h1), b = this._idOfCollider(h2);
       if (a || b) {
-        this.collisions.push({ t: this.simT, a, b });
+        // RP-FIX（F8）：事件带 pairKind——dyn/dyn（教学关心的物体间碰撞）vs env
+        // （球-地面/斜面等环境接触）。实测出生落地/滚动接触全灌进同一数组，
+        // 「碰撞时刻」UI 与解释器把地面事件当两球碰撞（幽灵碰撞实锤来源）。
+        const ea = a ? this.binds.get(a) : null, eb = b ? this.binds.get(b) : null;
+        const dynA = !!(ea && ea.entity.physics.body === 'dynamic');
+        const dynB = !!(eb && eb.entity.physics.body === 'dynamic');
+        // RP-FIX（R5 误报）：rel=碰前相对接近速度（_prevVel=步前刷新，恰好碰前瞬时）。
+        // Rapier 的 speculative contact 会在接触面前最多 v·h 处提前触发事件——
+        // 幽灵间隙判定要按这个物理余量放行，否则 1.5m/s 的正碰会被误判成隔 1.3cm 幽灵。
+        let rel = 0;
+        const va = a ? _prevVel.get(a) : null, vb = b ? _prevVel.get(b) : null;
+        if (va && vb && ea && eb) {
+          const ba = ea.body.translation(), bb = eb.body.translation();
+          const nx = bb.x - ba.x, ny = bb.y - ba.y, nz = bb.z - ba.z;
+          const L = Math.hypot(nx, ny, nz) || 1;
+          rel = Math.abs(((va[0] - vb[0]) * nx + (va[1] - vb[1]) * ny + (va[2] - vb[2]) * nz) / L);
+        }
+        this.collisions.push({ t: this.simT, a, b, pairKind: dynA && dynB ? 'dyn' : 'env', rel: +rel.toFixed(4) });
         if (this.collisions.length > 200) this.collisions.shift();
       }
     });
@@ -852,6 +960,25 @@ export class Runtime {
 
   _idOfCollider(handle) {
     return this._colOwner.get(handle) ?? null;
+  }
+
+  // RP-FIX（F6）：最差接触渗透深度（负值=嵌入米数）。无接触/无 API 返回 0。
+  // 只在静息钳制候选上调用（近静止体，每步最多几只——非热路径）。
+  _penetrationOf(b) {
+    if (!b.collider || !this.world) return 0;
+    let worst = 0;
+    try {
+      this.world.contactPairsWith(b.collider, (other) => {
+        this.world.contactPair(b.collider, other, (mf) => {
+          const n = mf.numContacts();
+          for (let i = 0; i < n; i++) {
+            const d = mf.contactDist ? mf.contactDist(i) : 0;
+            if (d < worst) worst = d;
+          }
+        });
+      });
+    } catch { /* 接触流形 API 不可用：按无渗透处理（保守=维持旧钳制行为） */ }
+    return worst;
   }
 
   // ============ 传送带驱动（RUN-2）：带对物的切向作用 = 动摩擦 a=μg 朝带速 ============
@@ -936,7 +1063,66 @@ export class Runtime {
     }
   }
 
-  _syncLinks() {
+  // ============ 链接渲染（RP-FIX F7）：端点贴被连体表面，不再锚在体心 ============
+  // 实测（z-devprobe2）：旧版端点=两体质心——弹簧穿墙 0.1m/整段没入球内，细墙场景
+  // 线圈从背面捅出来。支撑距离 = 体沿链接轴向的几何支撑（球=半径、盒=OBB 投影、
+  // 圆柱=盘面/侧缘），端点退到表面：视觉上「线正好接在物体上」，物理（joint 锚在
+  // 质心）不动——渲染与物理各归各，测量口径（中心距）不受影响。
+  _supportAlong(bind, dir) {
+    const e = bind.entity;
+    const p = e.params || {};
+    const sc = bind.mesh ? bind.mesh.scale : { x: 1, y: 1, z: 1 };
+    if (e.type === 'sphere' || e.type === 'celestial') {
+      return (p.radius ?? 0.15) * (sc.x + sc.y + sc.z) / 3;
+    }
+    if (p.sx != null && p.sy != null && p.sz != null) {
+      // OBB 支撑函数：Σ halfᵢ·|dir·axisᵢ|（axis 为盒世界轴）
+      if (bind.mesh) {
+        _ax.set(1, 0, 0).applyQuaternion(bind.mesh.quaternion);
+        _n1.set(0, 1, 0).applyQuaternion(bind.mesh.quaternion);
+        _n2.set(0, 0, 1).applyQuaternion(bind.mesh.quaternion);
+        return (p.sx / 2) * Math.abs(dir.dot(_ax)) + (p.sy / 2) * Math.abs(dir.dot(_n1)) + (p.sz / 2) * Math.abs(dir.dot(_n2));
+      }
+      return (p.sx / 2) * Math.abs(dir.x) + (p.sy / 2) * Math.abs(dir.y) + (p.sz / 2) * Math.abs(dir.z);
+    }
+    if (e.type === 'cylinder') {
+      // 近似：max(半径·|横向分量|, 半高·|竖向分量|)（局部系）
+      if (bind.mesh) {
+        _ax.copy(dir).applyQuaternion(bind.mesh.quaternion.clone().invert());
+        return Math.max((p.radius ?? 0.12) * Math.hypot(_ax.x, _ax.z), (p.height ?? 0.3) / 2 * Math.abs(_ax.y));
+      }
+      return Math.max((p.radius ?? 0.12) * Math.hypot(dir.x, dir.z), (p.height ?? 0.3) / 2 * Math.abs(dir.y));
+    }
+    return 0;   // 未知几何：锚回质心（与旧行为一致）
+  }
+
+  // 弹簧两端表面投影和（沿当前连线方向）：关节静长/胡克 stretch/弹性势能统一用它
+  // 折算成「表面长度」口径，与线圈的视觉呈现一致（RP-FIX F7 配套）。
+  // 链接锚定端的有效表面偏移（渲染与审计共用同一口径——分叉即假阳/假阴）：
+  // · ground 类承景面：锚点=顶面中心上方 sy/2（钉在地面上的「销」语义）。MOD-505 实锤：
+  //   沿绳方向取支撑距会把 12m 大地的半长 6m 当偏移——绳端被期望钉在 6m 外（假阳 661cm）。
+  // · 其余实体：沿链接轴的表面支撑距，钳到段长 45%（深交叠防端点越过中点，渲染同款钳制）。
+  _linkAnchorOffset(bind, dir, len) {
+    if (bind.entity && bind.entity.type === 'ground') {
+      const sy = (bind.entity.params && bind.entity.params.sy) || 0.1;
+      return sy / 2;
+    }
+    return Math.min(this._supportAlong(bind, dir), len * 0.45);
+  }
+
+  springSurfacePad(e) {
+    if (!Array.isArray(e.attach) || e.attach.length !== 2) return 0;
+    const ba = this.binds.get(e.attach[0]), bb = this.binds.get(e.attach[1]);
+    if (!ba || !bb || !ba.mesh || !bb.mesh) return 0;
+    const pa = ba.mesh.position, pb = bb.mesh.position;
+    const d = new THREE.Vector3(pb.x - pa.x, pb.y - pa.y, pb.z - pa.z);
+    const len = d.length();
+    if (len < 1e-6) return 0;
+    d.divideScalar(len);
+    return this._supportAlong(ba, d.clone()) + this._supportAlong(bb, d.clone().negate());
+  }
+
+  _syncLinks(staticMode = false) {
     for (const b of this.binds.values()) {
       // 测量尺：两端点间摆放（x 轴向拉伸 + 对齐），纯测量标注不建 joint
       if (b.entity.type === 'ruler' && Array.isArray(b.entity.attach) && b.entity.attach.length === 2 && b.mesh) {
@@ -958,23 +1144,48 @@ export class Runtime {
       }
       if (!Array.isArray(b.entity.attach) || b.entity.attach.length !== 2) continue;
       const a = this.binds.get(b.entity.attach[0]), c = this.binds.get(b.entity.attach[1]);
-      if (!a || !c) continue;
+      if (!a || !c || !a.mesh || !c.mesh) continue;
       const pa = a.mesh.position, pc = c.mesh.position;
-      if (b.entity.type === 'rope') { this._syncRope(b, pa, pc); continue; }   // 绳：verlet 垂坠/摆动（AG-V2）
       const dir = new THREE.Vector3().subVectors(pc, pa);
       const len = dir.length();
       if (len < 1e-6) continue;
-      b.mesh.position.copy(pa).addScaledVector(dir, 0.5);
-      b.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
-      b.mesh.scale.set(1, len, 1);
+      dir.divideScalar(len);
+      // 端点退到表面：中心 ± 支撑距离（口径与审计共用 _linkAnchorOffset——MOD-505 地面锚）
+      const offA = this._linkAnchorOffset(a, dir, len);
+      const offB = this._linkAnchorOffset(c, _n1.copy(dir).negate(), len);
+      const surfA = pa.clone().addScaledVector(dir, offA);
+      const surfB = pc.clone().addScaledVector(dir, -offB);
+      if (b.entity.type === 'rope') { this._syncRope(b, surfA, surfB, staticMode); continue; }   // 绳：verlet 垂坠/摆动（AG-V2）
+      const span = surfA.distanceTo(surfB);
+      if (span < 1e-4) continue;
+      b.mesh.position.copy(surfA).add(surfB).multiplyScalar(0.5);
+      b.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), _n2.subVectors(surfB, surfA).normalize());
+      b.mesh.scale.set(1, span, 1);
     }
   }
 
   // 绳的呈现层动力学（AG-V2）：8 段 verlet 链——重力下垂（slack 时悬链弧）、出生上踢的
   // 跳动、端点拖动的摆动。只动网格不动关节（rope joint 照旧约束刚体），零物理污染。
   // 张紧时 segRest 取 max(绳长/8, 端距/8)，链自然绷直，与 rope joint 单侧拉紧语义一致。
-  _syncRope(b, pa, pc) {
+  // RP-FIX（F1）：staticMode=编辑态/重置态——直线摆段、无 verlet、无随机抖动（确定性），
+  // 并清空动力学状态让下次运行从当前直线重新起链。端点 pa/pc 已是两端表面点（F7）。
+  _syncRope(b, pa, pc, staticMode = false) {
     const N = 8;
+    const segs = b.mesh.children;
+    if (staticMode) {
+      for (let i = 0; i < N && i < segs.length; i++) {
+        const A = pa.clone().lerp(pc, i / N);
+        const B2 = pa.clone().lerp(pc, (i + 1) / N);
+        const d = B2.clone().sub(A);
+        const len = Math.max(d.length(), 1e-4);
+        segs[i].position.copy(A).addScaledVector(d, 0.5);
+        segs[i].quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.divideScalar(len));
+        segs[i].scale.set(1, len, 1);
+      }
+      b.linkPts = null;      // 运行态从直线重新起链（首帧 verlet 初值=当前摆位）
+      b.linkPrev = null;
+      return;
+    }
     if (!b.linkPts || b.linkPts.length !== N + 1) {
       b.linkPts = [];
       b.linkPrev = [];
@@ -1013,7 +1224,6 @@ export class Runtime {
     for (let k = 0; k < 3; k++) {
       for (let i = 0; i < N; i++) corr(b.linkPts[i], b.linkPts[i + 1], i !== 0, i + 1 !== N);
     }
-    const segs = b.mesh.children;
     const dir = new THREE.Vector3();
     for (let i = 0; i < N && i < segs.length; i++) {
       const A = b.linkPts[i], B2 = b.linkPts[i + 1];
@@ -1034,6 +1244,97 @@ export class Runtime {
     }
     this._syncLinks();
     this._syncSensors();
+  }
+
+  // ============ 渲染事实采集（RP-AUDIT）：前端实际呈现 vs 引擎计算，同页可算 ============
+  // 用户需求：不用看图——弹簧/绳端点必须贴在被连体表面、两球碰撞时视觉上必须真的
+  // 接触、网格必须逐帧跟着物理体。这里只产事实（数值），判定在 agent-verify（纯函数）。
+  // 事实口径全部「从渲染树/物理体直接读」，不复用同步代码的计算路径（审计独立性）。
+  renderAuditFacts(newEventsFrom = 0) {
+    const bodies = [];
+    const links = [];
+    for (const [id, b] of this.binds) {
+      const e = b.entity;
+      if (b.isLink || e.type === 'ruler') continue;
+      const mp = b.mesh.position;
+      let delta = null, bodyPos = null, docDelta = null;
+      if (b.body && e.physics.body === 'dynamic') {
+        const p = b.body.translation();
+        bodyPos = [p.x, p.y, p.z];
+        delta = Math.hypot(p.x - mp.x, p.y - mp.y, p.z - mp.z);
+        // 出生跳变事实：探针首步前（simT=0）body 与文档位姿的差
+        if (this.simT === 0) docDelta = Math.hypot(p.x - e.transform.pos[0], p.y - e.transform.pos[1], p.z - e.transform.pos[2]);
+      }
+      bodies.push({
+        id, name: e.name, type: e.type, dyn: e.physics.body === 'dynamic',
+        mesh: [mp.x, mp.y, mp.z], body: bodyPos, delta, docDelta,
+        spawnLift: b.spawnLift || 0,   // 合法出生上抛量（自由落体位）——R1 判定要扣除
+      });
+    }
+    for (const [id, b] of this.binds) {
+      const e = b.entity;
+      if (!b.isLink || !Array.isArray(e.attach) || e.attach.length !== 2 || !b.mesh) continue;
+      const a = this.binds.get(e.attach[0]), c = this.binds.get(e.attach[1]);
+      if (!a || !c || !a.mesh || !c.mesh) continue;
+      const pa = a.mesh.position, pc = c.mesh.position;
+      const dir = new THREE.Vector3().subVectors(pc, pa);
+      const len = dir.length();
+      const fact = {
+        id, name: e.name, type: e.type, span: len,
+        aName: a.entity.name, bName: c.entity.name,
+        visible: b.mesh.visible !== false,
+      };
+      if (len > 1e-6) {
+        dir.divideScalar(len);
+        // 期望表面点（独立重算；偏移口径与 _syncLinks 共用 _linkAnchorOffset——分叉=假阳）。
+        // 审计非热路径，用克隆向量避免与 _supportAlong 内部复用的模块级临时向量互相踩踏
+        const offA = this._linkAnchorOffset(a, dir.clone(), len);
+        const surfA = [pa.x + dir.x * offA, pa.y + dir.y * offA, pa.z + dir.z * offA];
+        const dirN = dir.clone().negate();
+        const offB = this._linkAnchorOffset(c, dirN, len);
+        const surfB = [pc.x + dirN.x * offB, pc.y + dirN.y * offB, pc.z + dirN.z * offB];
+        if (e.type === 'rope') {
+          // 绳段 position 是「段中点」非端点（MOD-505 实锤：当中点用系统性差半段长≈6cm 假阳）
+          // ——端点 = 段中点 ∓ 四元数·(0, scaleY/2, 0)（与弹簧分支同款还原）
+          const segs = b.mesh.children;
+          if (segs.length >= 2) {
+            const endOf = (seg, sign) => {
+              const h = new THREE.Vector3(0, (seg.scale.y / 2) * sign, 0).applyQuaternion(seg.quaternion);
+              return [seg.position.x - h.x, seg.position.y - h.y, seg.position.z - h.z];
+            };
+            const eA = endOf(segs[0], 1);
+            const eB = endOf(segs[segs.length - 1], -1);
+            fact.gapA = Math.hypot(eA[0] - surfA[0], eA[1] - surfA[1], eA[2] - surfA[2]);
+            fact.gapB = Math.hypot(eB[0] - surfB[0], eB[1] - surfB[1], eB[2] - surfB[2]);
+          }
+        } else {
+          // 弹簧/杆件：渲染端点 = mesh.pos ± quat·(0, scaleY/2, 0)
+          const h = new THREE.Vector3(0, b.mesh.scale.y / 2, 0).applyQuaternion(b.mesh.quaternion);
+          const m = b.mesh.position;
+          const eA = [m.x - h.x, m.y - h.y, m.z - h.z];
+          const eB = [m.x + h.x, m.y + h.y, m.z + h.z];
+          fact.gapA = Math.hypot(eA[0] - surfA[0], eA[1] - surfA[1], eA[2] - surfA[2]);
+          fact.gapB = Math.hypot(eB[0] - surfB[0], eB[1] - surfB[1], eB[2] - surfB[2]);
+        }
+      }
+      links.push(fact);
+    }
+    // dyn 碰撞事件时刻的视觉间隙（事件是物理口径，间隙是渲染口径——差=幽灵碰撞）
+    const events = [];
+    for (let k = Math.max(newEventsFrom, 0); k < this.collisions.length; k++) {
+      const ev = this.collisions[k];
+      if (!ev || ev.pairKind !== 'dyn') continue;
+      const ba = ev.a && this.binds.get(ev.a), bb = ev.b && this.binds.get(ev.b);
+      if (!ba || !bb || !ba.mesh || !bb.mesh) continue;
+      const pa = ba.mesh.position, pb = bb.mesh.position;
+      const d = Math.hypot(pb.x - pa.x, pb.y - pa.y, pb.z - pa.z);
+      if (d > 1e-6) {
+        const dir = new THREE.Vector3(pb.x - pa.x, pb.y - pa.y, pb.z - pa.z).divideScalar(d);
+        const gap = d - this._supportAlong(ba, dir) - this._supportAlong(bb, dir.clone().negate());
+        events.push({ t: ev.t, a: ba.entity.name, b: bb.entity.name, visualGap: gap, rel: ev.rel || 0 });
+      }
+    }
+    return { t: this.simT, h: FIXED_H, bodies, links, events };
   }
 
   // ============ 轨迹采样（解释器/未来教学叠加层用） ============

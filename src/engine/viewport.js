@@ -186,6 +186,28 @@ export class Viewport {
     this.controls.update();
   }
 
+  // R7-B1 立即收敛取景动画：自检的相机判定必须是确定性的（半途相机=假阳/假阴），
+  // 迭代 tickFocus 到收敛，带硬上限兜底直接落位。
+  settleFocus() {
+    let n = 0;
+    while (this._focusAnim && n++ < 400) this.tickFocus();
+    if (this._focusAnim) {
+      const a = this._focusAnim;
+      this.controls.target.copy(a.target);
+      const dir = this.camera.position.clone().sub(a.target).setLength(a.dist);
+      this.camera.position.copy(a.target).add(dir);
+      this._focusAnim = null;
+      this.controls.update();
+    }
+  }
+
+  // 无动画直接落位到指定观察点/距离（视觉修复 tightframe 用：绕过 focusScene 的
+  // 全场景并入——超大静态道具正是「主体小成芝麻」的病因，只框动态主体）
+  snapTo(target, dist) {
+    this._focusAnim = { target: target.clone(), dist };
+    this.settleFocus();
+  }
+
   // ============ 观察点飞行（相机和观察点分类）：平滑移到保存的相机位姿 ============
   flyToPose(pos, target) {
     this._poseAnim = { pos: new THREE.Vector3(...pos), target: new THREE.Vector3(...target) };
@@ -497,9 +519,18 @@ export class Viewport {
     this.decompose = on;
   }
 
+  // A2b 教学聚光：contact 时刻受力箭头临时点亮并脉冲闪烁（不受用户叠加层开关影响，
+  // 窗口结束自动回到用户自己的开关态）
+  setForceFlash(until) { this._forceFlashUntil = until || 0; }
+  forceFlashing() { return performance.now() < (this._forceFlashUntil || 0); }
+
   // items: [{pos, contact, normal, friction, gravity, accel}]  每 tick 驱动
   updateForceArrows(items) {
-    if (!this.forcesOn) return;
+    const flashing = this.forceFlashing();
+    if (!this.forcesOn && !flashing) {
+      for (const a of this._forceArrows) a.visible = false;   // 聚光窗结束回到用户开关态
+      return;
+    }
     const COLORS = [0x7dc87d, 0xc96a5a, 0x5ac8c8, 0x9fd8a8, 0xd88a5a];
     const PER = this.decompose ? 4 : 3;   // 分解: N/f/重力/加速度；合力: 接触/重力/加速度
     if (this._forcePoolPer !== PER) {
@@ -543,6 +574,24 @@ export class Viewport {
       }
     }
     for (; ai < this._forceArrows.length; ai++) this._forceArrows[ai].visible = false;
+    if (flashing) {
+      // 聚光脉冲：3Hz 呼吸式闪烁强调「此刻谁在推谁」（只动透明度，不改几何）
+      const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 1000 * Math.PI * 2 * 3);
+      for (const a of this._forceArrows) {
+        if (!a.visible) continue;
+        for (const m of [a.line && a.line.material, a.cone && a.cone.material]) {
+          if (!m) continue;
+          m.transparent = true;
+          m.opacity = pulse;
+        }
+      }
+    } else {
+      for (const a of this._forceArrows) {
+        for (const m of [a.line && a.line.material, a.cone && a.cone.material]) {
+          if (m) m.opacity = 1;
+        }
+      }
+    }
   }
 
   forceArrowStats() {
@@ -1142,6 +1191,9 @@ export class Viewport {
       // 连接件（绳/弹簧 8 段圆柱 mesh 悬链穿过端物体是常态,无碰撞体）不作为嵌入障碍物
       // ——竖直圆摆正下方球曾被判埋抬飞 1.2m（MOD-504 实锤）
       if (ob && ob.entity && (ob.entity.type === 'rope' || ob.entity.type === 'spring' || ob.entity.type === 'tank')) continue;
+      // noCollide 实体（铰链摆杆等，连碰撞体都没有）同样不作障碍物——摆杆近端伸进基座是
+      // 铰链设计形态，被判嵌会把固定基座抬到静置高（p12 hinge 实锤：基座 2.5m→0.1m 场景报废）
+      if (ob && ob.entity && ob.entity.params && ob.entity.params.noCollide) continue;
       others.push(o);
     }
     return others;
@@ -1166,11 +1218,14 @@ export class Viewport {
     const far0 = this.raycaster.far;   // 共享 raycaster：far 必须还原，否则泄漏污染后续所有射线
     try {
       let embedded = 0, enclosed = 0, depth = 0;
-      for (const d of this._penDirs) {
+      // RP-FIX：deco 子件（转台辐条等凸出装饰，无碰撞体）不参与嵌入判定——
+        // 贴台物体与辐条视觉相交是设计形态，不是嵌入（误判会让自查把滑块搬走）
+        const noDeco = (h) => h && !h.object.userData.deco;
+        for (const d of this._penDirs) {
         this.raycaster.set(center, d);
         this.raycaster.far = far;
-        const sHit = this.raycaster.intersectObject(mesh, true)[0];
-        const oHit = this.raycaster.intersectObjects(others, true)[0];
+        const sHit = this.raycaster.intersectObject(mesh, true).find(noDeco);
+        const oHit = this.raycaster.intersectObjects(others, true).find(noDeco);
         if (!oHit) continue;
         enclosed++;
         // 他面比自己面更近 = 该方向被埋（贴面相切 o≈s 不算，1e-4 容差）

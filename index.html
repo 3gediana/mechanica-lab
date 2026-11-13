@@ -395,6 +395,7 @@
   #teachCard { position: fixed; z-index: 40; max-width: 340px; padding: 10px 14px 11px; border-radius: 10px; background: rgba(18, 20, 24, .93); border: 1px solid rgba(217, 164, 65, .38); border-left: 3px solid #eabb64; box-shadow: 0 10px 30px rgba(0, 0, 0, .5); opacity: 0; transform: translateY(8px); transition: opacity .25s ease, transform .25s ease, left .08s linear, top .08s linear; pointer-events: none; }
   #teachCard.on { opacity: 1; transform: none; }
   #teachCard .tt-title { font-size: 13.5px; font-weight: 600; color: var(--text); }
+  #teachCard .tt-sub { margin-top: 6px; padding: 6px 8px; border-radius: 4px; background: rgba(217, 164, 65, .08); border: 1px solid rgba(217, 164, 65, .25); font-family: var(--mono); font-size: 12px; color: #eabb64; line-height: 1.55; }
   #teachCard .tt-formula { font-family: var(--mono); font-size: 13px; color: #f0cd7e; margin-top: 5px; letter-spacing: .02em; }
   #teachCard .tt-note { font-size: 12px; color: var(--dim); margin-top: 5px; line-height: 1.5; }
   #teachList .teach-item { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; font-size: 12px; color: var(--dim); }
@@ -1091,6 +1092,11 @@
       </div>
       <div class="hint" style="margin-top:6px">自查三步：静态核对（放置/穿透/连接）→ 自动修复 → 运行探针（卡死/飞出/数值/能量，确定性步进后重置）→ 与题目理论的确定性对照。</div>
     </div>
+    <div class="grp" id="variantGrp" style="display:none">
+      <div class="grp-h">一题多变（对比变式）</div>
+      <div class="hint" style="margin-top:0">规则化派生（不重新解析）：切换后运行并生成解释，两个数字摆在一起就是对比结论。</div>
+      <div id="variantChips" class="btnrow" style="margin-top:6px;flex-wrap:wrap"></div>
+    </div>
     <div class="grp" id="assumpGrp" style="display:none">
       <div class="grp-h">假设与修正记录</div>
       <div id="assumpBody" class="hint" style="margin-top:0"></div>
@@ -1132,8 +1138,9 @@
     <button id="btnCons" title="守恒量读数：动量/能量漂移监测（能量条按初始态归一）"><svg class="ic"><use href="#i-scale"/></svg><span>守恒</span></button>
   </div>
   <div class="sgroup">
-    <button id="btnRec" title="录制帧序列（回放用）"><svg class="ic"><use href="#i-circle-dot"/></svg><span>录制</span></button>
+    <button id="btnFrameRec" title="录制帧序列（回放用）"><svg class="ic"><use href="#i-circle-dot"/></svg><span>录制</span></button>
     <button id="btnReplay" title="回放录制的帧序列" disabled><svg class="ic"><use href="#i-history"/></svg><span>回放</span></button>
+    <button id="btnProjector" title="课堂放映：重置→播放→每个教学关键点按节奏定格（比平时更久，留课堂阅读时间）→结束自动录屏成片下载；再点一次提前结束"><svg class="ic"><use href="#i-player-play"/></svg><span>放映</span></button>
   </div>
   <input type="range" id="replayBar" min="0" max="100" value="0" step="1" title="回放时间轴（拖动逐帧检查）" style="display:none;width:120px">
   <span class="ro ro-sep" id="roFrame" style="display:none" title="回放帧号（逐帧检查用）"></span>

@@ -301,7 +301,9 @@ try {
   await setRow('质量', [3]);
   // 运行 → 碰撞 → 读守恒条
   await page.click('#btnPlay');
-  await page.waitForTimeout(2600);
+  // R7 修根因：动量预置碰撞在 sim t≈1.93s，固定 sleep 在 headless 节流下 simT 只走到
+  // 1.7~2.0 边缘（竞态实锤）——改条件等待碰撞后状态，不再赌墙钟
+  await page.waitForFunction(() => window.MECH.state().simT > 2.2, null, { timeout: 15000, polling: 200 });
   const momData = await page.evaluate(() => {
     const bar = document.querySelector('#consbar');
     return {

@@ -168,3 +168,112 @@ test('patchBrief: warn 超限截断（maxWarn 默认 6）', () => {
 test('patchBrief: 空发现 → 空简报', () => {
   assert.deepEqual(patchBrief([]), []);
 });
+
+// ---------- R7-B1 视觉探针（纯函数判定） ----------
+import { auditVisualNdc, auditVisualCoverage, auditVisualFrame, auditVisualSubject, fitAccel, auditPhysicsCoarse } from '../../src/engine/agent-verify.js';
+
+test('auditVisualNdc: 全程在框内=ok', () => {
+  const F = auditVisualNdc({ tracks: [{ id: 'a', name: '球A', pts: [[0, 0], [0.8, -0.3], [1.2, 0.9]] }] });
+  assert.equal(F.length, 1);
+  assert.equal(F[0].sev, 'ok');
+});
+test('auditVisualNdc: 越限=error 且带 reframe 修复', () => {
+  const F = auditVisualNdc({ tracks: [
+    { id: 'a', name: '球A', pts: [[0, 0], [1.9, 0.2]] },
+    { id: 'b', name: '球B', pts: [[0, 0], [0.1, -2.5]] }] })[0];
+  assert.equal(F.sev, 'error');
+  assert.equal(F.repair, 'reframe');
+  assert.deepEqual(F.ids, ['a', 'b']);
+  assert.ok(F.msg.includes('2.50'));
+});
+test('auditVisualNdc: skipIds 的体不重复定罪（世界级出界去重）', () => {
+  const F = auditVisualNdc({ tracks: [{ id: 'a', name: '飞球', pts: [[5, -5]] }], skipIds: ['a'] });
+  assert.equal(F[0].sev, 'ok');
+});
+test('auditVisualCoverage: 缺网格=error 且 skipPatch（回喂模型救不了渲染层）', () => {
+  const F = auditVisualCoverage({ bodies: [{ id: 'a', name: '球', hasMesh: true }, { id: 'b', name: '块', hasMesh: false }] });
+  const err = F.find((f) => f.sev === 'error');
+  assert.ok(err && err.cat === '视觉·网格');
+  assert.equal(err.skipPatch, true);
+  assert.deepEqual(err.ids, ['b']);
+});
+test('auditVisualCoverage: 滑轮对无跨绳=error；正常=单条 ok 汇总', () => {
+  const E = auditVisualCoverage({ bodies: [{ id: 'a', name: '球', hasMesh: true }], ropeSegs: 0, hasPulleyPair: true });
+  assert.ok(E.some((f) => f.cat === '视觉·绳' && f.sev === 'error'));
+  const OK = auditVisualCoverage({ bodies: [{ id: 'a', name: '球', hasMesh: true }], ropeSegs: 3, hasPulleyPair: true });
+  assert.equal(OK.length, 1);
+  assert.equal(OK[0].sev, 'ok');
+  assert.ok(OK[0].msg.includes('3'));
+});
+test('auditVisualFrame: t0 退化=error+tightframe；t0 好而末帧退化=warn', () => {
+  const bad = auditVisualFrame({ t0: { mean: 2.1, bright: 10 } });
+  assert.equal(bad[0].sev, 'error');
+  assert.equal(bad[0].repair, 'tightframe');
+  const warn = auditVisualFrame({ t0: { mean: 18, bright: 900 }, tEnd: { mean: 1, bright: 2 } });
+  assert.ok(warn.some((f) => f.sev === 'warn' && f.item === '探针末帧'));
+  assert.ok(warn.some((f) => f.sev === 'ok' && f.item === '建场定格帧'));
+  const clean = auditVisualFrame({ t0: { mean: 18, bright: 900 }, tEnd: { mean: 15, bright: 400 } });
+  assert.ok(!clean.some((f) => f.sev !== 'ok'));
+});
+
+// ---------- R7-B1 物理粗对账（观察量 vs 理论量级） ----------
+test('fitAccel: 恒加速序列回归出正确斜率（跳过安定段）', () => {
+  const samples = [];
+  for (let i = 0; i <= 30; i++) {
+    const t = i * 0.1;
+    samples.push({ t, states: { a: { p: [0, 0, 0], v: [0, -9.81 * Math.max(0, t - 0.2), 0] } } });
+  }
+  const a = fitAccel(samples, 'a');
+  assert.ok(Math.abs(a - (-9.81)) < 0.01, 'a=' + a);
+});
+test('auditPhysicsCoarse: atwoodLike 吻合=ok / 偏差>30%=error', () => {
+  // a=(3−1)×10/(3+1)=5 m/s²；两侧一升一降同量级
+  const samples = [];
+  for (let i = 0; i <= 30; i++) {
+    const t = i * 0.1, v = 5 * Math.max(0, t - 0.25);
+    samples.push({ t, states: { L: { p: [0, 0, 0], v: [0, -v, 0] }, R: { p: [1, 0, 0], v: [0, v, 0] } } });
+  }
+  const ok = auditPhysicsCoarse({ samples, docInfo: { g: 10, topology: 'atwoodLike', masses: { L: 3, R: 1 }, pairIds: ['L', 'R'] } });
+  assert.equal(ok.sev, 'ok');
+  // L 侧加速度砍到 30%（1.5 m/s²）：均值 (1.5+5)/2=3.25，对 5.00 偏差 35%>30% → error
+  const samples2 = samples.map((s) => ({ t: s.t, states: { L: { p: [0, 0, 0], v: [0, -s.states.L.v[1] * 0.3, 0] }, R: s.states.R } }));
+  const bad = auditPhysicsCoarse({ samples: samples2, docInfo: { g: 10, topology: 'atwoodLike', masses: { L: 3, R: 1 }, pairIds: ['L', 'R'] } });
+  assert.equal(bad.sev, 'error');
+  assert.ok(bad.msg.includes('(m₁−m₂)g/(m₁+m₂)=5.00'));
+});
+test('auditPhysicsCoarse: 质量平衡跳过 / freefallLike 对账 g / 拓扑空=null', () => {
+  const bal = auditPhysicsCoarse({ samples: [], docInfo: { g: 10, topology: 'atwoodLike', masses: { L: 1, R: 1 }, pairIds: ['L', 'R'] } });
+  assert.equal(bal.sev, 'ok');
+  const samples = [];
+  for (let i = 0; i <= 30; i++) {
+    const t = i * 0.1;
+    samples.push({ t, states: { f: { p: [0, 0, 0], v: [0, -9.81 * t, 0] } } });
+  }
+  const ff = auditPhysicsCoarse({ samples, docInfo: { g: 9.81, topology: 'freefallLike', pairIds: ['f'] } });
+  assert.equal(ff.sev, 'ok');
+  assert.equal(auditPhysicsCoarse({ samples, docInfo: null }), null);
+});
+test('patchBrief: skipPatch 的 error 不进修订简报（视觉网格类不烧模型轮次）', () => {
+  const brief = patchBrief([
+    { sev: 'error', cat: '视觉·网格', item: '实体网格', msg: '无网格', skipPatch: true },
+    { sev: 'error', cat: '静态·嵌入', item: '块', msg: '嵌入' },
+  ]);
+  assert.equal(brief.length, 1);
+  assert.ok(brief[0].includes('静态·嵌入'));
+});
+
+test('auditVisualSubject: 正常份额=ok / 芝麻份额=error+tightframe / 无轨迹=ok', () => {
+  // atwood 实测正常帧：NDC 轨迹 ~0.6×0.3 → diag 0.67 → 份额 24%
+  const normal = auditVisualSubject({ tracks: [{ id: 'a', name: '球', pts: [] }] });
+  assert.equal(normal[0].sev, 'ok');   // 空轨迹=静态场景不查
+  const ok = auditVisualSubject({ tracks: [{ id: 'a', name: '球', pts: [[-0.3, -0.15], [0.3, 0.15]] }] });
+  assert.equal(ok[0].sev, 'ok');
+  // 260m 远：全轨迹挤在 NDC ±0.01 → 份额 0.5% → error
+  const tiny = auditVisualSubject({ tracks: [{ id: 'a', name: '球', pts: [[-0.01, -0.005], [0.01, 0.005]] }] });
+  assert.equal(tiny[0].sev, 'error');
+  assert.equal(tiny[0].repair, 'tightframe');
+  assert.equal(tiny[0].skipPatch, true);
+  // 宽抛体合法宽取景：轨迹撑满画面 → ok
+  const wide = auditVisualSubject({ tracks: [{ id: 'a', name: '球', pts: [[-0.9, -0.4], [0.9, 0.4]] }] });
+  assert.equal(wide[0].sev, 'ok');
+});

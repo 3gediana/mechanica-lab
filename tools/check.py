@@ -39,6 +39,9 @@ _ui = ["tools/serve.py"] + [f"tools/ui-test/p{i}.mjs" for i in range(0, 32)] + [
     "tools/ui-test/w1-manual.mjs", "tools/ui-test/w2-agent.mjs", "tools/ui-test/w3-failures.mjs",
     "tools/ui-test/w4-mixed.mjs", "tools/ui-test/w5-journey.mjs", "tools/ui-test/w6-depth.mjs",
     "tools/ui-test/w7-presets-explain.mjs",
+    # R6 收官批 + R7 自检自修（p50 教学跃迁随 A 战区交付时入列）
+    "tools/ui-test/p49-visual-audit.mjs", "tools/ui-test/p50-teach-elevate.mjs", "tools/ui-test/p51-selfheal.mjs",
+    "tools/ui-test/p52-render-consistency.mjs", "src/engine/teaching.js", "test/unit/teaching.test.mjs",
 ]
 for tool in _ui:
     need(ROOT / tool, (ROOT / tool).exists(), f"缺失: {tool}")

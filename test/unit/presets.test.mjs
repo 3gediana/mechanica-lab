@@ -220,9 +220,11 @@ test('springSHM：k=20、damping=0（默认 0.5 回归锚）、T≈1.40s、墙�
   const T = 2 * Math.PI * Math.sqrt(1 / 20);
   assert.ok(T > 1.39 && T < 1.41);
   // 振幅 = 初始拉伸，且压至最左不穿墙（墙右缘 −0.9 vs 球最左表面）
-  const stretch = dist(wall.transform.pos, ball.transform.pos) - spring.params.restLength;
+  // RP-FIX（弹簧表面口径）：restLength 现为表面距，拉伸=中心距−pad−L0（pad 与 runtime.springSurfacePad 同源）
+  const pad = wall.params.sx / 2 + ball.params.radius;
+  const stretch = dist(wall.transform.pos, ball.transform.pos) - pad - spring.params.restLength;
   assert.ok(Math.abs(stretch - 0.6) < 1e-9, `拉伸 ${stretch}`);
-  const eq = wall.transform.pos[0] + spring.params.restLength;
+  const eq = wall.transform.pos[0] + pad + spring.params.restLength;
   assert.ok(eq - stretch - ball.params.radius > wall.transform.pos[0] + wall.params.sx / 2, '极端位置不穿墙');
 });
 
@@ -234,7 +236,9 @@ test('springVert：从自然长静止释放（球-锚距=原长）、damping=0�
   const anchor = byType(doc, 'box')[0];
   assert.equal(spring.params.damping, 0);
   assert.equal(spring.params.stiffness, 30);
-  assert.ok(Math.abs(dist(anchor.transform.pos, ball.transform.pos) - spring.params.restLength) < 1e-9);
+  // RP-FIX（表面口径）：从自然长释放 = 表面距恰为原长（中心距多出 padV）
+  const padV = anchor.params.sy / 2 + ball.params.radius;
+  assert.ok(Math.abs(dist(anchor.transform.pos, ball.transform.pos) - padV - spring.params.restLength) < 1e-9);
   assert.ok(speed(ball.physics.linvel) === 0);
   const maxStretch = 2 * ball.physics.mass * G0 / spring.params.stiffness;
   assert.ok(maxStretch > 0.65 && maxStretch < 0.66);            // ≈0.654
@@ -251,7 +255,8 @@ test('coupled：两块同速 0.5、k=15、初始拉伸 0.3、地面加长 sx=14'
   assert.ok(blocks.every((b) => b.physics.linvel[0] === 0.5));
   assert.equal(spring.params.stiffness, 15);
   assert.equal(spring.params.damping, 0);
-  const sep = dist(blocks[0].transform.pos, blocks[1].transform.pos);
+  // RP-FIX（表面口径）：拉伸按表面距度量（中心距扣除两块半宽）
+  const sep = dist(blocks[0].transform.pos, blocks[1].transform.pos) - (blocks[0].params.sx / 2 + blocks[1].params.sx / 2);
   assert.ok(Math.abs(sep - (spring.params.restLength + 0.3)) < 1e-9, `间距 ${sep}`);
   const T = 2 * Math.PI * Math.sqrt(1 / (2 * 15));
   assert.ok(T > 1.14 && T < 1.16);
@@ -267,7 +272,9 @@ test('springGun：弹簧连墙-推板（非球）、压缩量恰 0.5、球与板
   const plate = doc.entities.find((e) => e.name.includes('推板'));
   const ball = byType(doc, 'sphere')[0];
   assert.deepEqual(spring.attach, [wall.id, plate.id], '弹簧必须连墙-推板（拉推双向不能直连球）');
-  const compression = spring.params.restLength - Math.abs(plate.transform.pos[0] - wall.transform.pos[0]);
+  // RP-FIX（表面口径）：压缩量按表面距度量（墙半厚+板半厚）
+  const padG = wall.params.sx / 2 + plate.params.sx / 2;
+  const compression = spring.params.restLength - (Math.abs(plate.transform.pos[0] - wall.transform.pos[0]) - padG);
   assert.ok(Math.abs(compression - 0.5) < 1e-6, `压缩量 ${compression}`);
   assert.equal(plate.physics.mass, 0.02);
   assert.equal(plate.transform.pos[1], ball.transform.pos[1], '推板与球等高（水平推力）');

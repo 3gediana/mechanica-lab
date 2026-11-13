@@ -28,23 +28,31 @@ try {
   await page.evaluate(() => window.MECH.play());
   await page.waitForTimeout(800);
   const spring = await page.evaluate(() => {
-    const M = window.MECH, vp = M.__vp;
+    const M = window.MECH, vp = M.__vp, rt = M.__rt;
     const spDoc = M.doc().entities.find((e) => e.type === 'spring');
     if (!spDoc) return null;
     const mesh = vp._bindLookup(spDoc.id).mesh;
-    const a = vp._bindLookup(spDoc.attach[0]).mesh.position;
-    const c = vp._bindLookup(spDoc.attach[1]).mesh.position;
+    const bindA = vp._bindLookup(spDoc.attach[0]), bindC = vp._bindLookup(spDoc.attach[1]);
+    const a = bindA.mesh.position, c = bindC.mesh.position;
     const dir = new (mesh.position.constructor)(0, 0.5 * mesh.scale.y, 0).applyQuaternion(mesh.quaternion);
     const p1 = mesh.position.clone().add(dir);
     const p2 = mesh.position.clone().sub(dir);
-    // 端点-中心配对误差：两种指派取小（p1↔a&p2↔c 或 p1↔c&p2↔a），各取两端最大偏差
+    // RP-FIX（弹簧表面口径）：端点应贴合实体「表面」而非中心——期望表面点用运行时同款
+    // _linkAnchorOffset 计算（与 _syncLinks/审计同源，分叉即假阳）
+    const n = c.clone().sub(a);
+    const len = n.length() || 1e-6;
+    n.divideScalar(len);
+    const offA = rt._linkAnchorOffset(bindA, n.clone(), len);
+    const offB = rt._linkAnchorOffset(bindC, n.clone().negate(), len);
+    const surfA = a.clone().addScaledVector(n, offA);
+    const surfB = c.clone().addScaledVector(n, -offB);
     const err = Math.min(
-      Math.max(p1.distanceTo(a), p2.distanceTo(c)),
-      Math.max(p1.distanceTo(c), p2.distanceTo(a)));
+      Math.max(p1.distanceTo(surfA), p2.distanceTo(surfB)),
+      Math.max(p1.distanceTo(surfB), p2.distanceTo(surfA)));
     return { err: +err.toFixed(4), len: +mesh.scale.y.toFixed(3) };
   });
   ok('弹簧 mesh 存在', !!spring, JSON.stringify(spring || {}));
-  if (spring) ok('弹簧端点贴合实体中心（<1cm）', spring.err < 0.01, `err=${spring.err}m len=${spring.len}`);
+  if (spring) ok('弹簧端点贴合实体表面（<1cm，RP 表面口径）', spring.err < 0.01, `err=${spring.err}m len=${spring.len}`);
 
   // ---- 2. 静息钳制（地面静球） ----
   await page.evaluate(() => {

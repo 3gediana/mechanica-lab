@@ -628,7 +628,9 @@ export const PRESETS = {
       }, seq);
       const ball = createEntity('sphere', {
         name: '振子球',
-        transform: { pos: [0.5, 0.15, 0], rot: [0, 0, 0] },
+        // RP-FIX（弹簧表面口径）：球心外移 pad(墙半厚0.1+球半径0.15)=0.25——物理拉伸量
+        // 与旧中心口径分毫不差（回归锚不动），线圈渲染长=表面距=旧中心距，视觉/公式同源
+        transform: { pos: [0.75, 0.15, 0], rot: [0, 0, 0] },
         params: { radius: 0.15 },
         physics: {
           body: 'dynamic', mass: m, friction: 0, restitution: 0,
@@ -643,7 +645,7 @@ export const PRESETS = {
         name: `弹簧 k=${k}`,
         params: { stiffness: k, restLength: L0, damping: 0 },   // 默认 0.5 会衰减，必须显式置 0
         attach: [wall.id, ball.id],
-        transform: { pos: [(-1 + 0.5) / 2, 0.15, 0] },
+        transform: { pos: [(-1 + 0.75) / 2, 0.15, 0] },
         source: 'preset',
       }, seq);
       doc.entities.push(ground, wall, ball, spring);
@@ -672,7 +674,8 @@ export const PRESETS = {
       }, seq);
       const ball = createEntity('sphere', {
         name: '振子球',
-        transform: { pos: [0, 3.0 - L0, 0], rot: [0, 0, 0] },   // 从自然长静止释放
+        // RP-FIX：表面口径下移 padV(0.075+0.12)=0.195——表面距=L0（自然长释放，物理同旧口径）
+        transform: { pos: [0, 3.0 - L0 - 0.195, 0], rot: [0, 0, 0] },   // 从自然长静止释放
         params: { radius: 0.12 },
         physics: {
           body: 'dynamic', mass: m, friction: 0.3, restitution: 0,
@@ -687,7 +690,7 @@ export const PRESETS = {
         name: `弹簧 k=${k}`,
         params: { stiffness: k, restLength: L0, damping: 0 },
         attach: [anchor.id, ball.id],
-        transform: { pos: [0, (3.0 + 2.0) / 2, 0] },
+        transform: { pos: [0, (3.0 + 3.0 - L0 - 0.195) / 2, 0] },
         source: 'preset',
       }, seq);
       doc.entities.push(anchor, ball, spring);
@@ -727,8 +730,9 @@ export const PRESETS = {
         measured: true,
         source: 'preset',
       }, seq);
-      const a = mkBlock(-0.55, 'chrome');
-      const b = mkBlock(0.55, 'brass');
+      // RP-FIX：表面口径各外移 pad/2=0.15（两块 sx/2=0.15）——旧中心距 1.1 的物理拉伸不变
+      const a = mkBlock(-0.70, 'chrome');
+      const b = mkBlock(0.70, 'brass');
       const spring = createEntity('spring', {
         name: `耦合弹簧 k=${k}`,
         params: { stiffness: k, restLength: L0, damping: 0 },
@@ -780,7 +784,8 @@ export const PRESETS = {
       // 轻推板：弹簧拉/推双向不能直连弹丸（会永远振荡）→ 推板传力，原长点板减速球自然分离
       const plate = createEntity('box', {
         name: '轻推板 (0.02kg)',
-        transform: { pos: [-1.2 + L0 - dx, 1.1, 0], rot: [0, 0, 0] },
+        // RP-FIX：表面口径外移 pad=0.12（墙半厚+板半厚）——压缩量 0.5 m 物理不变
+        transform: { pos: [-1.2 + L0 - dx + 0.12, 1.1, 0], rot: [0, 0, 0] },
         params: { sx: 0.04, sy: 0.2, sz: 0.3 },
         physics: {
           body: 'dynamic', mass: 0.02, friction: 0, restitution: 0,
@@ -792,7 +797,7 @@ export const PRESETS = {
       }, seq);
       const ball = createEntity('sphere', {
         name: '弹射球',
-        transform: { pos: [-1.2 + L0 - dx + 0.02 + 0.1 + 0.002, 1.1, 0], rot: [0, 0, 0] },
+        transform: { pos: [-1.2 + L0 - dx + 0.12 + 0.02 + 0.1 + 0.002, 1.1, 0], rot: [0, 0, 0] },
         params: { radius: 0.1 },
         physics: {
           body: 'dynamic', mass: 1, friction: 0, restitution: 0.05,
@@ -807,7 +812,7 @@ export const PRESETS = {
         name: `弹簧 k=${k}`,
         params: { stiffness: k, restLength: L0, damping: 0 },
         attach: [wall.id, plate.id],
-        transform: { pos: [(-1.2 + -1.2 + L0 - dx) / 2, 1.1, 0] },
+        transform: { pos: [(-1.2 + -1.2 + L0 - dx + 0.12) / 2, 1.1, 0] },
         source: 'preset',
       }, seq);
       doc.entities.push(ground, table, wall, plate, ball, spring);

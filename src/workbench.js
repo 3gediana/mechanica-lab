@@ -10,11 +10,16 @@ import {
 import { Runtime, FIXED_H, attachRegistry } from './engine/runtime.js';
 import { Viewport } from './engine/viewport.js';
 import { recorder } from './engine/recorder.js';
+// R7-A 战区教学跃迁纯函数层：A1 简报/A2a 代入行/A2d 变式/A3 时机检测/A4 节奏表/A2c 旁白文案
+import { briefFromPlan, substitutionLine, deriveVariants, detectTurn, detectLeaveSurface,
+  detectEquilibrium, detectSinkFloat, paceFor, narrationText, sceneFamily } from './engine/teaching.js';
 import { getPreset, PRESETS, PRESET_CAMERA } from './engine/presets.js';
 import { createMaterials } from './materials.js';
 import { normalizeParse, planToOverrides, ballOnRamp } from './engine/parse-schema.js';
 import { explainRun } from './engine/explain.js';
-import { auditStatic, auditMotion, summarize, rampGeomFromParams, patchBrief } from './engine/agent-verify.js';
+import { auditStatic, auditMotion, summarize, rampGeomFromParams, patchBrief,
+  auditVisualNdc, auditVisualCoverage, auditVisualFrame, auditVisualSubject, auditPhysicsCoarse,
+  auditRenderPhysics } from './engine/agent-verify.js';
 import { renderThumb } from './engine/thumbs.js';
 import { PerfMon } from './perfmon.js';
 import { SoundEngine } from './sound.js';
@@ -794,14 +799,22 @@ function maybeHitstop(strength) {
 // 事件检测：release=运行首帧、contact/ground=撞击对（ground=对家是地面）、highest/lowest=vy 变号、
 // end=模拟 6s 自动收尾或用户暂停时。触发即：场景内卡片（3D 锚定跟随，textContent 防注入）+
 // 录屏字幕（recorder.caption，公式进视频）+ 0.25x 教学慢放 1.6s（复用子弹时间缓动，不碰用户档位）。
-let teachArmed = [];            // [{moment,title,formula,note,fired}]
+let teachArmed = [];            // [{moment,title,formula,note,fired,at,sub}]
 let teachVyPrev = new Map();    // id -> prev vy（变号检测）
+let teachFullPrev = new Map();  // id -> prev {x,y,z}（A3 turn：vx 变号检测）
+let teachGroundPrev = new Map();// id -> prev 接触态（A3 leaveSurface）
+let teachStill = new Map();     // id -> {wasMoving, sec}（A3 equilibrium）
+let teachVertPrev = new Map();  // id -> {wasMoving}（A3 sinkFloat）
 let teachSeen = false;          // release 已发（每轮 play 重置）
 let teachT = 0;                 // 模拟秒累计（end 自动收尾）
 const TEACH_END_AT = 6;
 function armTeaching(plan) {
   teachArmed = (plan && Array.isArray(plan.teaching)) ? plan.teaching.map((t) => ({ ...t, fired: false })) : [];
   teachVyPrev = new Map();
+  teachFullPrev = new Map();
+  teachGroundPrev = new Map();
+  teachStill = new Map();
+  teachVertPrev = new Map();
   teachSeen = false;
   teachT = 0;
   renderTeachList();
@@ -810,35 +823,93 @@ function armTeaching(plan) {
 function resetTeachRun() {
   teachSeen = false;
   teachT = 0;
+  teachMarks.length = 0;          // A2b：教学打标随轮次清空
   teachVyPrev.clear();
+  teachFullPrev.clear();
+  teachGroundPrev.clear();
+  teachStill.clear();
+  teachVertPrev.clear();
   for (const t of teachArmed) t.fired = false;
   renderTeachList();
 }
-function teachSlowmo() {
+function teachSlowmo(moment) {
+  const pace = paceFor(moment);                     // A4 节奏分级：各时机不再一刀切 1.6s
   const now = performance.now();
   _bptLast = now;                  // 与自动子弹时间共享冷却（防双触发打架）
-  _bptUntil = now + 1600;
+  _bptUntil = now + (pace.slow > 0 ? 1600 : 0);   // 定格型不走慢放通道（pause 管时长）
   const chip = $('modeChip');
-  if (chip && !chip.textContent.includes('教学慢放')) chip.textContent += ' · 教学慢放';
+  if (pace.slow > 0 && chip && !chip.textContent.includes('教学慢放')) chip.textContent += ' · 教学慢放';
   if (chip) chip.classList.add('grab');
+  return pace;
+}
+// A4 定格型时机：真暂停画面 hold ms 后自动续播（用户手动暂停/重置即取消定格——
+// 不与用户操作打架；pauseToggle 不动倍率）；放映模式下 hold ×1.4 留课堂阅读时间。
+let _teachFreezeTimer = 0;
+function teachFreeze(holdMs) {
+  if (paused) return;                              // 用户已暂停：不抢
+  clearTimeout(_teachFreezeTimer);
+  _teachFreezing = true;
+  pauseToggle();                                   // 进定格（不触发 end 讲解）
+  _teachFreezing = false;
+  const chip = $('modeChip');
+  if (chip && !chip.textContent.includes('教学定格')) chip.textContent += ' · 教学定格';
+  _teachFreezeTimer = setTimeout(() => {
+    if (!paused) return;                           // 用户已自行续播
+    const chip2 = $('modeChip');
+    if (chip2) chip2.textContent = chip2.textContent.replace(' · 教学定格', '');
+    _teachFreezing = true;
+    pauseToggle();                                 // 自动续播
+    _teachFreezing = false;
+  }, holdMs * (projectorOn ? 1.4 : 1));
 }
 function fireTeach(moment, pos) {
   const tip = teachArmed.find((x) => x.moment === moment && !x.fired);
   if (!tip) return;
   tip.fired = true;
+  tip.at = runtime.simT;
+  // A2a 公式实时代入行：确定性从场景文档算出（与解释器同源），模型只给文案不许给数字
+  tip.sub = agentPlan ? substitutionLine(agentPlan, doc, moment) : null;
   showTeachCard(tip, pos);
-  recorder.caption(`💡 ${tip.title}${tip.formula ? '｜' + tip.formula : ''}`);   // 公式进录屏字幕
-  teachSlowmo();
+  recorder.caption(`💡 ${tip.title}${tip.formula ? '｜' + tip.formula : ''}${tip.sub ? '｜' + tip.sub.replace('代入：', '') : ''}`);   // 公式+代入进录屏字幕
+  const pace = teachSlowmo(moment);
+  if (pace.pause) teachFreeze(pace.hold);          // A4：碰撞/落地等一瞬即逝时刻真定格
+  teachSpotlight(moment);                          // A2b 聚光：矢量闪烁+曲线打标
+  speakTeach(tip);                                 // A2c 语音旁白（尊重全局静音，静默降级）
   renderTeachList();
 }
+// A2c TTS：Web Speech 本地中文旁白；全局静音=TTS 关；不可用/异常一律静默降级纯视觉
+let _ttsVoices = null;
+function speakTeach(tip) {
+  try {
+    if (sound.muted || !('speechSynthesis' in window)) return;
+    if (!_ttsVoices) _ttsVoices = speechSynthesis.getVoices().filter((v) => v.lang && v.lang.startsWith('zh'));
+    const u = new SpeechSynthesisUtterance(narrationText(tip, tip.sub));
+    if (_ttsVoices.length) u.voice = _ttsVoices[0];
+    u.rate = 1.05; u.pitch = 1; u.volume = 0.9;
+    speechSynthesis.cancel();                      // 上一条未播完让位（事件密集时不叠声）
+    speechSynthesis.speak(u);
+  } catch { /* TTS 不可用=纯视觉降级（QUALITY BAR：静默降级） */ }
+}
+// A2b 聚光：contact/ground 等时刻让「此刻画面在干嘛」可读——受力箭头闪烁强调 +
+// 曲线面板游标跳到该瞬间打标（琥珀竖线，3.4s 后淡出）
+function teachSpotlight(moment) {
+  if (moment !== 'contact' && moment !== 'ground') return;
+  teachMarks.push({ t: runtime.simT, until: performance.now() + 3400 });
+  if (teachMarks.length > 6) teachMarks.shift();
+  viewport.setForceFlash(performance.now() + 2400);   // 叠加层没开也临时点亮（窗口后回用户开关态）
+}
+const teachMarks = [];      // 曲线面板教学标记 [{t, until}]
 function showTeachCard(tip, pos) {
   const card = $('teachCard');
   if (!card) return;
+  // A2a：代入行放 formula 之下 note 之上——学生先看公式再看本场景真实数字怎么进去的
   card.innerHTML = '<div class="tt-title"></div>'
     + (tip.formula ? '<div class="tt-formula"></div>' : '')
+    + (tip.sub ? '<div class="tt-sub"></div>' : '')
     + (tip.note ? '<div class="tt-note"></div>' : '');
   card.querySelector('.tt-title').textContent = '💡 ' + (tip.title || tip.moment);   // 模型产物全走 textContent
   if (tip.formula) card.querySelector('.tt-formula').textContent = tip.formula;
+  if (tip.sub) card.querySelector('.tt-sub').textContent = tip.sub;
   if (tip.note) card.querySelector('.tt-note').textContent = tip.note;
   card.classList.remove('on');
   void card.offsetWidth;   // 重启入场动画
@@ -866,14 +937,42 @@ function tickTeach(dtSim) {
     if (!teachSeen) { teachSeen = true; fireTeach('release', null); }
     if (teachT >= TEACH_END_AT) fireTeach('end', null);
     for (const [id, b] of runtime.binds) {
-      if (!b.body || !b.entity || !b.entity.physics || b.entity.physics.body !== 'dynamic') { teachVyPrev.delete(id); continue; }
-      const vy = b.body.linvel().y;
+      if (!b.body || !b.entity || !b.entity.physics || b.entity.physics.body !== 'dynamic') { teachVyPrev.delete(id); teachFullPrev.delete(id); continue; }
+      const v = b.body.linvel();
       const prev = teachVyPrev.get(id);
-      teachVyPrev.set(id, vy);
+      const prevFull = teachFullPrev.get(id);
+      teachVyPrev.set(id, v.y);
+      teachFullPrev.set(id, v);
       if (prev == null) continue;
       const p = b.mesh.position;
-      if (prev > 0.06 && vy <= 0) fireTeach('highest', [p.x, p.y + 0.3, p.z]);
-      else if (prev < -0.06 && vy >= 0) fireTeach('lowest', [p.x, p.y + 0.3, p.z]);
+      if (prev > 0.06 && v.y <= 0) fireTeach('highest', [p.x, p.y + 0.3, p.z]);
+      else if (prev < -0.06 && v.y >= 0) fireTeach('lowest', [p.x, p.y + 0.3, p.z]);
+      // A3 新时机（检测器纯函数在 teaching.js，这里只喂逐帧速度/接触/浸没状态）：
+      // turn=水平折返（vx 变号近水平）；leaveSurface=支撑消失且正在上升（弹起/抛离）
+      if (prevFull && detectTurn(prevFull.x, v.x, v.y)) fireTeach('turn', [p.x, p.y + 0.3, p.z]);
+      const onG = runtime.contactNormals && runtime.contactNormals.has(id);
+      const prevG = teachGroundPrev.get(id);
+      teachGroundPrev.set(id, !!onG);
+      if (prevG != null && detectLeaveSurface(prevG, !!onG, v.y)) fireTeach('leaveSurface', [p.x, p.y + 0.3, p.z]);
+      // equilibrium=曾运动过且持续 ≥1s 近静止（静息钳制/悬浮平衡）
+      const sp = Math.hypot(v.x, v.y, v.z);
+      const st = teachStill.get(id) || { wasMoving: false, sec: 0 };
+      if (sp > 0.25) st.wasMoving = true;
+      st.sec = sp < 0.04 ? st.sec + dtSim : 0;
+      teachStill.set(id, st);
+      if (detectEquilibrium(st.wasMoving, st.sec, sp)) {
+        st.wasMoving = false;                      // 触发一次后重置（再动再报）
+        fireTeach('equilibrium', [p.x, p.y + 0.3, p.z]);
+      }
+      // sinkFloat=浸入液体且竖直运动趋停（浮沉到达平衡位）——浸没态读 runtime 浮力环的 _vSub
+      const imm = (b._vSub || 0) > 0;
+      const sv = teachVertPrev.get(id) || { wasMoving: false };
+      if (Math.abs(v.y) > 0.3) sv.wasMoving = true;
+      teachVertPrev.set(id, sv);
+      if (detectSinkFloat(sv.wasMoving, v.y, imm)) {
+        sv.wasMoving = false;
+        fireTeach('sinkFloat', [p.x, p.y + 0.3, p.z]);
+      }
     }
   }
   // 滑轮行程到端自动定格（R6-035/037，全场景）：上升侧抵达滑轮下缘=绳行程用尽。理想约束
@@ -895,7 +994,8 @@ function tickTeach(dtSim) {
     }
   }
 }
-const TEACH_MOMENT_CN = { release: '释放', contact: '接触/碰撞', highest: '最高/折返', lowest: '最低点', ground: '落地', end: '收尾' };
+const TEACH_MOMENT_CN = { release: '释放', contact: '接触/碰撞', highest: '最高/折返', lowest: '最低点', ground: '落地', end: '收尾',
+  turn: '水平折返', leaveSurface: '抛离', equilibrium: '平衡', sinkFloat: '浮沉平衡' };
 function renderTeachList() {
   const el = $('teachList');
   if (!el) return;
@@ -912,7 +1012,106 @@ function renderTeachList() {
   });
 }
 function teachState() {
-  return { armed: teachArmed.length, fired: teachArmed.filter((t) => t.fired).length, items: teachArmed.map((t) => ({ moment: t.moment, title: t.title, fired: t.fired })) };
+  return { armed: teachArmed.length, fired: teachArmed.filter((t) => t.fired).length,
+    items: teachArmed.map((t) => ({ moment: t.moment, title: t.title, fired: t.fired, sub: t.sub || null })),
+    marks: teachMarks.length, projector: projectorOn };
+}
+
+// ============ A5 课堂放映模式：一键=重置→播放→关键点定格（节奏×1.4）→录屏成片 ============
+// 老师拿到能直接放课堂的讲解片：教学 plan 的全部 moment 依次触发（代入行/聚光/TTS 同源
+// 复用），'end' 触发后收尾停录下载 WebM。再点一次/用户重置=提前结束（诚实不硬撑）。
+let projectorOn = false;
+let _projGuard = 0;
+function projectorRun() {
+  if (projectorOn) { projectorStop('已提前结束放映'); return; }
+  if (!teachArmed.length) { toast('没有已装载的教学要点（先解析题目建场），放映无从谈起', true); return; }
+  projectorOn = true;
+  const btn = $('btnProjector');
+  if (btn) btn.classList.add('hot');
+  resetSim(true);
+  const r = recorder.start(viewport.renderer.domElement);
+  if (!r.ok) toast('录屏不可用（' + (r.reason === 'busy' ? '已在录制中' : '此浏览器不支持') + '），将纯放映不出片', true);
+  recorder.caption('课堂放映 · 开始');
+  play();
+  toast('放映中：关键点自动定格，结束后自动保存讲解片');
+  // 收尾哨兵：end 卡显示 1.6s 后停录；用户重置随时撤（诚实退出）
+  clearInterval(_projGuard);
+  _projGuard = setInterval(() => {
+    if (!projectorOn) { clearInterval(_projGuard); return; }
+    if (mode === 'edit') { projectorStop('场景被重置，放映结束'); return; }
+    const endTip = teachArmed.find((t) => t.moment === 'end' && t.fired);
+    if (!endTip) return;
+    if (!endTip._wall) endTip._wall = performance.now();
+    if (performance.now() - endTip._wall > 1600) projectorStop('放映完毕，讲解片已保存');
+  }, 250);
+}
+async function projectorStop(msg) {
+  projectorOn = false;
+  clearInterval(_projGuard);
+  const btn = $('btnProjector');
+  if (btn) btn.classList.remove('hot');
+  if (mode === 'run' && !paused) pauseToggle();   // 定在终态画面（不重置——老师要看结果）
+  if (recorder.active) {
+    const blob = await recorder.stop();
+    if (blob && blob.size > 1024) {
+      const name = recorder.saveBlob(blob);
+      toast(`${msg}：${name}（${(blob.size / 1048576).toFixed(1)} MB）`);
+      return;
+    }
+  }
+  toast(msg);
+}
+{ // simbar 接线
+  const pb = $('btnProjector');
+  if (pb) pb.onclick = () => projectorRun();
+}
+
+// ============ A2d 对比变式（一题多变）：从建好的场景文档规则化派生（非模型调用） ============
+// 变式只动参数（摩擦/质量/初速），物理链路/教学 plan 原样——切回原题、跑解释，两个数字
+// 摆在一起就是「对比结论」。派生规则纯函数在 teaching.js（deriveVariants）。
+let variantBase = null;          // 原题 doc 深拷贝（切回用）
+let variantList = [];
+function setupVariantPanel() {
+  variantBase = JSON.parse(JSON.stringify(doc));
+  variantList = deriveVariants(doc);
+  const grp = $('variantGrp');
+  if (!grp) return;
+  if (!variantList.length) { grp.style.display = 'none'; return; }
+  grp.style.display = 'block';
+  const chips = $('variantChips');
+  chips.innerHTML = '';
+  const mk = (label, hint, hot, fn) => {
+    const b = document.createElement('button');
+    b.className = 'tbtn' + (hot ? ' hot' : '');
+    b.style.cssText = 'flex:0 0 auto';
+    b.textContent = label;
+    b.title = hint;
+    b.onclick = fn;
+    chips.appendChild(b);
+  };
+  mk('原题', '题面原样', true, () => switchVariantDoc(null));
+  variantList.forEach((v, i) => mk(v.label, v.hint, false, () => switchVariantDoc(i)));
+  updateVariantChips(-1);
+}
+let _variantNow = -1;            // -1=原题
+function updateVariantChips(idx) {
+  _variantNow = idx;
+  const chips = $('variantChips');
+  if (!chips) return;
+  [...chips.children].forEach((b, i) => b.classList.toggle('hot', (i - 1) === idx));
+}
+function switchVariantDoc(idx) {
+  if (idx === _variantNow) return;
+  const v = idx == null ? null : variantList[idx];
+  // 走专用通道而非 applyDoc：变式探索要保留解析 plan 与教学装填（对比结论的前提）
+  doc = v ? v.doc : JSON.parse(JSON.stringify(variantBase));
+  mode = 'edit'; paused = false;
+  rebuildAll();
+  updateSimbarStatic();
+  commitChange(v ? `切换变式：${v.label}` : '切回原题');
+  armTeaching(agentPlan);
+  updateVariantChips(v ? idx : -1);
+  toast(v ? `已切换到「${v.label}」——运行后对照解释数字，体会参数如何改变结论` : '已切回原题');
 }
 
 // ============ 阿特伍德跨绳可视化（R6-036）：约束是纯 PBD 投影（无绳实体） ============
@@ -1021,10 +1220,11 @@ function play() {
   sound.ui('play');
   updateSimbarStatic();
 }
+let _teachFreezing = false;   // A4 教学定格中（pauseToggle 不当作用户暂停讲 end）
 function pauseToggle() {
   if (mode !== 'run') return;
   paused = !paused;
-  if (paused && teachArmed.length) fireTeach('end', null);   // R6-033：用户暂停=讲收尾总结
+  if (paused && teachArmed.length && !_teachFreezing) fireTeach('end', null);   // R6-033：用户暂停=讲收尾总结（教学定格不算）
   // 暂停态 gizmo 摆姿势（PL-14）：暂停=接管摆位，继续=交还运行
   viewport.setGizmoEnabled(paused && !!selectedId);
   sound.ui('pause');
@@ -1567,7 +1767,7 @@ function bindUI() {
       try { localStorage.setItem('mech.grid', gridOn ? '1' : '0'); } catch { /* 静默 */ }
     };
   }
-  $('btnRec').onclick = () => toggleFrameRec();
+  $('btnFrameRec').onclick = () => toggleFrameRec();   // 重复 ID 修复：btnRec 是顶栏 WebM 录屏（p47 锁定），帧序列归 btnFrameRec
   $('btnReplay').onclick = () => startReplay();
   // 回放时间轴：拖动中暂停自动推进、松手继续（拖动即逐帧 scrub）
   {
@@ -3361,6 +3561,27 @@ function drawCurves() {
       : `KE=${keNow.toFixed(2)}J`;
     ctx.fillText(label, xNow + (xNow > W - 64 ? -5 : 5), Math.max(12, yNow - 6));
   }
+  // A2b 教学打标：关键事件时刻的琥珀竖线+时刻标签（随聚光窗淡出）——「曲线跳到这一瞬」
+  {
+    const now = performance.now();
+    for (let k = teachMarks.length - 1; k >= 0; k--) {
+      if (teachMarks[k].until < now) { teachMarks.splice(k, 1); continue; }
+      const t = teachMarks[k].t;
+      if (t < t0 || t > t1) continue;
+      const x = ((t - t0) / span) * (W - 8) + 4;
+      ctx.strokeStyle = 'rgba(231, 189, 104, 0.85)';
+      ctx.lineWidth = 1.4;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(x, 2); ctx.lineTo(x, H - 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(231, 189, 104, 0.9)';
+      ctx.font = '9px ui-monospace, SFMono-Regular, Menlo, monospace';
+      ctx.textAlign = x > W - 40 ? 'right' : 'left';
+      ctx.fillText(`t=${t.toFixed(2)}s`, x + (x > W - 40 ? -3 : 3), 10);
+    }
+  }
 }
 
 function updateCurveLegend() {
@@ -3450,21 +3671,21 @@ function toggleFrameRec() {
   if (runtime.recFrames) {
     runtime.recFrames = false;
     clearInterval(_recTimer);
-    $('btnRec').classList.remove('hot');
-    setBtnText('btnRec', '录制');
+    $('btnFrameRec').classList.remove('hot');
+    setBtnText('btnFrameRec', '录制');
     $('btnReplay').disabled = runtime.frames.length < 2;
     toast(`已录制 ${runtime.frames.length} 帧`);
   } else {
     if (mode !== 'edit') resetSim();
     runtime.frames = [];
     runtime.recFrames = true;
-    $('btnRec').classList.add('hot');
-    setBtnText('btnRec', '停止录制');
+    $('btnFrameRec').classList.add('hot');
+    setBtnText('btnFrameRec', '停止录制');
     const recStart = performance.now();
     clearInterval(_recTimer);
     _recTimer = setInterval(() => {   // UI-566：录制中有秒数反馈
       if (!runtime.recFrames) { clearInterval(_recTimer); return; }
-      setBtnText('btnRec', `停止 ${((performance.now() - recStart) / 1000).toFixed(0)}s`);
+      setBtnText('btnFrameRec', `停止 ${((performance.now() - recStart) / 1000).toFixed(0)}s`);
     }, 1000);
     play();
     toast('录制中（最长约 30s）');
@@ -3816,7 +4037,7 @@ function tick() {
     POOL_NORM.trim();
     viewport.updateNormalViz(POOL_NORM.list);
   }
-  if (forcesOn) {
+  if (forcesOn || viewport.forceFlashing()) {   // A2b：聚光窗内即使叠加层没开也算力箭头数据
     // 通用接触法向：Rapier 接触对收集（任意面：地面/斜坡/墙面/曲轨），运行过才有；
     // 绳/弹簧类无接触对 → 不分解、显示接触合力（张力语义），不再依赖斜面几何特判
     // （wantContactNormals 已前移到主循环脏门槛之前，每帧同步）
@@ -3887,14 +4108,16 @@ function tick() {
         const len = Math.hypot(dx, dy, dz) || 1e-9;
         const rest = e.params.restLength ?? 0.8;
         const k = e.params.stiffness ?? 20;
-        const stretch = len - rest;
+        // RP-FIX：stretch 按表面长度口径（与关节静长/线圈渲染一致）
+        const pad = runtime.springSurfacePad(e);
+        const stretch = len - pad - rest;
         const F = k * stretch;
         const ux = dx / len, uy = dy / len, uz = dz / len;
         const it = POOL_SPRING.next();
         it.aPos[0] = pa.x; it.aPos[1] = pa.y; it.aPos[2] = pa.z;
         it.bPos[0] = pb.x; it.bPos[1] = pb.y; it.bPos[2] = pb.z;
         it.fA[0] = F * ux; it.fA[1] = F * uy; it.fA[2] = F * uz;
-        it.k = k; it.len = len; it.stretch = stretch; it.F = F;
+        it.k = k; it.len = len - pad; it.stretch = stretch; it.F = F;
         it.aName = ba.entity.name; it.bName = bb.entity.name;
       }
       POOL_SPRING.trim();
@@ -4223,6 +4446,7 @@ function bindAgentPanel() {
     if (st && st.ok && !st.key) {
       setAgentStage('idle', '未开始：未配置解析 Key，可手动搭建或载入示例数据（配置后可拍照解析）');
     }
+    if (st && st.model) serverModelName = st.model;   // R7-006：解析来源徽章随服务端模型走
   }).catch(() => { /* 服务不可用时保持默认文案（w3 断言依赖） */ });
 }
 
@@ -4728,11 +4952,11 @@ async function loadFixtureData(name) {
 }
 
 // 外部喂入解析结果（真实模型输出回归用）：与 fixture 走同一条 normalizeParse 生产路径
-function adoptParse(raw, statusLine) {
+function adoptParse(raw, statusLine, standalone = true) {
   const n = normalizeParse(raw);
   if (!n.ok) { setParseStatus('解析结果无效：' + n.errors.join('; '), true); return null; }
   agentPlan = n.plan;
-  agentStandalone = true;   // R6-F5：示例数据=完整独立题目（与题图通道同语义）
+  agentStandalone = standalone;   // R6-F5：示例数据=完整独立题目（与题图通道同语义）；loadParseMixed=文字通道混合语义
   agentPlan.autoTags = deriveTagsFromPlan(n.plan);   // Agent 自动标签
   agentPlanApplied = false;
   agentCorrections = [];
@@ -4881,11 +5105,13 @@ function buildChangePreview() {
   box.style.display = agentChanges.length ? 'block' : 'none';
 }
 
+let serverModelName = '';        // /api/status 回传的解析模型名（徽章随实走模型）
 function renderParseResult(warnings = []) {
   const plan = agentPlan;
   $('parseResultGrp').style.display = 'block';
   const badge = $('parseSrcBadge');
-  badge.textContent = plan.fixture ? '示例数据' : 'step-5-preview';
+  badge.textContent = plan.fixture ? '示例数据' : (serverModelName || '解析模型');
+  badge.title = plan.fixture ? '未调用模型，本地示例数据' : `真实解析模型：${serverModelName || '未知（服务端未报）'}`;
   badge.className = 'badge' + (plan.fixture ? ' given' : '');
 
   // 元信息（模型字符串一律 textContent，不做 innerHTML）
@@ -4913,6 +5139,8 @@ function renderParseResult(warnings = []) {
     gv.textContent = plan.goal;
     meta.append(g, gv);
   }
+  // A1 拆题简报：已知量/未知量/考点/解题路线分步条目（teaching.js 确定性构造，非灰字墙）
+  renderBriefCard(meta, plan);
   // 重力（可编辑）
   const grow = document.createElement('div');
   grow.className = 'frow';
@@ -5102,6 +5330,65 @@ function appendList(parent, title, items) {
     ol.appendChild(li);
   }
   parent.append(t, ol);
+}
+
+// A1 拆题简报卡：已知量（键值格）/考点（琥珀徽标）/解题路线（编号步骤条）——建场前
+// 学生先看懂题再动Scene。数字全部确定性来自 plan+doc（briefFromPlan），模型不参与。
+function renderBriefCard(parent, plan) {
+  const br = briefFromPlan(plan, doc);
+  if (!br.known.length && !br.unknown.length && !br.route) return;   // 没料不占版面
+  const wrap = document.createElement('div');
+  wrap.className = 'brief-card';
+  wrap.style.cssText = 'margin-top:10px;padding:9px 10px;border:1px solid rgba(217,164,65,.22);border-left:2px solid rgba(217,164,65,.55);border-radius:4px;background:rgba(217,164,65,.04)';
+  const h = document.createElement('div');
+  h.style.cssText = 'font-size:11px;color:var(--accent);margin-bottom:6px;letter-spacing:.04em';
+  h.textContent = '拆题简报';
+  wrap.appendChild(h);
+  if (br.topics.length) {
+    const tp = document.createElement('div');
+    tp.style.cssText = 'font-size:12px;color:var(--text);margin-bottom:6px';
+    tp.textContent = '考点：' + br.topics.join('；');
+    wrap.appendChild(tp);
+  }
+  if (br.known.length) {
+    const kh = document.createElement('div');
+    kh.style.cssText = 'font-size:11px;color:var(--faint)';
+    kh.textContent = '已知量';
+    wrap.appendChild(kh);
+    const kv = document.createElement('div');
+    kv.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px 10px;margin:4px 0 8px';
+    for (const k of br.known) {
+      const chip = document.createElement('span');
+      chip.className = 'badge';
+      chip.style.cssText = 'font-family:var(--mono)';
+      chip.textContent = `${k.label} = ${k.value}`;
+      kv.appendChild(chip);
+    }
+    wrap.appendChild(kv);
+  }
+  if (br.route) {
+    const rh = document.createElement('div');
+    rh.style.cssText = 'font-size:11px;color:var(--faint)';
+    rh.textContent = '解题路线';
+    wrap.appendChild(rh);
+    const ol = document.createElement('ol');
+    ol.style.cssText = 'margin:4px 0 0;padding-left:18px';
+    ol.className = 'plist';
+    for (const step of br.route) {
+      const li = document.createElement('li');
+      li.style.cssText = 'margin:4px 0';
+      const st = document.createElement('div');
+      st.style.cssText = 'font-size:12px;color:var(--text)';
+      st.textContent = step.title;
+      const sd = document.createElement('div');
+      sd.style.cssText = 'font-size:11px;color:var(--dim);font-family:var(--mono)';
+      sd.textContent = step.detail;
+      li.append(st, sd);
+      ol.appendChild(li);
+    }
+    wrap.appendChild(ol);
+  }
+  parent.appendChild(wrap);
 }
 
 function recordCorrection(field, from, to) {
@@ -5514,6 +5801,9 @@ async function runAgentVerify(auto = true) {
 function scheduleAgentPatch() {
   const st = agentVerifyState;
   if (!st || !st.summary.error) return;
+  // R7-B1：skipPatch 类 error（视觉·网格/视觉·绳——渲染层问题）回喂模型也救不了，
+  // 只有模型可修的 error（放置/参数/题意）才烧修订轮次
+  if (!st.findings.some((f) => f.sev === 'error' && !f.skipPatch)) return;
   if (agentPatchBusy || agentPatchRounds >= AGENT_PATCH_MAX) return;
   if (!agentPlan || parseBusy || mode !== 'edit') return;
   maybeAgentPatch().catch(() => { setAgentStage('built', '自查未过；模型修订失败'); agentPatchBusy = false; });
@@ -5581,7 +5871,15 @@ async function runAgentVerifyInner() {
   let findings = auditStatic({ ...ctx, penetrations });
   // ---- 2. 自动修复（一轮 ≤6 处）：嵌入抬升 / 坡面重算落点 / 题给位置还原 ----
   let repaired = 0;
-  const fixables = findings.filter((f) => f.sev === 'error' && f.repair);
+  // RP-FIX（地上钉）：承景类（地面/斜面/曲面/轨道/水槽）不参与抬升修复——嵌入的根源几乎
+  // 总是「物体被放进了承景」，抬承景=把地板搬到球头上（竖直上抛实锤：地面被抬 0.3m 压住
+  // 上抛球，弹出抵消初速后坠出世界）。承景若真有问题交给模型修订，不动几何。
+  const SCENERY = new Set(['ground', 'ramp', 'curvedRamp', 'bowl', 'waveFloor', 'track', 'tank', 'conveyor', 'pulley']);
+  const fixables = findings.filter((f) => {
+    if (f.sev !== 'error' || !f.repair) return false;
+    const it = ctx.items.find((x) => x.id === f.id);
+    return !(it && SCENERY.has(it.type) && f.repair === 'lift');
+  });
   if (fixables.length) {
     const fixes = [];
     for (const f of fixables.slice(0, 6)) {
@@ -5593,7 +5891,13 @@ async function runAgentVerifyInner() {
       // 阶梯到 1.2m 管深嵌（方块嵌斜坡要 >0.5m）；环搜搬家兜底（己身占位不干扰）。
       const spotOk = (c) => entityPoseBlocked(it.id, c) === 0;
       if (f.repair === 'lift') {
-        const cands = [0.02, 0.05, 0.1, 0.2, 0.35, 0.5, 0.8, 1.2].map((lift) => [it.pos[0], it.pos[1] + lift, it.pos[2]]);
+        // RP-FIX：首选「自然静置高」（球=半径/盒=半高）——题给半埋位被修后落在贴面接触，
+        // 而不是 +0.2 悬空（旧阶梯首选 0.02~0.2，嵌得深的球被抬到脱离题意的空中）
+        const c = registry.getComponent(it.type);
+        const rest = c && c.spawnY ? c.spawnY(it.params || {}) : null;
+        const cands = [];
+        if (rest != null) cands.push([it.pos[0], +rest.toFixed(3), it.pos[2]]);
+        cands.push(...[0.02, 0.05, 0.1, 0.2, 0.35, 0.5, 0.8, 1.2].map((lift) => [it.pos[0], it.pos[1] + lift, it.pos[2]]));
         const spot = placementFindSpot(it.type, it.params, it.pos, it.rotY, it.isDynamic);
         if (spot) cands.push(spot);
         np = cands.find(spotOk) || null;
@@ -5605,6 +5909,10 @@ async function runAgentVerifyInner() {
         }
       } else if (f.repair === 'restore' && it.given.position) {
         const gp = [...it.given.position];
+        // RP-FIX：题给位本身半埋（y < 静置高）时钳到贴面——原样还原=下一轮自查再定罪死循环
+        const cc = registry.getComponent(it.type);
+        const restH = cc && cc.spawnY ? cc.spawnY(it.params || {}) : null;
+        if (restH != null && gp[1] < restH) gp[1] = +restH.toFixed(3);
         const cands = [gp, ...[0.02, 0.05, 0.1, 0.2, 0.35, 0.5, 0.8, 1.2].map((lift) => [gp[0], gp[1] + lift, gp[2]])];
         const spot = placementFindSpot(it.type, it.params, gp, it.rotY, it.isDynamic);
         if (spot) cands.push(spot);
@@ -5640,21 +5948,123 @@ async function runAgentVerifyInner() {
       ];
     }
   }
-  // ---- 3. 运动探针 + 理论对照（需要动态体才有意义；理论要在重置前算——报告/碰撞数据活在 runtime） ----
+  // ---- 3. 视觉预检（R7-B1）：网格覆盖 + 建场定格帧。相机先收敛——半途相机的判定不可信 ----
+  viewport.settleFocus();
+  syncAtwoodRopes();
+  const visBodies = [];
+  for (const e of doc.entities) {
+    const b = viewport._bindLookup(e.id);
+    visBodies.push({ id: e.id, name: e.name, type: e.type, hasMesh: !!(b && b.mesh && b.mesh.visible) });
+  }
+  let ropeSegs = 0;
+  viewport.scene.traverse((o) => { if (o.name === 'atwoodRope' && o.visible) ropeSegs++; });
+  findings.push(...auditVisualCoverage({
+    bodies: visBodies, ropeSegs,
+    hasPulleyPair: doc.entities.some((e) => e.physics && e.physics.onPulley),
+  }));
+  const t0Stats = frameStats();
+  // ---- 4. 运动探针 + 理论对照 + NDC 出画（理论要在重置前算——报告/碰撞数据活在 runtime） ----
+  let worldTracks = [];
+  let skipIds = [];
+  let tEndStats = null;
   if (mode !== 'edit') resetSim(true);
   if (doc.entities.some((e) => e.physics.body === 'dynamic' || e.physics.gravitating)) {
     setAgentStage('verifying', '自查：运行探针…');
     const probe = await motionProbe();
     snapshotSeries(probe.series, (probe.entities[0] || {}).name, agentVerifyCtx && agentVerifyCtx.plan.questionType);   // DE-1：探针数据也可导出
     findings.push(...auditMotion(probe));
+    // RP-AUDIT（渲染-物理一致性）：出生跳变/网格漂移/链接端点贴合/幽灵碰撞——纯计算口径
+    findings.push(...auditRenderPhysics(probe.rp || {}));
+    // 世界级出界的体不再重复做取景定罪（同一问题一次报告；p37 C 计数口径依赖这条去重）
+    skipIds = findings.filter((f) => f.cat === '运动·出界' && f.id != null).map((f) => f.id);
+    worldTracks = worldTracksOf(probe);
+    const ndcT = worldTracks.map((t) => ({ id: t.id, name: t.name, pts: t.pts.map(ndcOf) }));
+    findings.push(...auditVisualNdc({ tracks: ndcT, skipIds }));
+    findings.push(...auditVisualSubject({ tracks: ndcT }));
+    tEndStats = frameStats();
     const tf = verifyTheory(probe);
     if (tf) findings.push(tf);
+    // 理论通道没接住的题型 → 物理量级粗对账兜底（观察量 vs 闭式预期，30% 口径）
+    if (!tf || tf.unsupported) {
+      const cf = auditPhysicsCoarse({ samples: probe.samples, docInfo: coarseDocInfo() });
+      if (cf) findings.push(cf);
+    }
     resetSim(true);   // 探针跑完回初始态（在理论提取之后——collisionReports 随重置清空）
   }
-  agentVerifyState = { findings, summary: summarize(findings), repaired, at: Date.now() };
+  findings.push(...auditVisualFrame({ t0: t0Stats, tEnd: tEndStats }));
+
+  // ---- 5. 视觉修复循环（R7-B2）：重取景/包络补拍 ≤2 轮 → 复检。复检用已存世界轨迹
+  //      按新相机重投（不重跑模拟）+ 定格帧现渲重采样；修不动就如实保留 error ----
+  const visual = { rounds: 0, repaired: [] };
+  const initialBadCats = [...new Set(findings.filter((f) => f.sev === 'error'
+    && (f.repair === 'reframe' || f.repair === 'tightframe')).map((f) => f.cat))];
+  const replaceCat = (cat, fs) => {
+    for (let i = findings.length - 1; i >= 0; i--) if (findings[i].cat === cat) findings.splice(i, 1);
+    findings.push(...fs);
+  };
+  const replaceItem = (cat, item, f) => {
+    const i = findings.findIndex((x) => x.cat === cat && x.item === item);
+    if (i >= 0) findings.splice(i, 1, f); else findings.push(f);
+  };
+  while (visual.rounds < 2) {
+    const bad = findings.find((f) => f.sev === 'error' && (f.repair === 'reframe' || f.repair === 'tightframe'));
+    if (!bad) break;
+    visual.rounds++;
+    setAgentStage('verifying', `自查：视觉修复第 ${visual.rounds} 轮（${bad.repair === 'reframe' ? '轨迹包络重取景' : '主体特写重取景'}）…`);
+    let fixedNow = false;
+    if (bad.repair === 'reframe') {
+      // 包络补拍：动态体全程轨迹包络并入取景（R6-037③ 终点出画的应用内版本）；
+      // 包络 >60m 属世界级远走，重取景只会把一切拍成芝麻——不硬救，如实保留
+      const box = new THREE.Box3();
+      for (const tr of worldTracks) for (const p of tr.pts) box.expandByPoint(new THREE.Vector3(p[0], p[1], p[2]));
+      const size = box.isEmpty() ? 0 : box.getSize(new THREE.Vector3()).length();
+      if (size > 0 && size <= 60) {
+        viewport.focusScene(box);   // 静态场景与地面切片由 focusScene 自带并入
+        viewport.settleFocus();
+        fixedNow = true;
+      }
+    } else {
+      // 主体特写：只框「动作」= 动态体网格 ∪ 全程轨迹包络（绕过 focusScene 的全场景
+      // 并入——超大静态道具正是病因）。只框初始位姿会让行程终点出画，与出画修复互
+      // 相打架（实测两轮振荡），必须一并框住
+      const box = new THREE.Box3();
+      for (const e of doc.entities) {
+        if (e.physics.body !== 'dynamic') continue;
+        const b = viewport._bindLookup(e.id);
+        if (b && b.mesh && b.mesh.visible) box.expandByObject(b.mesh);
+      }
+      for (const tr of worldTracks) for (const p of tr.pts) box.expandByPoint(new THREE.Vector3(p[0], p[1], p[2]));
+      if (!box.isEmpty()) {
+        const center = box.getCenter(new THREE.Vector3());
+        viewport.snapTo(center, Math.max(box.getSize(new THREE.Vector3()).length() * 1.6, 2.2));
+        fixedNow = true;
+      }
+    }
+    if (!fixedNow) { delete bad.repair; break; }
+    const reT = worldTracks.map((t) => ({ id: t.id, name: t.name, pts: t.pts.map(ndcOf) }));
+    const reNdc = auditVisualNdc({ tracks: reT, skipIds })[0];
+    replaceCat('视觉·出画', [reNdc]);
+    const reSubj = auditVisualSubject({ tracks: reT })[0];
+    replaceCat('视觉·主体', [reSubj]);
+    const reFrame = auditVisualFrame({ t0: frameStats() })[0];
+    replaceItem('视觉·画面', '建场定格帧', reFrame);
+    if (reNdc.sev !== 'error' && reFrame.sev !== 'error' && reSubj.sev !== 'error') break;
+  }
+  // 记账：开场坏过、循环后已无 error 的类 = 自动修复成功的类（一轮重取景常同时治好出画+主体）
+  for (const c of initialBadCats) {
+    if (!findings.some((f) => f.cat === c && f.sev === 'error')) visual.repaired.push(c);
+  }
+  if (visual.repaired.length) {
+    findings.push({ sev: 'ok', cat: '视觉·修复', item: '自动重取景', msg: `视觉问题已自动修复（${visual.repaired.join('、')}），共 ${visual.rounds} 轮` });
+  } else if (visual.rounds) {
+    findings.push({ sev: 'warn', cat: '视觉·修复', item: '自动重取景', msg: `已尝试 ${visual.rounds} 轮重取景仍未全过——建议手动取景（双击聚焦按钮=全景）后重跑自查` });
+  }
+  agentVerifyState = { findings, summary: summarize(findings), repaired, visual, at: Date.now() };
   renderAgentVerify();
-  setAgentStage('built', `已建场，自查 ${agentVerifyState.summary.ok}✓ ${agentVerifyState.summary.warn}⚠ ${agentVerifyState.summary.error}✗`);
   const s = agentVerifyState.summary;
+  agentOps.push({ op: '视觉自检', target: `${s.ok}✓ ${s.warn}⚠ ${s.error}✗${visual.repaired.length ? '（自动修 ' + visual.repaired.length + ' 类）' : ''}`, ok: s.error === 0 });
+  setAgentStage('built', `已建场，自查 ${s.ok}✓ ${s.warn}⚠ ${s.error}✗`);
+  setupVariantPanel();   // A2d：自查（含自动修复）后的终态 doc 才做变式基线
   toast(s.error ? `自查发现 ${s.error} 处问题（见 Agent 页签）`
     : s.warn ? `自查通过，${s.warn} 处提醒（见 Agent 页签）` : '自查全部通过');
 }
@@ -5742,11 +6152,28 @@ async function motionProbe() {
   const total = Math.ceil(needT * 120);
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const isTest = typeof navigator !== 'undefined' && navigator.webdriver;
+  // RP-AUDIT：渲染事实采集——t0（首步前：出生跳变+编辑态链接摆放）、事件帧（碰撞当步：
+  // 幽灵间隙必须用事发时刻的网格位置量，事后量会把弹开后的间距误当幽灵）、周期帧
+  const rpT0 = runtime.renderAuditFacts(0);
+  const rpFrames = [];
+  let rpColN = runtime.collisions.length;
+  // PTC-FAST（2026-11）：分块粒度 4 步→60 步——真人浏览器探针墙钟提速 ~8×（原每 4 步
+  // sleep(8ms)，6.5s 场景探针墙钟 10s+；现在 ~0.5s 模拟一块，长场景也能秒级出自查）。
+  // webdriver 路径保持全同步（套件按同步步进写）。
+  const chunk = isTest ? total : 60;
   for (let s = 1; s <= total; s++) {
     runtime.stepOnce();
-    if (!isTest && s % 4 === 0) {   // 分块让帧（AG-V2）：探针运动肉眼可见（webdriver 走同步路径不interleave）
+    if (!isTest && s % chunk === 0) {   // 分块让帧：进度可见 + 主线程不被饿死
       setAgentStage('verifying', `自查：探针运行 t=${runtime.simT.toFixed(1)}/${needT}s`);
-      await sleep(8);
+      await sleep(0);
+    }
+    if (runtime.collisions.length > rpColN) {
+      rpFrames.push(runtime.renderAuditFacts(rpColN));   // 碰撞当步立即采样
+      rpColN = runtime.collisions.length;
+    } else if (s % (every * 2) === 0) {
+      // 周期帧只查渲染漂移/端点贴合——事件必须用「事发当步」的网格位置量，
+      // 事后拿分开后的位置量旧事件会把正常弹开误判成幽灵碰撞（实测 0.11→0.17m 假阳性）
+      rpFrames.push(runtime.renderAuditFacts(runtime.collisions.length));
     }
     if (s % every === 0) {
       const states = {};
@@ -5760,7 +6187,71 @@ async function motionProbe() {
   }
   const series = runtime.stopRecording();
   const flags = { isAstro, isRotation, isHinge, isAtwood };
-  return { samples, ke, entities, sceneFlags: { hasGround }, series, flags };
+  return { samples, ke, entities, sceneFlags: { hasGround }, series, flags, rp: { t0: rpT0, frames: rpFrames } };
+}
+
+// ============ R7-B1 视觉探针采样（页内侧）：NDC 投影 + 帧像素统计 + 世界轨迹 ============
+// 判定纯函数在 agent-verify.js；这里只负责「相机投影/现渲像素/网格清点」这些页内事。
+function ndcOf(p) {
+  const el = viewport.renderer.domElement;
+  const r = el.getBoundingClientRect();
+  const [sx, sy] = viewport.screenPosOf(p[0], p[1], p[2]);
+  return [+(((sx - r.left) / r.width) * 2 - 1).toFixed(4), +(-(((sy - r.top) / r.height) * 2 - 1)).toFixed(4)];
+}
+
+// 现渲一帧并下采样 320×180 灰度统计。主渲染器 preserveDrawingBuffer 未开——读回前
+// 必须现渲（p49 同款坑：否则拿到清空后的空缓冲）
+function frameStats() {
+  viewport.render();
+  const src = viewport.renderer.domElement;
+  const c2 = document.createElement('canvas'); c2.width = 320; c2.height = 180;
+  const ctx = c2.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(src, 0, 0, 320, 180);
+  const d = ctx.getImageData(0, 0, 320, 180).data;
+  let sum = 0, bright = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    sum += g;
+    if (g >= 40) bright++;
+  }
+  return { mean: +(sum / (d.length / 4)).toFixed(1), bright };
+}
+
+// 探针世界轨迹（NDC 判定与重取景复检共用：相机可换，世界坐标不变）
+function worldTracksOf(probe) {
+  const tracks = [];
+  for (const it of probe.entities) {
+    if (!it.isDynamic && !it.gravitating) continue;
+    const pts = [];
+    for (const s of probe.samples) {
+      const st = s.states[it.id];
+      if (st) pts.push(st.p);
+    }
+    if (pts.length) tracks.push({ id: it.id, name: it.name, pts });
+  }
+  return tracks;
+}
+
+// 粗对账拓扑：滑轮对（atwoodLike）→ 双侧质量闭式 a=(m1−m2)g/(m1+m2)；
+// 单动态球无约束件零初速（freefallLike）→ g 兜底
+function coarseDocInfo() {
+  const g = doc.gravity ?? -9.81;
+  const pair = (runtime._pulleyPairs || [])[0];
+  if (pair && pair.balls && pair.balls.length === 2) {
+    const [a, b] = pair.balls;
+    return { g, topology: 'atwoodLike', masses: { [a.id]: a.m, [b.id]: b.m }, pairIds: [a.id, b.id] };
+  }
+  const dyn = doc.entities.filter((e) => e.physics.body === 'dynamic');
+  const spheres = dyn.filter((e) => e.type === 'sphere');
+  const constraintTypes = ['rope', 'spring', 'ramp', 'pulley', 'conveyor', 'curvedRamp', 'bowl', 'tank'];
+  if (spheres.length === 1 && dyn.length === 1
+    && !doc.entities.some((e) => constraintTypes.includes(e.type))
+    && !doc.entities.some((e) => e.joints && e.joints.length)
+    && !doc.entities.some((e) => e.physics.gravitating)
+    && spheres[0].physics.linvel.every((v) => Math.abs(v) < 1e-9)) {
+    return { g, topology: 'freefallLike', masses: {}, pairIds: [spheres[0].id] };
+  }
+  return null;
 }
 
 function verifyTheory({ series, flags }) {
@@ -5771,7 +6262,7 @@ function verifyTheory({ series, flags }) {
     flags.isAtwood ? atwoodInfo() : null, runtime.trails);   // MOD-502：双摆对照走全体轨迹通道
   if (!r) return null;
   if (!r.supported) {
-    return { sev: 'ok', cat: '理论对照', item: '题型', msg: `${r.reason || '该题型暂无确定性解释器'}（已做运动健全性检查）` };
+    return { sev: 'ok', cat: '理论对照', item: '题型', unsupported: true, msg: `${r.reason || '该题型暂无确定性解释器'}（已做运动健全性检查）` };
   }
   if (r.pass === false) {
     // 「测不出偏差」（errPct=null，如球被挡没走完测量段）≠「与理论不符」——前者提醒后者定罪
@@ -5835,6 +6326,44 @@ function renderAgentVerify() {
   }
 }
 
+// ============ R7-B3 可注入故障：p49 首跑咬出的真问题类做成可复现故障 ============
+// 每个故障对应一类真实用户实锤（编号沿用 R6-038 的 9 类清单），用于验证应用内
+// 「自检→规则化修复→复检」闭环。只动相机/取景/网格可见性，不碰物理演化。
+function injectFault(name) {
+  const vp = viewport;
+  const t = vp.controls.target.clone();
+  const dir = vp.camera.position.clone().sub(t);
+  const setDist = (d) => { vp.camera.position.copy(t).add(dir.clone().setLength(d)); vp.controls.update(); vp.render(); };
+  switch (name) {
+    case 'ndc-out':       // ②类：取景框住了局部——动态体运动出画（相机级）
+      vp.settleFocus();
+      setDist(Math.max(0.8, dir.length() * 0.22));
+      return '取景过近（动态体将出画）';
+    case 'sesame':        // ⑨类：相机拉到 260m——主体小成芝麻/雾外全黑
+      vp.settleFocus();
+      setDist(260);
+      return '取景过远（画面将退化）';
+    case 'travel-out':    // ③/⑥类：只按初始包围盒取景——行程终点/落点出画（R6-037③ R6-038⑥ 原案）
+      vp.focusScene();    // 撤掉 atwoodEnvelopeBox 的运动包络
+      vp.settleFocus();
+      setDist(dir.length() * 0.35);
+      return '取景未并入运动包络（行程终点将出画）';
+    case 'prop-huge':     // ⑨类变体：40m 静态大道具并进取景——主体被压成芝麻（固定体，不参与运动探针）
+      window.MECH.addComponent('box', { name: '故障注入·巨墙', params: { sx: 40, sy: 40, sz: 0.5 }, physics: { body: 'fixed' }, transform: { pos: [24, 20, 0] } });
+      vp.focusScene();
+      vp.settleFocus();
+      return '加入 40m 静态道具并重取景（主体将过小）';
+    case 'mesh-missing': {   // B 探针类：动态体网格不可见（画面里消失）
+      const e = doc.entities.find((x) => x.physics.body === 'dynamic') || doc.entities[0];
+      const b = e ? vp._bindLookup(e.id) : null;
+      if (b && b.mesh) { b.mesh.visible = false; return `「${e.name}」网格已隐藏`; }
+      return '注入失败：找不到可隐藏的网格';
+    }
+    default:
+      return '未知故障：' + name;
+  }
+}
+
 function resetAgentPanel() {
   stopCamera();
   agentImageDataUrl = null;
@@ -5843,6 +6372,8 @@ function resetAgentPanel() {
   agentCrop = null;
   agentStandalone = false;   // R6-F5：通道语义随面板复位
   armTeaching(null);   // R6-033：场景切换摘掉教学 tips
+  variantBase = null;   // A2d：变式基线随面板复位
+  const vg = $('variantGrp'); if (vg) vg.style.display = 'none';
   cropMode = false;
   agentPlan = null;
   agentPlanApplied = false;
@@ -6624,6 +7155,18 @@ window.MECH = {
   // AG-V 建场自查通道（p37 断言用）
   agentVerifyState: () => agentVerifyState,
   runAgentVerify: () => runAgentVerify(false),
+  // R7-A 教学跃迁通道（p50 断言用）：教学状态/简报/变式/放映
+  teachState: () => teachState(),
+  teachBrief: () => briefFromPlan(agentPlan, doc),
+  teachPace: (m) => paceFor(m),
+  variantState: () => ({ base: !!variantBase, list: variantList.map((v) => v.id), now: _variantNow }),
+  switchVariant: (idx) => switchVariantDoc(idx == null ? null : idx),
+  projectorState: () => ({ on: projectorOn }),
+  projectorRun: () => projectorRun(),
+  // R7-B2/B3：自检自修通道（等收敛后回报告）+ 可注入故障（把 p49 首跑咬出的真问题
+  // 做成可复现故障，验证「检出→修复→复检」闭环；仅测试用，不在 UI 暴露）
+  selfCheck: async () => { await runAgentVerify(false); return agentVerifyState; },
+  __injectFault: (name) => injectFault(name),
   agentBusy: () => verifyBusy || agentPatchBusy,   // 自查/模型修订进行中（建场分批/探针/回喂），测试屏障用
   agentPatchState: () => ({ rounds: agentPatchRounds, busy: agentPatchBusy, max: AGENT_PATCH_MAX }),   // AG-V3 修订轮次（测试断言用）
   __recDump: () => runtime.recording && runtime.recording.points.map((p) => +p.pos[0].toFixed(4)),   // TEMP-DEBUG
@@ -6675,6 +7218,9 @@ window.MECH = {
   }),
   loadFixture: (name) => loadFixtureData(name || 'incline'),
   loadParse: (obj) => (obj && typeof obj === 'object') ? adoptParse(obj, '已载入外部解析结果（回归用，走生产 normalizeParse 路径）') : null,
+  // R7：混合语义回归通道——fixture 走文字通道语义（不清场景，matchOverrides 复用既有实体），
+  // p16/p18 的混合复用验收在 R6-F5（示例=独立成题）后需要它保持可测
+  loadParseMixed: (obj) => (obj && typeof obj === 'object') ? adoptParse(obj, '已载入解析结果（混合语义，复用既有实体）', false) : null,
   astroState: () => astroWithDrift(),
   rotationState: () => rotationWithDrift(),
   atwoodState: () => atwoodInfo(),

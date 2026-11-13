@@ -1,6 +1,7 @@
 // p18.mjs — Round 21 验收：逐条接受/拒绝变更 UI（变更预览清单勾选确认，跳过单条）
 // 纪律：单浏览器 / 单 context / 单标签；总时长上限约 3 分钟。
 import { chromium } from 'playwright';
+import { readFileSync } from 'node:fs';
 import { mkdirSync } from 'node:fs';
 
 const BASE = process.env.MECH_BASE || 'http://127.0.0.1:8721';
@@ -44,7 +45,9 @@ try {
   const manual = await loadManualScene(page);
   await page.waitForTimeout(250);
   await page.click('#tabAgent');
-  await page.evaluate(() => window.MECH.loadFixture('incline'));
+  // R7：混合段走 loadParseMixed（R6-F5 后示例通道=独立成题自清场景）
+  await page.evaluate((j) => window.MECH.loadParseMixed(JSON.parse(j)),
+    readFileSync(new URL('../fixtures/parse-incline.json', import.meta.url), 'utf-8'));
   await page.waitForTimeout(250);
   const pv = await page.evaluate(() => {
     const rows = [...document.querySelectorAll('#changePreviewList label span')];
@@ -87,7 +90,9 @@ try {
   await loadManualScene(page);
   await page.waitForTimeout(250);
   await page.click('#tabAgent');
-  await page.evaluate(() => window.MECH.loadFixture('incline'));
+  // R7：混合段走 loadParseMixed（R6-F5 后示例通道=独立成题自清场景）
+  await page.evaluate((j) => window.MECH.loadParseMixed(JSON.parse(j)),
+    readFileSync(new URL('../fixtures/parse-incline.json', import.meta.url), 'utf-8'));
   await page.waitForTimeout(250);
   const gIdx = await page.evaluate(() => {
     const rows = [...document.querySelectorAll('#changePreviewList label')];

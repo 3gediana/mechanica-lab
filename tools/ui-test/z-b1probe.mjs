@@ -1,0 +1,12 @@
+import { chromium } from 'playwright';
+const browser = await chromium.launch({ headless: true });
+const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
+await page.goto('http://127.0.0.1:8721', { waitUntil: 'domcontentloaded' });
+await page.waitForFunction(() => window.MECH && window.MECH.ready(), null, { timeout: 25000 });
+await page.evaluate(() => { window.MECH.loadPreset('momentum'); });
+await page.waitForTimeout(400);
+await page.click('#btnPlay');
+await page.waitForTimeout(5000);
+const st = await page.evaluate(() => ({ simT: window.MECH.state().simT, fps: (window.MECH.perf(120) || {}).fps }));
+console.log('simT after 5s wall:', st.simT.toFixed(2), 'fps:', st.fps);
+await browser.close();
