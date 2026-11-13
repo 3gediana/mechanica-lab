@@ -8,11 +8,12 @@ import http.server, sys, json, os, urllib.request, urllib.error, re, tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-# 模型通道（2026-11-10 切换）：stepfun step-5-preview 额度耗尽 → 15730 付费池 apigoto
-# 提供商的 deepseek-flash（多模态，OpenAI Chat Completions 协议，额度充沛）。
+# 模型通道（2026-11-14 切换）：本机 15730 模型池（OpenAI 兼容中转，/v1/models 含
+# opencode-go/deepseek-v4.1-flash 别名）的 opencode-go 提供商 DeepSeek V4.1 Flash（多模态）。
+# 前史：step-5-preview 额度耗尽 → apigoto deepseek-flash → 本池 opencode-go（用户 11-14 点单）。
 # 数值口径（temperature/max_tokens/提取链/错误语义）与 step-5-preview 时代完全一致。
-STEP_URL = "https://api.apigoto.com/v1/chat/completions"
-STEP_MODEL = "deepseek-flash"
+STEP_URL = "http://127.0.0.1:15730/v1/chat/completions"
+STEP_MODEL = "opencode-go/deepseek-v4.1-flash"
 MAX_BODY = 8 * 1024 * 1024          # 8MB 图片上限
 CALL_TIMEOUT = 90                    # 代理兜底尝试超时 s
 DIRECT_TIMEOUT = 70                  # 直连尝试超时 s（健康推理实测 44~60s；死路由快速转兜底，
